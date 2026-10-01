@@ -145,17 +145,10 @@ if(WIN32)
 		DESTINATION ${JKAInstallDir}
 		COMPONENT ${JKAMPClientComponent})
 else(WIN32)
-	if(MakeApplicationBundles AND BuildMPEngine)
-		install(TARGETS ${MPVanillaRenderer}
-			LIBRARY
-			DESTINATION "${JKAInstallDir}/${MPEngine}.app/Contents/MacOS/"
-			COMPONENT ${JKAMPClientComponent})
-	else()
-		install(TARGETS ${MPVanillaRenderer}
-			LIBRARY
-			DESTINATION ${JKAInstallDir}
-			COMPONENT ${JKAMPClientComponent})
-	endif()
+	install(TARGETS ${MPVanillaRenderer}
+		LIBRARY
+		DESTINATION ${JKAInstallDir}
+		COMPONENT ${JKAMPClientComponent})
 endif()
 
 set_target_properties(${MPVanillaRenderer} PROPERTIES COMPILE_DEFINITIONS "${SharedDefines}")

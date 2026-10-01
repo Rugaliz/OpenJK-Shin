@@ -168,17 +168,10 @@ if(BuildSPRdVanilla OR BuildJK2SPRdVanilla)
 				DESTINATION ${InstallDir}
 				COMPONENT ${Component})
 		else(WIN32)
-			if(MakeApplicationBundles AND (BuildSPEngine OR BuildJK2SPEngine))
-				install(TARGETS ${ProjectName}
-					LIBRARY
-					DESTINATION "${InstallDir}/${EngineName}.app/Contents/MacOS/"
-					COMPONENT ${Component})
-			else()
-				install(TARGETS ${ProjectName}
-					LIBRARY
-					DESTINATION ${InstallDir}
-					COMPONENT ${Component})
-			endif()
+			install(TARGETS ${ProjectName}
+				LIBRARY
+				DESTINATION ${InstallDir}
+				COMPONENT ${Component})
 		endif()
 
 		set_target_properties(${ProjectName} PROPERTIES COMPILE_DEFINITIONS "${SPRDVanillaDefines}")

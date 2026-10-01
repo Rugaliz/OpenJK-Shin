@@ -399,41 +399,18 @@ if(BuildSPEngine OR BuildJK2SPEngine)
 				endif()
 			endif()
 		else(WIN32)
-			if(MakeApplicationBundles)
-				set_source_files_properties(${SPDirName}/macosx/OpenJK.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-				set(SPEngineFiles ${SPEngineFiles} ${SPDirName}/macosx/OpenJK.icns)
-				set_source_files_properties(${SPDirName}/macosx/English.lproj/InfoPlist.strings PROPERTIES MACOSX_PACKAGE_LOCATION Resources/English.lproj)
-				set(SPEngineFiles ${SPEngineFiles} ${SPDirName}/macosx/English.lproj/InfoPlist.strings)
-				
-				add_executable(${ProjectName} MACOSX_BUNDLE ${SPEngineFiles})
-				set_target_properties(${ProjectName} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${SPDirName}/macosx/OpenJKInfo.plist")
-			else(MakeApplicationBundles)
-				add_executable(${ProjectName} ${SPEngineFiles})
-			endif(MakeApplicationBundles)
+			add_executable(${ProjectName} ${SPEngineFiles})
 		endif(WIN32)
 
-		if(MakeApplicationBundles)
-			install(CODE "
-				include(BundleUtilities)
-				set(BU_CHMOD_BUNDLE_ITEMS ON)
-				fixup_bundle(\"${CMAKE_BINARY_DIR}/${ProjectName}.app\" \"\" \"\")
-				"
-				COMPONENT Runtime)
-			install(TARGETS ${ProjectName}
-				BUNDLE
+		install(TARGETS ${ProjectName}
+			RUNTIME
+			DESTINATION ${InstallDir}
+			COMPONENT ${Component})
+		if(SPEngineExtraInstallFiles)
+			install(FILES ${SPEngineExtraInstallFiles}
 				DESTINATION ${InstallDir}
 				COMPONENT ${Component})
-		else(MakeApplicationBundles)
-			install(TARGETS ${ProjectName}
-				RUNTIME
-				DESTINATION ${InstallDir}
-				COMPONENT ${Component})
-			if(SPEngineExtraInstallFiles)
-				install(FILES ${SPEngineExtraInstallFiles}
-					DESTINATION ${InstallDir}
-					COMPONENT ${Component})
-			endif()
-		endif(MakeApplicationBundles)
+		endif()
 
 		set_target_properties(${ProjectName} PROPERTIES COMPILE_DEFINITIONS "${SPEngineDefines}")
 

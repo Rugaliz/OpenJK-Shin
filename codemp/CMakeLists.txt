@@ -555,16 +555,6 @@ if(BuildMPEngine)
 	set(MPEngineFiles ${MPEngineFiles} ${MPEngineSysFiles})
 	source_group("sys" FILES ${MPEngineSysFiles})
 
-	if(MakeApplicationBundles)
-		set(MACOSX_BUNDLE_BUNDLE_NAME ${MPEngine})
-		set(MACOSX_BUNDLE_DISPLAY_NAME ${MPEngine})
-		set(MACOSX_BUNDLE_ICON_FILE OpenJK.icns)
-		set_source_files_properties(${MPDir}/macosx/OpenJK.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-		set(MPEngineFiles ${MPEngineFiles} ${MPDir}/macosx/OpenJK.icns)
-		set_source_files_properties(${MPDir}/macosx/English.lproj/InfoPlist.strings PROPERTIES MACOSX_PACKAGE_LOCATION Resources/English.lproj)
-		set(MPEngineFiles ${MPEngineFiles} ${MPDir}/macosx/English.lproj/InfoPlist.strings)
-	endif(MakeApplicationBundles)
-
 	if(WIN32)
 		add_executable(${MPEngine} WIN32 ${MPEngineFiles})
 		if(UseInternalSDL2)
@@ -579,36 +569,18 @@ if(BuildMPEngine)
 			endif()
 		endif()
 	else(WIN32)
-		if(MakeApplicationBundles)
-			add_executable(${MPEngine} MACOSX_BUNDLE ${MPEngineFiles})
-			set_target_properties(${MPEngine} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${MPDir}/macosx/OpenJKInfo.plist")
-		else(MakeApplicationBundles)
-			add_executable(${MPEngine} ${MPEngineFiles})
-		endif(MakeApplicationBundles)
+		add_executable(${MPEngine} ${MPEngineFiles})
 	endif(WIN32)
 
-	if(MakeApplicationBundles)
-		install(CODE "
-			include(BundleUtilities)
-			set(BU_CHMOD_BUNDLE_ITEMS ON)
-			fixup_bundle(\"${CMAKE_BINARY_DIR}/${MPEngine}.app\" \"\" \"\")
-			"
-			COMPONENT Runtime)
-		install(TARGETS ${MPEngine}
-			BUNDLE
+	install(TARGETS ${MPEngine}
+		RUNTIME
+		DESTINATION ${JKAInstallDir}
+		COMPONENT ${JKAMPClientComponent})
+	if(MPEngineExtraInstallFiles)
+		install(FILES ${MPEngineExtraInstallFiles}
 			DESTINATION ${JKAInstallDir}
 			COMPONENT ${JKAMPClientComponent})
-	else(MakeApplicationBundles)
-		install(TARGETS ${MPEngine}
-			RUNTIME
-			DESTINATION ${JKAInstallDir}
-			COMPONENT ${JKAMPClientComponent})
-		if(MPEngineExtraInstallFiles)
-			install(FILES ${MPEngineExtraInstallFiles}
-				DESTINATION ${JKAInstallDir}
-				COMPONENT ${JKAMPClientComponent})
-		endif()
-	endif(MakeApplicationBundles)
+	endif()
 
 	set_target_properties(${MPEngine} PROPERTIES COMPILE_DEFINITIONS "${MPEngineDefines}")
 

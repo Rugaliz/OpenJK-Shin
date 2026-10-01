@@ -5,8 +5,7 @@ Rework was made by SomaZ, no change of the license.
 
 openjkcmd.ico was contributed by SirYodaJedi
 
-code*/macosx/OpenJK.icns and shared/sdl/sdl_icon.h are derived works
-under the same terms.
+shared/sdl/sdl_icon.h is a derived work under the same terms.
 
 ----
 
