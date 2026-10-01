@@ -134,10 +134,12 @@ if(BuildSPEngine OR BuildJK2SPEngine)
 		"${SPDir}/client/snd_mem.cpp"
 		"${SPDir}/client/snd_mix.cpp"
 		"${SPDir}/client/snd_music.cpp"
+		"${SPDir}/client/snd_resample.cpp"
 		"${SPDir}/client/snd_ambient.h"
 		"${SPDir}/client/snd_local.h"
 		"${SPDir}/client/snd_music.h"
 		"${SPDir}/client/snd_public.h"
+		"${SPDir}/client/snd_resample.h"
 
 		"${SPDir}/client/vmachine.cpp"
 		"${SPDir}/client/vmachine.h"

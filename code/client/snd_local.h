@@ -29,6 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "snd_public.h"
+#include "snd_resample.h"
 #include "../mp3code/mp3struct.h"
 
 #if defined(_MSC_VER) && !defined(WIN64)

@@ -106,11 +106,14 @@ typedef struct
 	fileHandle_t s_backgroundFile;	// valid handle, else -1 if an MP3 (so that NZ compares still work)
 	wavinfo_t	s_backgroundInfo;
 	int			s_backgroundSamples;
+	double		dMP3_SourcePos;		// MP3 only: where the next sample put in the raw buffer comes from, in MP3 sample frames.
+									//	Fractional because the MP3's rate is converted to the output rate on the way.
 
 	void Rewind()
 	{
 		MP3Stream_Rewind( &chMP3_Bgrnd );
 		s_backgroundSamples = sfxMP3_Bgrnd.iSoundLengthInSamples;
+		dMP3_SourcePos = 0.0;
 	}
 
 	void SeekTo(float fTime)
@@ -119,6 +122,7 @@ typedef struct
 		chMP3_Bgrnd.iMP3SlidingDecodeWritePos = 0;
 		MP3Stream_SeekTo( &chMP3_Bgrnd, fTime );
 		s_backgroundSamples = sfxMP3_Bgrnd.iSoundLengthInSamples;
+		dMP3_SourcePos = 0.0;
 	}
 
 } MusicInfo_t;
@@ -453,7 +457,7 @@ void S_Init( void ) {
 	s_allowDynamicMusic = Cvar_Get( "s_allowDynamicMusic", "1",       CVAR_ARCHIVE_ND );
 	s_debugdynamic      = Cvar_Get( "s_debugdynamic",      "0",       0 );
 	s_initsound         = Cvar_Get( "s_initsound",         "1",       CVAR_ARCHIVE | CVAR_LATCH );
-	s_khz               = Cvar_Get( "s_khz",               "44",      CVAR_ARCHIVE | CVAR_LATCH );
+	s_khz               = Cvar_Get( "s_khz",               "0",       CVAR_ARCHIVE | CVAR_LATCH );	// 0 or 44 = rate of the output device, 11 or 22 = low rates, or a rate in Hz
 	s_quality           = Cvar_Get( "s_quality",           "2",       CVAR_ARCHIVE );	// 0 = fast, 1 = good, 2 = best
 	s_language          = Cvar_Get( "s_language",          "english", CVAR_ARCHIVE | CVAR_NORESTART );
 	s_lip_threshold_1   = Cvar_Get( "s_threshold1",        "0.3",     0 );
@@ -2061,13 +2065,66 @@ portable_samplepair_t *S_GetRawSamplePointer() {
 	return s_rawsamples;
 }
 
-// Linearly interpolated 16 bit sample, used when streamed audio (cinematics) has to be converted to the output rate
-static inline int S_RawLerp16( const short *data, int src, float frac, int samples, int channels, int ch )
+// Streamed 16 bit audio at a different rate than the output (the soundtrack of a cinematic) is converted by one
+// resampler per stream, which carries the filter's position and the samples either side of a piece over to the next,
+// so the pieces the audio arrives in join up without clicks. [0] is the first or only stream, [1] is added on top.
+static resampleStream_t	s_rawStream[2];
+static int				s_rawStreamNext[2] = { -1, -1 };	// where in the raw buffer the stream's next sample goes
+static int				s_rawStreamRate[2], s_rawStreamChannels[2], s_rawStreamSpeed[2];
+
+static void S_RawResample16( int samples, int rate, int channels, const short *data, int intVolume, qboolean bFirstOrOnlyUpdateThisFrame, int rawEndStart )
 {
-	const int next = ( src + 1 < samples ) ? src + 1 : src;
-	const int a = data[src * channels + ch];
-	const int b = data[next * channels + ch];
-	return a + (int)( (b - a) * frac );
+	const int		slot = bFirstOrOnlyUpdateThisFrame ? 0 : 1;
+	resampleStream_t *pStream = &s_rawStream[slot];
+	const double	dStep = (double)rate / dma.speed;
+	static float	fOut[16384 * 2];
+
+	// anything other than a straight continuation (a new stream, the sound restarted, the buffer was reset...) starts afresh
+	if ( s_rawStreamNext[slot] != rawEndStart || s_rawStreamRate[slot] != rate || s_rawStreamChannels[slot] != channels || s_rawStreamSpeed[slot] != dma.speed )
+	{
+		S_ResampleStream_Reset( pStream, channels, dStep );
+		s_rawStreamRate[slot] = rate;
+		s_rawStreamChannels[slot] = channels;
+		s_rawStreamSpeed[slot] = dma.speed;
+	}
+
+	int maxIn = (int)( 16000.0 * dStep );	// keeps what comes out of one go within fOut
+	if ( maxIn > RESAMPLE_STREAM_MAXIN )
+		maxIn = RESAMPLE_STREAM_MAXIN;
+	if ( maxIn < 1 )
+		maxIn = 1;
+
+	for ( int done = 0; done < samples; )
+	{
+		const int nIn = ( samples - done < maxIn ) ? samples - done : maxIn;
+		const int nOut = S_ResampleStream_Process( pStream, data + done * channels, nIn, fOut, 16384 );
+		done += nIn;
+
+		for ( int j = 0; j < nOut; j++ )
+		{
+			const int left = (int)floorf( fOut[j * channels] + 0.5f ) * intVolume;
+			const int right = ( channels == 2 ) ? (int)floorf( fOut[j * 2 + 1] + 0.5f ) * intVolume : left;
+			const int dst = s_rawend&(MAX_RAW_SAMPLES-1);
+
+			s_rawend++;
+			//Don't overflow if resampling.
+			if (s_rawend > rawEndStart + MAX_RAW_SAMPLES)
+				break;
+
+			if ( bFirstOrOnlyUpdateThisFrame )
+			{
+				s_rawsamples[dst].left = left;
+				s_rawsamples[dst].right = right;
+			}
+			else
+			{
+				s_rawsamples[dst].left += left;
+				s_rawsamples[dst].right += right;
+			}
+		}
+	}
+
+	s_rawStreamNext[slot] = s_rawend;
 }
 
 /*
@@ -2101,99 +2158,55 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 	scale = (float)rate / dma.speed;
 
 //Com_Printf ("%i < %i < %i\n", s_soundtime, s_paintedtime, s_rawend);
-	if (channels == 2 && width == 2)
+	if (width == 2 && scale != 1.0 && (channels == 1 || channels == 2))
 	{
-		if (scale == 1.0)
-		{	// optimized case
-			if (bFirstOrOnlyUpdateThisFrame)
+		S_RawResample16( samples, rate, channels, (const short *)data, intVolume, bFirstOrOnlyUpdateThisFrame, rawEndStart );
+	}
+	else if (channels == 2 && width == 2)
+	{
+		// (scale is 1.0 here, other rates are converted above)
+		if (bFirstOrOnlyUpdateThisFrame)
+		{
+			for (i=0 ; i<samples ; i++)
 			{
-				for (i=0 ; i<samples ; i++)
-				{
-					dst = s_rawend&(MAX_RAW_SAMPLES-1);
-					s_rawend++;
-					s_rawsamples[dst].left = ((short *)data)[i*2] * intVolume;
-					s_rawsamples[dst].right = ((short *)data)[i*2+1] * intVolume;
-				}
-			}
-			else
-			{
-				for (i=0 ; i<samples ; i++)
-				{
-					dst = s_rawend&(MAX_RAW_SAMPLES-1);
-					s_rawend++;
-					s_rawsamples[dst].left  += ((short *)data)[i*2] * intVolume;
-					s_rawsamples[dst].right += ((short *)data)[i*2+1] * intVolume;
-				}
+				dst = s_rawend&(MAX_RAW_SAMPLES-1);
+				s_rawend++;
+				s_rawsamples[dst].left = ((short *)data)[i*2] * intVolume;
+				s_rawsamples[dst].right = ((short *)data)[i*2+1] * intVolume;
 			}
 		}
 		else
 		{
-			if (bFirstOrOnlyUpdateThisFrame)
+			for (i=0 ; i<samples ; i++)
 			{
-				for (i=0 ; ; i++)
-				{
-					src = i*scale;
-					if (src >= samples)
-						break;
-					dst = s_rawend&(MAX_RAW_SAMPLES-1);
-					s_rawend++;
-					//Don't overflow if resampling.
-					if (s_rawend > rawEndStart + MAX_RAW_SAMPLES)
-						break;
-					s_rawsamples[dst].left = S_RawLerp16( (short *)data, src, i*scale - src, samples, 2, 0 ) * intVolume;
-					s_rawsamples[dst].right = S_RawLerp16( (short *)data, src, i*scale - src, samples, 2, 1 ) * intVolume;
-				}
-			}
-			else
-			{
-				for (i=0 ; ; i++)
-				{
-					src = i*scale;
-					if (src >= samples)
-						break;
-					dst = s_rawend&(MAX_RAW_SAMPLES-1);
-					s_rawend++;
-					//Don't overflow if resampling.
-					if (s_rawend > rawEndStart + MAX_RAW_SAMPLES)
-						break;
-					s_rawsamples[dst].left  += S_RawLerp16( (short *)data, src, i*scale - src, samples, 2, 0 ) * intVolume;
-					s_rawsamples[dst].right += S_RawLerp16( (short *)data, src, i*scale - src, samples, 2, 1 ) * intVolume;
-				}
+				dst = s_rawend&(MAX_RAW_SAMPLES-1);
+				s_rawend++;
+				s_rawsamples[dst].left  += ((short *)data)[i*2] * intVolume;
+				s_rawsamples[dst].right += ((short *)data)[i*2+1] * intVolume;
 			}
 		}
 	}
 	else if (channels == 1 && width == 2)
 	{
+		// (scale is 1.0 here, other rates are converted above)
 		if (bFirstOrOnlyUpdateThisFrame)
 		{
-			for (i=0 ; ; i++)
+			for (i=0 ; i<samples ; i++)
 			{
-				src = i*scale;
-				if (src >= samples)
-					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
-				//Don't overflow if resampling.
-				if (s_rawend > rawEndStart + MAX_RAW_SAMPLES)
-					break;
-				s_rawsamples[dst].left = S_RawLerp16( (short *)data, src, i*scale - src, samples, 1, 0 ) * intVolume;
-				s_rawsamples[dst].right = S_RawLerp16( (short *)data, src, i*scale - src, samples, 1, 0 ) * intVolume;
+				s_rawsamples[dst].left = ((short *)data)[i] * intVolume;
+				s_rawsamples[dst].right = ((short *)data)[i] * intVolume;
 			}
 		}
 		else
 		{
-			for (i=0 ; ; i++)
+			for (i=0 ; i<samples ; i++)
 			{
-				src = i*scale;
-				if (src >= samples)
-					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
-				//Don't overflow if resampling.
-				if (s_rawend > rawEndStart + MAX_RAW_SAMPLES)
-					break;
-				s_rawsamples[dst].left  += S_RawLerp16( (short *)data, src, i*scale - src, samples, 1, 0 ) * intVolume;
-				s_rawsamples[dst].right += S_RawLerp16( (short *)data, src, i*scale - src, samples, 1, 0 ) * intVolume;
+				s_rawsamples[dst].left  += ((short *)data)[i] * intVolume;
+				s_rawsamples[dst].right += ((short *)data)[i] * intVolume;
 			}
 		}
 	}
@@ -4259,7 +4272,7 @@ static qboolean S_StartBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolean
 			//
 			memset(&pMusicInfo->streamMP3_Bgrnd,0,sizeof(pMusicInfo->streamMP3_Bgrnd));
 			char *psError = C_MP3Stream_DecodeInit( &pMusicInfo->streamMP3_Bgrnd, pbMP3DataSegment, pMusicInfo->iLoadedDataLen,
-													dma.speed,
+													MP3_SAMPLE_RATE,	// decoded at its own rate, converted to the output rate when put in the raw buffer
 													16,		// sfx->width * 8,
 													qtrue	// bStereoDesired
 													);
@@ -4282,10 +4295,11 @@ static qboolean S_StartBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolean
 
 				pMusicInfo->s_backgroundInfo.format		= WAV_FORMAT_MP3;	// not actually used this way, but just ensures we don't match one of the legit formats
 				pMusicInfo->s_backgroundInfo.channels	= 2;		// always, for our MP3s when used for music (else 1 for FX)
-				pMusicInfo->s_backgroundInfo.rate		= dma.speed;
+				pMusicInfo->s_backgroundInfo.rate		= MP3_SAMPLE_RATE;
 				pMusicInfo->s_backgroundInfo.width		= 2;		// always, for our MP3s
 				pMusicInfo->s_backgroundInfo.samples	= pMusicInfo->sfxMP3_Bgrnd.iSoundLengthInSamples;
 				pMusicInfo->s_backgroundSamples			= pMusicInfo->sfxMP3_Bgrnd.iSoundLengthInSamples;
+				pMusicInfo->dMP3_SourcePos				= 0.0;
 
 				memset(&pMusicInfo->chMP3_Bgrnd,0,sizeof(pMusicInfo->chMP3_Bgrnd));
 						pMusicInfo->chMP3_Bgrnd.thesfx = &pMusicInfo->sfxMP3_Bgrnd;
@@ -4755,6 +4769,92 @@ void S_StopBackgroundTrack( void )
 
 
 
+// Most MP3 data (stereo, 16 bit) asked of the sliding decoder window at once, see the comment in S_UpdateBackgroundTrack_Actual
+#define SIZEOF_RAW_BUFFER_FOR_MP3 4096
+
+// Puts nOut samples of an MP3 music track in the raw sample buffer, converting from the MP3's rate to the output rate
+//
+// The MP3 is decoded at its own rate (MP3_SAMPLE_RATE) and the position of each output sample is worked out from
+// MusicInfo_t::dMP3_SourcePos, which carries the fractional part from one call to the next so the pieces join up
+// exactly. At the same rate this is just a copy.
+//
+// returns qtrue if the end of the MP3 was reached
+//
+static qboolean S_MusicMP3_ToRawBuffer( MusicInfo_t *pMusicInfo, int nOut, float fVolume, qboolean bFirstOrOnlyMusicTrack, byte *raw )
+{
+	const double dStep = (double)MP3_SAMPLE_RATE / dma.speed;	// MP3 samples per output sample
+	const qboolean bSameRate = (qboolean)(dma.speed == MP3_SAMPLE_RATE);
+	resampleFilter_t filter;
+	S_Resample_SetupFilter( &filter, dStep );
+
+	const double dPos = pMusicInfo->dMP3_SourcePos;
+	const int iFirst = bSameRate ? (int)dPos : (int)ceil( dPos - filter.support ) - 1;
+	const int iLast = bSameRate ? iFirst + nOut - 1 : (int)floor( dPos + ( nOut - 1 ) * dStep + filter.support ) + 1;
+	const int iFetchFirst = ( iFirst < 0 ) ? 0 : iFirst;	// before the start is silence
+	const int nFetch = iLast - iFetchFirst + 1;
+	const int fileBytes = nFetch * 4;						// stereo, 16 bit
+	qboolean qbEnded;
+
+	assert( (unsigned)fileBytes <= SIZEOF_RAW_BUFFER_FOR_MP3 );
+
+	if (pMusicInfo->s_backgroundFile == -1)
+	{
+		// in-mem...
+		//
+		qbEnded = (MP3Stream_GetSamples( &pMusicInfo->chMP3_Bgrnd, iFetchFirst, fileBytes/2, (short*) raw, qtrue ))?qfalse:qtrue;
+	}
+	else
+	{
+		// streaming an MP3 file instead... (note that the 'fileBytes' request size isn't that relevant for MP3s,
+		//										since code here can't know how much the MP3 needs to decompress)
+		//
+		byte *pbScrolledStreamData = MP3MusicStream_ReadFromDisk(pMusicInfo, pMusicInfo->chMP3_Bgrnd.MP3StreamHeader.iSourceReadIndex, fileBytes);
+
+		pMusicInfo->chMP3_Bgrnd.MP3StreamHeader.pbSourceData = pbScrolledStreamData - pMusicInfo->chMP3_Bgrnd.MP3StreamHeader.iSourceReadIndex;
+
+		qbEnded = (MP3Stream_GetSamples( &pMusicInfo->chMP3_Bgrnd, iFetchFirst, fileBytes/2, (short*) raw, qtrue ))?qfalse:qtrue;
+	}
+
+	const int intVolume = (int)(256 * fVolume);
+	const short *pSamples = (const short *) raw;
+
+	for ( int i = 0; i < nOut; i++ )
+	{
+		int iLeft, iRight;
+
+		if ( bSameRate )
+		{
+			iLeft = pSamples[i*2];
+			iRight = pSamples[i*2+1];
+		}
+		else
+		{
+			float f[2];
+			S_Resample_Interp( pSamples, 2, nFetch, dPos + i * dStep - iFetchFirst, &filter, f );
+			iLeft = (int)floorf( f[0] + 0.5f );
+			iRight = (int)floorf( f[1] + 0.5f );
+		}
+
+		const int dst = s_rawend&(MAX_RAW_SAMPLES-1);
+		s_rawend++;
+		if ( bFirstOrOnlyMusicTrack )
+		{
+			s_rawsamples[dst].left = iLeft * intVolume;
+			s_rawsamples[dst].right = iRight * intVolume;
+		}
+		else
+		{
+			s_rawsamples[dst].left += iLeft * intVolume;
+			s_rawsamples[dst].right += iRight * intVolume;
+		}
+	}
+
+	pMusicInfo->dMP3_SourcePos = dPos + nOut * dStep;
+
+	return qbEnded;
+}
+
+
 // qboolean return is true only if we're changing from a streamed intro to a dynamic loop...
 //
 static qboolean S_UpdateBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolean bFirstOrOnlyMusicTrack, float fDefaultVolume)
@@ -4794,7 +4894,6 @@ static qboolean S_UpdateBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolea
 //	is far too big for the window decoder to handle in one request because of the time-travel issue associated with
 //	normal sfx buffer painting, and allowing sufficient sliding room, even though the music file never goes back in time.
 //
-#define SIZEOF_RAW_BUFFER_FOR_MP3 4096
 #define RAWSIZE (pMusicInfo->bIsMP3?SIZEOF_RAW_BUFFER_FOR_MP3:sizeof(raw))
 
 	if ( !pMusicInfo->s_backgroundFile ) {
@@ -4818,55 +4917,51 @@ static qboolean S_UpdateBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolea
 	{
 		bufferSamples = MUSIC_RAW_LOOKAHEAD - (s_rawend - s_soundtime);
 
-		// decide how much data needs to be read from the file
-		fileSamples = bufferSamples * pMusicInfo->s_backgroundInfo.rate / dma.speed;
-
-		// don't try to play if there are no more samples in the file
-		if (!fileSamples) {
-			return qfalse;
-		}
-
-		// don't try and read past the end of the file
-		if ( fileSamples > pMusicInfo->s_backgroundSamples ) {
-			fileSamples = pMusicInfo->s_backgroundSamples;
-		}
-
-		// our max buffer size
-		fileBytes = fileSamples * (pMusicInfo->s_backgroundInfo.width * pMusicInfo->s_backgroundInfo.channels);
-		if ((unsigned)fileBytes > RAWSIZE ) {
-			fileBytes = RAWSIZE;
-			fileSamples = fileBytes / (pMusicInfo->s_backgroundInfo.width * pMusicInfo->s_backgroundInfo.channels);
-		}
-
 		qboolean qbForceFinish = qfalse;
 		if (pMusicInfo->bIsMP3)
 		{
-			int iStartingSampleNum = pMusicInfo->chMP3_Bgrnd.thesfx->iSoundLengthInSamples - pMusicInfo->s_backgroundSamples;	// but this IS relevant
-			// Com_Printf(S_COLOR_YELLOW "Requesting MP3 samples: sample %d\n",iStartingSampleNum);
+			// MP3s are converted from their own rate to the output rate (so can't just ask for as many file samples
+			//	as are wanted)
+			//
+			// How much is done at a time is limited by what the MP3 decoder can be asked for. Both tracks of cross-fading
+			//	dynamic music have to add exactly the same number of samples, so it must not depend on the track.
+			//
+			const double dStep = (double)MP3_SAMPLE_RATE / dma.speed;
+			resampleFilter_t filter;
+			S_Resample_SetupFilter( &filter, dStep );
+			const int iMaxSource = SIZEOF_RAW_BUFFER_FOR_MP3 / 4;
+			int iMaxOut = (dma.speed == MP3_SAMPLE_RATE) ? iMaxSource : (int)(( iMaxSource - 2.0 * filter.support - 8.0 ) / dStep);
+			if ( iMaxOut < 1 )
+				iMaxOut = 1;
 
+			qbForceFinish = S_MusicMP3_ToRawBuffer( pMusicInfo, (bufferSamples < iMaxOut) ? bufferSamples : iMaxOut,
+													pMusicInfo->fSmoothedOutVolume, bFirstOrOnlyMusicTrack, raw );
 
-			if (pMusicInfo->s_backgroundFile == -1)
-			{
-				// in-mem...
-				//
-				qbForceFinish = (MP3Stream_GetSamples( &pMusicInfo->chMP3_Bgrnd, iStartingSampleNum, fileBytes/2, (short*) raw, qtrue ))?qfalse:qtrue;
-
-				//Com_Printf(S_COLOR_YELLOW "Music time remaining: %f seconds\n", MP3Stream_GetRemainingTimeInSeconds( &pMusicInfo->chMP3_Bgrnd.MP3StreamHeader ));
-			}
-			else
-			{
-				// streaming an MP3 file instead... (note that the 'fileBytes' request size isn't that relevant for MP3s,
-				//										since code here can't know how much the MP3 needs to decompress)
-				//
-				byte *pbScrolledStreamData = MP3MusicStream_ReadFromDisk(pMusicInfo, pMusicInfo->chMP3_Bgrnd.MP3StreamHeader.iSourceReadIndex, fileBytes);
-
-				pMusicInfo->chMP3_Bgrnd.MP3StreamHeader.pbSourceData = pbScrolledStreamData - pMusicInfo->chMP3_Bgrnd.MP3StreamHeader.iSourceReadIndex;
-
-				qbForceFinish = (MP3Stream_GetSamples( &pMusicInfo->chMP3_Bgrnd, iStartingSampleNum, fileBytes/2, (short*) raw, qtrue ))?qfalse:qtrue;
-			}
+			// (the length of music is 0x7FFFFFFF, it ends when the decoder runs out)
+			pMusicInfo->s_backgroundSamples = pMusicInfo->sfxMP3_Bgrnd.iSoundLengthInSamples - (int)pMusicInfo->dMP3_SourcePos;
 		}
 		else
 		{
+			// decide how much data needs to be read from the file
+			fileSamples = bufferSamples * pMusicInfo->s_backgroundInfo.rate / dma.speed;
+
+			// don't try to play if there are no more samples in the file
+			if (!fileSamples) {
+				return qfalse;
+			}
+
+			// don't try and read past the end of the file
+			if ( fileSamples > pMusicInfo->s_backgroundSamples ) {
+				fileSamples = pMusicInfo->s_backgroundSamples;
+			}
+
+			// our max buffer size
+			fileBytes = fileSamples * (pMusicInfo->s_backgroundInfo.width * pMusicInfo->s_backgroundInfo.channels);
+			if ((unsigned)fileBytes > RAWSIZE ) {
+				fileBytes = RAWSIZE;
+				fileSamples = fileBytes / (pMusicInfo->s_backgroundInfo.width * pMusicInfo->s_backgroundInfo.channels);
+			}
+
 			// streaming a WAV off disk...
 			//
 			r = FS_Read( raw, fileBytes, pMusicInfo->s_backgroundFile );
@@ -4879,15 +4974,16 @@ static qboolean S_UpdateBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolea
 			// byte swap if needed (do NOT do for MP3 decoder, that has an internal big/little endian handler)
 			//
 			S_ByteSwapRawSamples( fileSamples, pMusicInfo->s_backgroundInfo.width, pMusicInfo->s_backgroundInfo.channels, raw );
+
+			// add to raw buffer
+			S_RawSamples(	fileSamples, pMusicInfo->s_backgroundInfo.rate,
+							pMusicInfo->s_backgroundInfo.width, pMusicInfo->s_backgroundInfo.channels, raw, pMusicInfo->fSmoothedOutVolume,
+							bFirstOrOnlyMusicTrack
+						);
+
+			pMusicInfo->s_backgroundSamples -= fileSamples;
 		}
 
-		// add to raw buffer
-		S_RawSamples(	fileSamples, pMusicInfo->s_backgroundInfo.rate,
-						pMusicInfo->s_backgroundInfo.width, pMusicInfo->s_backgroundInfo.channels, raw, pMusicInfo->fSmoothedOutVolume,
-						bFirstOrOnlyMusicTrack
-					);
-
-		pMusicInfo->s_backgroundSamples -= fileSamples;
 		if ( !pMusicInfo->s_backgroundSamples || qbForceFinish )
 		{
 			// loop the music, or play the next piece if we were on the intro...

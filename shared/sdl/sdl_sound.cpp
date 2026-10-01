@@ -38,6 +38,7 @@ cvar_t *s_sdlSpeed;
 cvar_t *s_sdlChannels;
 cvar_t *s_sdlDevSamps;
 cvar_t *s_sdlMixSamps;
+cvar_t *s_muteWhenUnfocused;
 
 /* The audio callback. All the magic happens here. */
 static int deviceChunkSamples = 1024;
@@ -133,12 +134,79 @@ static void SNDDMA_PrintAudiospec(const char *str, const SDL_AudioSpec *spec)
 	Com_Printf( "  Channels: %d\n", (int) spec->channels );
 }
 
+#ifdef _JK2EXE
+/*
+===============
+SNDDMA_GetDeviceFrequency
+
+The rate the system's audio stack runs the default output device at (48000 on most modern systems, 44100 on some),
+or 0 if SDL can't tell.
+===============
+*/
+static int SNDDMA_GetDeviceFrequency(void)
+{
+	SDL_AudioSpec spec;
+	memset(&spec, '\0', sizeof (spec));
+
+#if SDL_VERSION_ATLEAST(2, 24, 0)
+	char *name = NULL;
+	if (SDL_GetDefaultAudioInfo(&name, &spec, 0) == 0)
+	{
+		SDL_free(name);
+		return spec.freq;
+	}
+#endif
+
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+	if (SDL_GetNumAudioDevices(0) > 0 && SDL_GetAudioDeviceSpec(0, 0, &spec) == 0)
+		return spec.freq;
+#endif
+
+	return 0;
+}
+
+/*
+===============
+SNDDMA_ChooseFrequency
+
+Picks the rate the mixer runs at when it isn't set explicitly (s_khz 0, or the stock default of 44).
+
+Sound is mixed at the rate of the output device, so the system never has to convert it again. Rates well above
+48kHz buy nothing here (the game's sound is 44.1kHz at best), so they are brought down to something the system
+converts cheaply instead.
+===============
+*/
+static int SNDDMA_ChooseFrequency(void)
+{
+	int freq = SNDDMA_GetDeviceFrequency();
+
+	if (freq <= 0)
+		return 48000;
+	if (freq > 48000)
+		return (freq % 44100 == 0) ? 44100 : 48000;
+	if (freq < 32000)
+		return 44100;
+	return freq;
+}
+#endif
+
 static int SNDDMA_ExpandSampleFrequencyKHzToHz(int khz)
 {
 	switch (khz)
 	{
+#ifdef _JK2EXE
+		// 0 is the default of the cvar, 44 what the stock default.cfg sets it to ("very high" in the sound menu):
+		//	both mean the output device's own rate, which is at least as good as 44.1kHz
+		case 0:
+		case 44: return SNDDMA_ChooseFrequency();
+		default:
+			if (khz >= 8000 && khz <= 192000)
+				return khz;		// an exact rate in Hz
+			return 44100;
+#else
 		default:
 		case 44: return 44100;
+#endif
 		case 22: return 22050;
 		case 11: return 11025;
 	}
@@ -163,6 +231,7 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 		s_sdlChannels = Cvar_Get("s_sdlChannels", "2", CVAR_ARCHIVE_ND);
 		s_sdlDevSamps = Cvar_Get("s_sdlDevSamps", "0", CVAR_ARCHIVE_ND);
 		s_sdlMixSamps = Cvar_Get("s_sdlMixSamps", "0", CVAR_ARCHIVE_ND);
+		s_muteWhenUnfocused = Cvar_Get("s_muteWhenUnfocused", "1", CVAR_ARCHIVE_ND);	// 0 = keep playing while the window isn't in front
 	}
 
 	Com_Printf( "SDL_Init( SDL_INIT_AUDIO )... " );
@@ -213,7 +282,13 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 	desired.channels = (int) s_sdlChannels->value;
 	desired.callback = SNDDMA_AudioCallback;
 
-	dev = SDL_OpenAudioDevice( NULL, 0, &desired, &obtained, 0 );
+#ifdef _JK2EXE
+	// When the rate follows the device, let the device have the final say rather than have SDL convert for us
+	const int allowedChanges = (sampleFrequencyInKHz == 0 || sampleFrequencyInKHz == 44) ? SDL_AUDIO_ALLOW_FREQUENCY_CHANGE : 0;
+#else
+	const int allowedChanges = 0;
+#endif
+	dev = SDL_OpenAudioDevice( NULL, 0, &desired, &obtained, allowedChanges );
 	if ( !dev )
 	{
 		Com_Printf("SDL_OpenAudioDevice() failed: %s\n", SDL_GetError());
@@ -340,6 +415,11 @@ void SNDDMA_Activate( qboolean activate )
 		S_AL_MuteAllSounds( (qboolean)!activate );
 	}
 #endif
+
+	if ( !activate && s_muteWhenUnfocused && !s_muteWhenUnfocused->integer )
+	{
+		return;	// keep playing in the background
+	}
 
 	if ( activate )
 	{
