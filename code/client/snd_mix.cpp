@@ -208,6 +208,10 @@ static void S_PaintChannelFrom16( channel_t *ch, const sfx_t *sfx, int count, in
 }
 
 
+// The most decoded samples a single request to the MP3 decoder's sliding window should ask for (see
+// MP3SlidingDecodeBuffer in snd_local.h), which also sizes the source buffer used when converting the rate.
+#define MP3_PAINT_MAX_SOURCE	3000
+
 void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset )
 {
 	int data;
@@ -217,14 +221,56 @@ void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampl
 	portable_samplepair_t	*samp;
 	static short tempMP3Buffer[PAINTBUFFER_SIZE];
 
-	MP3Stream_GetSamples( ch, sampleOffset, count, tempMP3Buffer, qfalse );	// qfalse = not stereo
-
 	leftvol = ch->leftvol*snd_vol;
 	rightvol = ch->rightvol*snd_vol;
-	sfx = tempMP3Buffer;
-
 	samp = &paintbuffer[ bufferOffset ];
 
+	if ( dma.speed != MP3_SAMPLE_RATE )
+	{
+		// The MP3 is always decoded at its own rate, so convert to the output rate here. The position of every output
+		// sample is worked out from its number alone (so, unlike the pieces of a stream, the pieces this is called
+		// with need nothing carried over between them), and only the source samples around it are decoded.
+		static short srcBuffer[MP3_PAINT_MAX_SOURCE + 8];
+		const double dStep = (double)MP3_SAMPLE_RATE / dma.speed;	// source samples per output sample
+		resampleFilter_t filter;
+		S_Resample_SetupFilter( &filter, dStep );
+
+		int maxRun = (int)( ( MP3_PAINT_MAX_SOURCE - 2.0 * filter.support - 8.0 ) / dStep );
+		if ( maxRun < 1 )
+			maxRun = 1;
+
+		while ( count > 0 )
+		{
+			const int n = ( count < maxRun ) ? count : maxRun;
+			const int iFirst = (int)ceil( sampleOffset * dStep - filter.support ) - 1;
+			const int iLast = (int)floor( ( sampleOffset + n - 1 ) * dStep + filter.support ) + 1;
+			const int iFetchFirst = ( iFirst < 0 ) ? 0 : iFirst;	// before the start of the sound is silence
+			const int iFetchCount = iLast - iFetchFirst + 1;
+
+			MP3Stream_GetSamples( ch, iFetchFirst, iFetchCount, srcBuffer, qfalse );	// qfalse = not stereo
+
+			for ( i = 0; i < n; i++ )
+			{
+				float f;
+				S_Resample_Interp( srcBuffer, 1, iFetchCount, ( sampleOffset + i ) * dStep - iFetchFirst, &filter, &f );
+				if ( f > 32767.0f )			f = 32767.0f;
+				else if ( f < -32768.0f )	f = -32768.0f;
+				data = (int)floorf( f + 0.5f );
+
+				samp->left += (data * leftvol)>>8;
+				samp->right += (data * rightvol)>>8;
+				samp++;
+			}
+
+			sampleOffset += n;
+			count -= n;
+		}
+		return;
+	}
+
+	MP3Stream_GetSamples( ch, sampleOffset, count, tempMP3Buffer, qfalse );	// qfalse = not stereo
+
+	sfx = tempMP3Buffer;
 
 	while ( count & 3 ) {
 		data = *sfx;

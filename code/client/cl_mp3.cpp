@@ -136,7 +136,7 @@ float MP3Stream_GetPlayingTimeInSeconds( LP_MP3STREAM lpMP3Stream )
 float MP3Stream_GetRemainingTimeInSeconds( LP_MP3STREAM lpMP3Stream )
 {
 	if (lpMP3Stream->iTimeQuery_UnpackedLength)	// fields initialised?
-		return (float)(((((double)(lpMP3Stream->iTimeQuery_UnpackedLength - (lpMP3Stream->iBytesDecodedTotal * (lpMP3Stream->iTimeQuery_SampleRate / dma.speed)))) / (double)lpMP3Stream->iTimeQuery_SampleRate) / (double)lpMP3Stream->iTimeQuery_Channels) / (double)lpMP3Stream->iTimeQuery_Width);
+		return (float)(((((double)(lpMP3Stream->iTimeQuery_UnpackedLength - lpMP3Stream->iBytesDecodedTotal)) / (double)lpMP3Stream->iTimeQuery_SampleRate) / (double)lpMP3Stream->iTimeQuery_Channels) / (double)lpMP3Stream->iTimeQuery_Width);
 
 	return 0.0f;
 }
@@ -280,7 +280,9 @@ qboolean MP3Stream_InitFromFile( sfx_t* sfx, byte *pbSrcData, int iSrcDatalen, c
 		sfx->eSoundCompressionMethod = ct_MP3;
 		sfx->fVolRange = fMaxVol;
 		//sfx->width  = 2;
-		sfx->iSoundLengthInSamples = ((iMP3UnPackedSize / 2/*sfx->width*/) / (44100 / dma.speed)) / (bStereoDesired?2:1);
+		// the sound is decoded at the file's own rate and converted to the output rate while it is mixed, so state the
+		//	length in output samples
+		sfx->iSoundLengthInSamples = (int)(((int64_t)((iMP3UnPackedSize / 2/*sfx->width*/) / (bStereoDesired?2:1)) * dma.speed) / MP3_SAMPLE_RATE);
 		//
 		// alloc mem for data and store it (raw MP3 in this case)...
 		//
@@ -291,7 +293,7 @@ qboolean MP3Stream_InitFromFile( sfx_t* sfx, byte *pbSrcData, int iSrcDatalen, c
 		//
 		MP3STREAM SFX_MP3Stream = {};	// important to init to all zeroes!
 		char *psError = C_MP3Stream_DecodeInit( &SFX_MP3Stream, /*sfx->data*/ /*sfx->soundData*/ pbSrcData, iSrcDatalen,
-												dma.speed,//(s_khz->value == 44)?44100:(s_khz->value == 22)?22050:11025,
+												MP3_SAMPLE_RATE,	// always decode at the file's rate, the mixer converts to the output rate
 												2/*sfx->width*/ * 8,
 												bStereoDesired
 												);

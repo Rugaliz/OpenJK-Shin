@@ -47,6 +47,11 @@ typedef struct id3v1_1 {
 } id3v1_1;	// 128 bytes in size
 
 
+// The game's MP3s are all 44.1kHz. They are always decoded at that rate, whatever the output (DMA) rate is,
+// and converted to the output rate by the mixer (snd_mix.cpp) and the music streamer (snd_dma.cpp).
+#define MP3_SAMPLE_RATE	44100
+
+
 extern const char sKEY_MAXVOL[];
 extern const char sKEY_UNCOMP[];
 

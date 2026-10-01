@@ -201,43 +201,6 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 }
 
 
-// Windowed-sinc low pass kernel used for high quality sample rate conversion (s_quality 2).
-// Stored as a table of sinc(u) * Blackman-Harris window for u in [0, SINC_HALF_TAPS], SINC_TABLE_RES entries per unit.
-#define SINC_HALF_TAPS	16
-#define SINC_TABLE_RES	256
-static float	sSincTable[SINC_HALF_TAPS * SINC_TABLE_RES + 2];
-static qboolean	sSincTableBuilt = qfalse;
-
-static void S_BuildSincTable( void )
-{
-	for ( int n = 0; n < SINC_HALF_TAPS * SINC_TABLE_RES + 2; n++ )
-	{
-		const double u = (double)n / SINC_TABLE_RES;
-		if ( u >= SINC_HALF_TAPS )
-		{
-			sSincTable[n] = 0.0f;
-			continue;
-		}
-		const double sinc = ( n == 0 ) ? 1.0 : sin( M_PI * u ) / ( M_PI * u );
-		const double t = u / SINC_HALF_TAPS;	// 0..1 across the half window
-		const double window = 0.35875 + 0.48829 * cos( M_PI * t ) + 0.14128 * cos( 2.0 * M_PI * t ) + 0.01168 * cos( 3.0 * M_PI * t );
-		sSincTable[n] = (float)( sinc * window );
-	}
-	sSincTableBuilt = qtrue;
-}
-
-static inline float S_SincKernel( float u )
-{
-	if ( u < 0.0f )
-		u = -u;
-	if ( u >= SINC_HALF_TAPS )
-		return 0.0f;
-	const float f = u * SINC_TABLE_RES;
-	const int i = (int)f;
-	const float t = f - i;
-	return sSincTable[i] + ( sSincTable[i + 1] - sSincTable[i] ) * t;
-}
-
 // one source sample as 16 bit, with the ends of the sound repeated outwards
 static inline int S_ResampleFetch( const byte *pData, int iInWidth, int iInCount, int idx )
 {
@@ -289,15 +252,10 @@ void ResampleSfx (sfx_t *sfx, int iInRate, int iInWidth, byte *pData)
 
 	sfx->fVolRange	= 0;
 
-	if ( iQuality >= 2 && dStepScale != 1.0 && !sSincTableBuilt )
-	{
-		S_BuildSincTable();
-	}
-
-	// sinc cutoff, as a fraction of the source's Nyquist frequency: everything is kept when upsampling, and
-	// when downsampling only what the new, lower rate can represent
-	const float	fCutoff = ( dStepScale > 1.0 ) ? (float)( 1.0 / dStepScale ) : 1.0f;
-	const float	fSupport = SINC_HALF_TAPS / fCutoff;	// how many source samples either side of a position are used
+	resampleFilter_t	filter;
+	S_Resample_SetupFilter( &filter, dStepScale );
+	const float	fCutoff = filter.cutoff;
+	const float	fSupport = filter.support;	// how many source samples either side of a position are used
 
 	for (i=0 ; i<iOutCount ; i++)
 	{
@@ -316,7 +274,7 @@ void ResampleSfx (sfx_t *sfx, int iInRate, int iInWidth, byte *pData)
 			float fSum = 0.0f, fWeightSum = 0.0f;
 			for ( int k = iFirst; k <= iLast; k++ )
 			{
-				const float fWeight = S_SincKernel( (float)( dSrcPos - k ) * fCutoff );
+				const float fWeight = S_Resample_Kernel( (float)( dSrcPos - k ) * fCutoff );
 				fSum += fWeight * S_ResampleFetch( pData, iInWidth, iInCount, k );
 				fWeightSum += fWeight;
 			}
