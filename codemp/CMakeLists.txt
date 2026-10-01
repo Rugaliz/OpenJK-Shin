@@ -364,23 +364,6 @@ if(BuildMPEngine)
 		set(MPEngineLibraries ${MPEngineLibraries} ${OPENGL_LIBRARIES})
 	endif()
 
-	# OpenAL (is optionally included for Windows)
-	if (MSVC AND NOT WIN64)
-		if(UseInternalOpenAL)
-			# There's a libs/OpenAL32.lib
-			# (mrw) TODO Is this actually required on windows? It is loaded at runtime, should not be linked?
-			find_library(OpenALLibrary NAMES OpenAL32 PATHS ${OpenJKLibDir})
-			if(NOT OpenALLibrary)
-				message(FATAL_ERROR "UseInternalOpenAL enabled, but lib/OpenAL32.lib not found!")
-			endif(NOT OpenALLibrary)
-			set(MPEngineLibraries ${MPEngineLibraries} ${OpenALLibrary})
-		else(UseInternalOpenAL)
-			find_package(OpenAL REQUIRED)
-			set(MPEngineIncludeDirectories ${MPEngineIncludeDirectories} ${OPENAL_INCLUDE_DIR})
-			set(MPEngineLibraries ${MPEngineLibraries} ${OPENAL_LIBRARY})
-		endif(UseInternalOpenAL)
-	endif()
-
 	if(UseInternalSDL2)
 		if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 			set(MPEngineLibraries
@@ -410,16 +393,6 @@ if(BuildMPEngine)
 		set(MPEngineIncludeDirectories ${MPEngineIncludeDirectories} ${SDL2_INCLUDE_DIRS})
 		set(MPEngineLibraries ${MPEngineLibraries} ${SDL2_LIBRARIES})
 	endif()
-
-	# EAX is Windows-Only (right?)
-	if(MSVC)
-		set(MPEngineEAXFiles
-			"${MPDir}/client/eax/eax.h"
-			"${MPDir}/client/eax/EaxMan.h"
-			)
-		source_group("eax" FILES ${MPEngineEAXFiles})
-		set(MPEngineFiles ${MPEngineFiles} ${MPEngineEAXFiles})
-	endif(MSVC)
 
 	#    Source Files
 

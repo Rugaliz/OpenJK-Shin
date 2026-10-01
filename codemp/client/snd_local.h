@@ -28,26 +28,6 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_public.h"
 #include "mp3code/mp3struct.h"
 
-#if defined(_MSC_VER) && !defined(WIN64)
-#define USE_OPENAL
-#endif
-
-// Open AL Specific
-#ifdef USE_OPENAL
-#include "OpenAL/al.h"
-#include "OpenAL/alc.h"
-#include "eax/eax.h"
-#include "eax/EaxMan.h"
-/*#elif defined MACOS_X
-#include <OpenAL/al.h>
-#include <OpenAL/alc.h>
-#else
-#include <AL/al.h>
-#include <AL/alc.h>*/
-#endif
-// Added for Open AL to know when to mute all sounds (e.g when app. loses focus)
-void S_AL_MuteAllSounds(qboolean bMute);
-
 
 //from SND_AMBIENT
 extern void AS_Init( void );
@@ -88,12 +68,6 @@ typedef struct sfx_s {
 	float			fVolRange;				// used to set the highest volume this sample has at load time - used for lipsynching
 	int				iLastLevelUsedOn;		// used for cacheing purposes
 
-	// Open AL
-#ifdef USE_OPENAL
-	ALuint		Buffer;
-#endif
-	char		*lipSyncData;
-
 	struct sfx_s	*next;					// only used because of hash table when registering
 } sfx_t;
 
@@ -108,21 +82,6 @@ typedef struct dma_s {
 
 
 #define START_SAMPLE_IMMEDIATE	0x7fffffff
-
-// Open AL specific
-#ifdef USE_OPENAL
-typedef struct STREAMINGBUFFER_s {
-	ALuint	BufferID;
-	ALuint	Status;
-	char	*Data;
-} STREAMINGBUFFER;
-#endif
-
-#define NUM_STREAMING_BUFFERS	4
-#define STREAMING_BUFFER_SIZE	4608		// 4 decoded MP3 frames
-
-#define QUEUED		1
-#define UNQUEUED	2
 
 
 typedef struct channel_s {
@@ -151,18 +110,6 @@ typedef struct channel_s {
 	qboolean	doppler;
 	float		dopplerScale;
 
-	// Open AL specific
-	bool	bLooping;	// Signifies if this channel / source is playing a looping sound
-//	bool	bAmbient;	// Signifies if this channel / source is playing a looping ambient sound
-	bool	bProcessed;	// Signifies if this channel / source has been processed
-	bool	bStreaming;	// Set to true if the data needs to be streamed (MP3 or dialogue)
-#ifdef USE_OPENAL
-	STREAMINGBUFFER	buffers[NUM_STREAMING_BUFFERS];	// AL Buffers for streaming
-	ALuint		alSource;		// Open AL Source
-#endif
-	bool		bPlaying;		// Set to true when a sound is playing on this channel / source
-	int			iStartTime;		// Time playback of Source begins
-	int			lSlotID;		// ID of Slot rendering Source's environment (enables a send to this FXSlot)
 } channel_t;
 
 
