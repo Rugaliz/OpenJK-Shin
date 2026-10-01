@@ -147,16 +147,7 @@ if(NOT MSVC)
 	set_target_properties(${MPCGame} PROPERTIES PREFIX "")
 endif()
 
-if(MakeApplicationBundles AND BuildMPEngine)
-	install(TARGETS ${MPCGame}
-		LIBRARY
-		DESTINATION "${JKAInstallDir}/${MPEngine}.app/Contents/MacOS/OpenJK"
-		COMPONENT ${JKAMPCoreComponent})
-	install(TARGETS ${MPCGame}
-		LIBRARY
-		DESTINATION "${JKAInstallDir}/${MPEngine}.app/Contents/MacOS/base"
-		COMPONENT ${JKAMPCoreComponent})
-elseif(WIN32)
+if(WIN32)
 	install(TARGETS ${MPCGame}
 		RUNTIME
 		DESTINATION "${JKAInstallDir}/OpenJK"

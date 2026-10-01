@@ -37,7 +37,7 @@ Download the [latest build](https://github.com/JACoders/OpenJK/releases/tag/late
 Installing and running OpenJK:
 
 1. Extract the contents of the file into the Jedi Academy `GameData/` folder. For Steam users, this will be in `<Steam Folder>/steamapps/common/Jedi Academy/GameData/`.
-1. Run `openjk.x86.exe` (Windows), `openjk.i386` (Linux 32-bit), `openjk.x86_64` (Linux 64-bit) or the `OpenJK` app bundle (macOS), depending on your operating system.
+1. Run `openjk.x86.exe` (Windows), `openjk.i386` (Linux 32-bit), `openjk.x86_64` (Linux 64-bit), depending on your operating system.
 
 ### Linux Instructions
 
@@ -49,16 +49,6 @@ If you do not have an existing JKA installation and need to download the base ga
 1. Using SteamCMD download the game, `app_update 6020`.
 
 Extract the contents of the file into the Jedi Academy `GameData/` folder. For Steam users, this will be in `<Steam Folder>/steamapps/common/Jedi Academy/GameData/`.
-
-### macOS Instructions
-
-If you have the Mac App Store Version of Jedi Academy, follow these steps to get OpenJK runnning under macOS:
-
-1. Install [Homebrew](https://brew.sh/) if you don't have it.
-1. Open the Terminal app, and enter the command `brew install sdl2`.
-1. Extract the contents of the OpenJK DMG into the game directory `/Applications/Star Wars Jedi Knight: Jedi Academy.app/Contents/`
-1. Run `OpenJK.app` or `OpenJK SP.app`
-1. Savegames, Config Files and Log Files are stored in `/Users/$USER/Library/Application Support/OpenJK/`
 
 ## For Developers
 

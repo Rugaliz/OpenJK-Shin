@@ -389,17 +389,10 @@ if(WIN32)
 		DESTINATION "${JKAInstallDir}/OpenJK"
 		COMPONENT ${JKASPClientComponent})
 else(WIN32)
-	if(MakeApplicationBundles AND BuildSPEngine)
-		install(TARGETS ${SPGame}
-			LIBRARY
-			DESTINATION "${JKAInstallDir}/${SPEngine}.app/Contents/MacOS/OpenJK"
-			COMPONENT ${JKASPClientComponent})
-	else()
-		install(TARGETS ${SPGame}
-			LIBRARY
-			DESTINATION "${JKAInstallDir}/OpenJK"
-			COMPONENT ${JKASPClientComponent})
-	endif()
+	install(TARGETS ${SPGame}
+		LIBRARY
+		DESTINATION "${JKAInstallDir}/OpenJK"
+		COMPONENT ${JKASPClientComponent})
 endif()
 
 set_target_properties(${SPGame} PROPERTIES COMPILE_DEFINITIONS "${SPGameDefines}")

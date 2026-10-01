@@ -86,11 +86,6 @@ option(UseInternalPNG    "If set, use bundled libpng."  ${UseInternalPNGDefault}
 option(UseInternalJPEG   "If set, use bundled libjpeg." ${UseInternalJPEGDefault})
 option(UseInternalSDL2   "If set, use bundled SDL2."    ${UseInternalSDL2Default})
 
-# This option won't appear on non-Apple platforms.
-if(APPLE)
-  option(MakeApplicationBundles "Whether to build .app application bundles for engines built" ON)
-endif()
-
 #=============================================================================
 #
 # Custom CMake Modules needed
