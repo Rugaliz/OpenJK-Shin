@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_public.h"
 #include "snd_resample.h"
 #include "snd_hrtf.h"
+#include "snd_reverb.h"
 #include "../mp3code/mp3struct.h"
 
 
@@ -121,6 +122,15 @@ typedef struct
 	float		hrtfAzimuth;	// degrees, 0 = ahead, positive to the right
 	float		hrtfElevation;	// degrees, positive upwards
 	hrtfState_t	*pHrtfState;
+	//
+	// room effects (s_reverb): how much of the sound is sent to the reverb of the room, how much the sound is held
+	// back by something between it and the listener (0 to 1, and where that was heading and when it was last looked at),
+	// and the state of the low pass filter that does that
+	int			reverbvol;		// 0-255
+	float		obstruct;
+	float		obstructTarget;
+	int			obstructNextTime;
+	float		lpState;
 
 } channel_t;
 
@@ -157,6 +167,10 @@ extern	dma_t	dma;
 #define	MUSIC_RAW_LOOKAHEAD	16384
 extern	portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 
+extern	cvar_t	*s_reverb;			// 1 = the sound of the room: reverb, sounds held back by walls, muffling underwater
+extern	cvar_t	*s_reverbLevel;		// how much reverb there is (1 = as worked out from the room)
+extern	qboolean	s_reverbActive;	// the room effects are in use this frame
+extern	float		s_underwater;	// 0 to 1, how far under the surface the listener is
 extern	cvar_t	*s_hrtf;			// 1 = position sounds binaurally (head-related transfer functions) for headphones
 extern	cvar_t	*s_quality;			// 0 fast, 1 good, 2 best: quality of sample rate conversion when loading sounds
 portable_samplepair_t *S_GetRawSamplePointer();	// TA added this, but it just returns the s_rawsamples[] array above. Oh well...

@@ -34,6 +34,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_local.h"
 #include "cl_mp3.h"
 #include "snd_music.h"
+#include "../qcommon/cm_public.h"	// (to look at the shape of the room)
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #if defined(_WIN32)
@@ -183,6 +184,11 @@ cvar_t *s_dynamix;
 cvar_t *s_initsound;
 cvar_t *s_khz;
 cvar_t *s_hrtf;
+cvar_t *s_reverb;
+cvar_t *s_reverbLevel;
+qboolean s_reverbActive = qfalse;
+float s_underwater = 0.0f;
+static int s_reverbRate = 0;		// the rate the reverb is set up for (0 = not at all, or to be cleared)
 cvar_t *s_quality;
 cvar_t *s_language;	// note that this is distinct from "g_language"
 cvar_t *s_lip_threshold_1;
@@ -323,6 +329,8 @@ void S_Init( void ) {
 	s_initsound         = Cvar_Get( "s_initsound",         "1",       CVAR_ARCHIVE | CVAR_LATCH );
 	s_khz               = Cvar_Get( "s_khz",               "0",       CVAR_ARCHIVE | CVAR_LATCH );	// 0 or 44 = rate of the output device, 11 or 22 = low rates, or a rate in Hz
 	s_hrtf              = Cvar_Get( "s_hrtf",              "0",       CVAR_ARCHIVE );	// 1 = binaural positioning for headphones
+	s_reverb            = Cvar_Get( "s_reverb",            "1",       CVAR_ARCHIVE );	// the sound of the room: reverb, walls, water
+	s_reverbLevel       = Cvar_Get( "s_reverbLevel",       "1",       CVAR_ARCHIVE );	// how much reverb (1 = as worked out from the room)
 	s_quality           = Cvar_Get( "s_quality",           "2",       CVAR_ARCHIVE );	// 0 = fast, 1 = good, 2 = best
 	s_language          = Cvar_Get( "s_language",          "english", CVAR_ARCHIVE | CVAR_NORESTART );
 	s_lip_threshold_1   = Cvar_Get( "s_threshold1",        "0.3",     0 );
@@ -837,6 +845,241 @@ static void S_HrtfSetupLoop( channel_t *ch, const sfx_t *sfx, const vec3_t dir, 
 	ch->pHrtfState = &s_hrtfLoops[use].state;
 }
 
+/*
+===============================================================================
+
+THE SOUND OF THE ROOM (s_reverb)
+
+How a sound is heard depends on where it is: in a big metal hangar it echoes for seconds, in a small padded room it
+doesn't at all, outdoors there is hardly any reverb. Rays are sent out from the listener in all directions through the
+collision data of the level, and what they hit (how far, and what it is made of) says how long the reverb of the
+room is and how loud. The reverb itself is in snd_reverb.cpp, and the sounds are mixed into it in snd_mix.cpp.
+
+===============================================================================
+*/
+#define ROOM_RAYS			26
+#define ROOM_RAY_LENGTH		3000.0f		// how far a ray looks (units)
+#define UNIT_TO_METERS		0.03f		// how long a unit is, about (a person is 2 metres, 56 units + a bit)
+#define SPEED_OF_SOUND		343.0f		// metres per second
+
+// Per material, how much of the sound a surface of it soaks up at the middle frequencies (0 to 1)
+static const float s_materialAbsorption[MATERIAL_LAST] =
+{
+	0.10f,	// MATERIAL_NONE
+	0.10f,	// SOLIDWOOD
+	0.15f,	// HOLLOWWOOD
+	0.04f,	// SOLIDMETAL
+	0.06f,	// HOLLOWMETAL
+	0.30f,	// SHORTGRASS
+	0.40f,	// LONGGRASS
+	0.20f,	// DIRT
+	0.30f,	// SAND
+	0.25f,	// GRAVEL
+	0.04f,	// GLASS
+	0.03f,	// CONCRETE
+	0.02f,	// MARBLE
+	0.02f,	// WATER
+	0.50f,	// SNOW
+	0.03f,	// ICE
+	0.30f,	// FLESH
+	0.25f,	// MUD
+	0.04f,	// BPGLASS
+	0.40f,	// DRYLEAVES
+	0.40f,	// GREENLEAVES
+	0.50f,	// FABRIC
+	0.35f,	// CANVAS
+	0.05f,	// ROCK
+	0.20f,	// RUBBER
+	0.06f,	// PLASTIC
+	0.03f,	// TILES
+	0.45f,	// CARPET
+	0.08f,	// PLASTER
+	0.04f,	// SHATTERGLASS
+	0.06f,	// ARMOR
+	0.15f,	// COMPUTER
+};
+
+// ... and how much it soaks up the high frequencies more than that (0 to 1): soft things take the highs first
+static const float s_materialSoftness[MATERIAL_LAST] =
+{
+	0.2f, 0.2f, 0.3f, 0.0f, 0.1f, 0.8f, 0.9f, 0.5f, 0.7f, 0.4f, 0.0f, 0.0f, 0.0f, 0.1f, 1.0f, 0.0f,
+	0.8f, 0.6f, 0.0f, 0.9f, 0.9f, 1.0f, 0.8f, 0.1f, 0.5f, 0.1f, 0.0f, 1.0f, 0.4f, 0.0f, 0.1f, 0.3f,
+};
+
+static vec3_t	s_roomRays[ROOM_RAYS];
+static qboolean	s_roomRaysMade = qfalse;
+static int		s_roomNextAnalysis = 0;
+
+// Gets the reverb ready for the output rate (the first time it is wanted, or after the sound was restarted)
+static qboolean S_ReverbPrepare( void )
+{
+	if ( s_reverbRate != dma.speed )
+	{
+		S_Reverb_Init( dma.speed );
+		s_reverbRate = dma.speed;
+		s_roomNextAnalysis = 0;		// look at the room at once, and be in it at once
+		Com_DPrintf( "Sound: reverb ready at %d Hz\n", dma.speed );
+	}
+	return qtrue;
+}
+
+static void S_MakeRoomRays( void )
+{
+	// evenly spread over a sphere (a Fibonacci spiral), the same every time so turning round makes no difference
+	for ( int i = 0; i < ROOM_RAYS; i++ )
+	{
+		const float z = 1.0f - 2.0f * ( i + 0.5f ) / ROOM_RAYS;
+		const float r = sqrtf( 1.0f - z * z );
+		const float phi = i * 2.3999632f;	// the golden angle
+
+		s_roomRays[i][0] = r * cosf( phi );
+		s_roomRays[i][1] = r * sinf( phi );
+		s_roomRays[i][2] = z;
+	}
+	s_roomRaysMade = qtrue;
+}
+
+/*
+===============
+S_AnalyseRoom
+
+Works out what the reverb should be like for where the listener is, and sets it (gradually, unless "immediately").
+===============
+*/
+static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immediately )
+{
+	reverbParams_t params;
+	const float level = ( s_reverbLevel->value < 0.0f ) ? 0.0f : s_reverbLevel->value;
+
+	if ( inwater )
+	{
+		// underwater everything is dull and close, whatever the room
+		params.rt60 = 1.2f;
+		params.hfRatio = 0.2f;
+		params.preDelay = 0.005f;
+		params.erDelay = 0.01f;
+		params.erLevel = 0.15f * level;
+		params.lateLevel = 0.45f * level;
+	}
+	else
+	{
+		if ( !s_roomRaysMade )
+			S_MakeRoomRays();
+
+		int hits = 0;
+		float distanceSum = 0.0f, nearest = ROOM_RAY_LENGTH * UNIT_TO_METERS;
+		float absorptionSum = 0.0f, softnessSum = 0.0f;
+
+		for ( int i = 0; i < ROOM_RAYS; i++ )
+		{
+			vec3_t end;
+			trace_t trace;
+
+			VectorMA( head, ROOM_RAY_LENGTH, s_roomRays[i], end );
+			CM_BoxTrace( &trace, head, end, vec3_origin, vec3_origin, 0, CONTENTS_SOLID );
+
+			if ( trace.allsolid || trace.startsolid )
+				return;		// inside something, this isn't a place to judge
+
+			if ( trace.fraction >= 1.0f || ( trace.surfaceFlags & SURF_SKY ) )
+				continue;	// open: nothing to reflect the sound
+
+			const float distance = trace.fraction * ROOM_RAY_LENGTH * UNIT_TO_METERS;
+			const int material = trace.surfaceFlags & MATERIAL_MASK;
+
+			hits++;
+			distanceSum += distance;
+			if ( distance < nearest )
+				nearest = distance;
+			absorptionSum += s_materialAbsorption[material];
+			softnessSum += s_materialSoftness[material];
+		}
+
+		const float hitFraction = (float)hits / ROOM_RAYS;
+		const float meanDistance = hits ? distanceSum / hits : ROOM_RAY_LENGTH * UNIT_TO_METERS;
+		const float absorption = hits ? absorptionSum / hits : 0.1f;
+		const float softness = hits ? softnessSum / hits : 0.0f;
+
+		// How long the sound lasts: Sabine's rule, 0.161 V / A. The volume over the surface is about a third of
+		// the distance to the walls, A is what the walls take up. A bit more is soaked up than the materials say (the
+		// furniture, doorways, the rest of the level), and where there is nothing it all escapes.
+		const float absorbed = hitFraction * ( absorption + 0.08f ) + ( 1.0f - hitFraction ) * 1.0f;
+		float rt60 = 0.053f * meanDistance / absorbed;
+		if ( rt60 < 0.12f )		rt60 = 0.12f;
+		if ( rt60 > 4.0f )		rt60 = 4.0f;
+
+		// the highs go first in soft rooms and in big ones (the air takes them)
+		float hfRatio = ( 0.9f - 0.45f * softness ) / ( 1.0f + meanDistance / 50.0f );
+		if ( hfRatio < 0.15f )	hfRatio = 0.15f;
+
+		const float enclosed = hitFraction * sqrtf( hitFraction );	// (more of the sound is lost the more is open)
+
+		params.rt60 = rt60;
+		params.hfRatio = hfRatio;
+		params.preDelay = Com_Clamp( 0.004f, 0.06f, 0.004f + 0.0015f * meanDistance );
+		params.erDelay = Com_Clamp( 0.004f, 0.08f, 2.0f * nearest / SPEED_OF_SOUND );
+		params.erLevel = 0.55f * hitFraction * level;
+		params.lateLevel = 0.55f * enclosed * level;
+
+		if ( com_developer->integer )
+		{
+			static int lastReport;
+			if ( Sys_Milliseconds() - lastReport > 3000 )
+			{
+				lastReport = Sys_Milliseconds();
+				Com_DPrintf( "Sound: room: %d of %d rays hit, mean %.1fm, nearest %.1fm, absorption %.2f, rt60 %.2fs, hf %.2f, tail %.2f\n",
+							hits, ROOM_RAYS, meanDistance, nearest, absorption, params.rt60, params.hfRatio, params.lateLevel );
+			}
+		}
+	}
+
+	if ( immediately )
+		S_Reverb_SetNow( &params );
+	else
+		S_Reverb_SetTarget( &params );
+}
+
+// How much of a sound goes to the reverb: the reverb of a room is about as loud for far sounds as for near ones, so
+// the sound is attenuated by less than the direct sound is (its volume before and after the distance is allowed for)
+static int S_ReverbSend( float master, float direct )
+{
+	if ( !s_reverbActive || master <= 0.0f )
+		return 0;
+
+	int send = (int)sqrtf( master * direct );
+	return ( send > 255 ) ? 255 : send;
+}
+
+// Lets the sound of a channel be muffled when there is a wall between it and the listener, gradually (it is looked
+// at a few times a second, and the muffling follows at its own pace)
+static void S_UpdateObstruction( channel_t *ch, const vec3_t origin, int now, float seconds )
+{
+	if ( !s_reverbActive )
+	{
+		ch->obstruct = ch->obstructTarget = 0.0f;
+		return;
+	}
+
+	if ( now >= ch->obstructNextTime )
+	{
+		trace_t trace;
+		const qboolean bNew = (qboolean)( ch->obstructNextTime == 0 );	// the sound has only just started
+
+		CM_BoxTrace( &trace, listener_origin, origin, vec3_origin, vec3_origin, 0, CONTENTS_SOLID );
+		ch->obstructTarget = ( !trace.startsolid && trace.fraction < 0.98f ) ? 1.0f : 0.0f;
+		ch->obstructNextTime = now + 120 + ( ch - s_channels ) * 5;	// (not all in the same frame)
+
+		if ( bNew )
+			ch->obstruct = ch->obstructTarget;	// (it shouldn't start loud and then be muffled)
+	}
+
+	const float step = 6.0f * seconds;
+	if ( ch->obstruct < ch->obstructTarget )
+		ch->obstruct = Q_min( ch->obstruct + step, ch->obstructTarget );
+	else
+		ch->obstruct = Q_max( ch->obstruct - step, ch->obstructTarget );
+}
+
 // returns qtrue if the sound is to be positioned binaurally, in which case left_vol and right_vol are the same (the
 // distance has been allowed for, the sides are the HRTF's business) and dirOut, if given, is the direction of the
 // sound relative to the listener (x right, y ahead, z up)
@@ -1250,6 +1493,8 @@ void S_StopAllSounds(void) {
 	S_StopBackgroundTrack();
 
 	S_StopSounds();
+
+	s_reverbRate = 0;	// (the tail of the last room is cleared when the reverb is next set up)
 }
 
 /*
@@ -1421,6 +1666,7 @@ void S_AddLoopSounds (void)
 		{
 			S_HrtfSetupLoop( ch, loop->sfx, dirTotal, loopFrame );
 		}
+		ch->reverbvol = S_ReverbSend( (float)loop->volume, (float)left_total );
 		ch->thesfx = loop->sfx;
 
 		// you cannot use MP3 files here because they offer only streaming access, not random
@@ -1855,6 +2101,25 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 		return;
 	}
 
+		// the room: the reverb is set up for the output rate (and cleared) the first time, and the room looked at a few
+		// times a second
+		const int now = Sys_Milliseconds();
+		static int lastRespatialize;
+		const float seconds = Com_Clamp( 0.0f, 0.2f, ( now - lastRespatialize ) * 0.001f );
+		lastRespatialize = now;
+
+		s_reverbActive = (qboolean)( s_reverb->integer && dma.channels == 2 && S_ReverbPrepare() );
+		{
+			const float target = ( s_reverbActive && inwater ) ? 1.0f : 0.0f;
+			if ( s_underwater < target )		s_underwater = Q_min( s_underwater + 4.0f * seconds, target );
+			else								s_underwater = Q_max( s_underwater - 4.0f * seconds, target );
+		}
+		if ( s_reverbActive && now >= s_roomNextAnalysis )
+		{
+			S_AnalyseRoom( head, inwater, (qboolean)( s_roomNextAnalysis == 0 ) );
+			s_roomNextAnalysis = now + 100;
+		}
+
 		// binaural positioning needs the filters made for the output rate (the first time this is wanted, and again if
 		// the rate changed), and stereo output
 		const qboolean bWasHrtf = s_hrtfActive;
@@ -1886,6 +2151,10 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 				ch->leftvol = ch->master_vol;
 				ch->rightvol = ch->master_vol;
 				ch->hrtf = qfalse;
+
+				// the player's own sounds are in the room too, announcements and the like are not
+				ch->reverbvol = ( ch->entchannel == CHAN_VOICE_GLOBAL || ch->entchannel == CHAN_ANNOUNCER || !s_reverbActive ) ? 0 : (int)( ch->master_vol * 0.7f );
+				ch->obstruct = ch->obstructTarget = 0.0f;
 			} else {
 				const vec3_t	*origin;
 				if (ch->fixed_origin) {
@@ -1903,6 +2172,9 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 				{
 					ch->hrtf = qfalse;
 				}
+
+				ch->reverbvol = S_ReverbSend( (float)ch->master_vol, 0.5f * ( ch->leftvol + ch->rightvol ) );
+				S_UpdateObstruction( ch, *origin, now, seconds );
 			}
 
 			//NOTE: Made it so that voice sounds keep playing, even out of range
