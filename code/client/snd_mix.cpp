@@ -187,27 +187,6 @@ CHANNEL MIXING
 
 ===============================================================================
 */
-static void S_PaintChannelFrom16( channel_t *ch, const sfx_t *sfx, int count, int sampleOffset, int bufferOffset )
-{
-	portable_samplepair_t	*pSamplesDest;
-	int iData;
-
-
-	int iLeftVol	= ch->leftvol  * snd_vol;
-	int iRightVol	= ch->rightvol * snd_vol;
-
-	pSamplesDest	= &paintbuffer[ bufferOffset ];
-
-	for ( int i=0 ; i<count ; i++ )
-	{
-		iData = sfx->pSoundData[ sampleOffset++ ];
-
-		pSamplesDest[i].left  += (iData * iLeftVol )>>8;
-		pSamplesDest[i].right += (iData * iRightVol)>>8;
-	}
-}
-
-
 // The most decoded samples a single request to the MP3 decoder's sliding window should ask for (see
 // MP3SlidingDecodeBuffer in snd_local.h), which also sizes the source buffer used when converting the rate.
 #define MP3_PAINT_MAX_SOURCE	3000
@@ -257,52 +236,56 @@ static void S_FetchMP3Samples( channel_t *ch, int count, int sampleOffset, short
 	}
 }
 
-void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset )
+// What the sounds that are to have reverb send to it, mixed together (mono, on the scale of the paint buffer)
+static int	reverbBuffer[PAINTBUFFER_SIZE];
+
+// The sound of a channel being muffled by something between the sound and the listener (ch->obstruct, 0 to 1): the
+// highs are filtered away, and it is a little quieter
+static void S_ObstructSamples( channel_t *ch, const short *src, int count, short *dst )
 {
-	int data;
-	int leftvol, rightvol;
-	signed short *sfx;
-	int	i;
-	portable_samplepair_t	*samp;
-	static short tempMP3Buffer[PAINTBUFFER_SIZE];
+	const float cutoff = 18000.0f * powf( 0.05f, ch->obstruct );	// 18kHz down to 900Hz
+	const float a = 1.0f - expf( -2.0f * (float)M_PI * cutoff / dma.speed );
+	const float gain = 1.0f - 0.4f * ch->obstruct;
+	float state = ch->lpState;
 
-	S_FetchMP3Samples( ch, count, sampleOffset, tempMP3Buffer );
-
-	leftvol = ch->leftvol*snd_vol;
-	rightvol = ch->rightvol*snd_vol;
-	sfx = tempMP3Buffer;
-
-	samp = &paintbuffer[ bufferOffset ];
-
-	while ( count & 3 ) {
-		data = *sfx;
-		samp->left += (data * leftvol)>>8;
-		samp->right += (data * rightvol)>>8;
-
-		sfx++;
-		samp++;
-		count--;
+	for ( int i = 0; i < count; i++ )
+	{
+		state += a * ( src[i] - state );
+		dst[i] = (short)( state * gain );
 	}
-
-	for ( i=0 ; i<count ; i += 4 ) {
-		data = sfx[i];
-		samp[i].left += (data * leftvol)>>8;
-		samp[i].right += (data * rightvol)>>8;
-
-		data = sfx[i+1];
-		samp[i+1].left += (data * leftvol)>>8;
-		samp[i+1].right += (data * rightvol)>>8;
-
-		data = sfx[i+2];
-		samp[i+2].left += (data * leftvol)>>8;
-		samp[i+2].right += (data * rightvol)>>8;
-
-		data = sfx[i+3];
-		samp[i+3].left += (data * leftvol)>>8;
-		samp[i+3].right += (data * rightvol)>>8;
-	}
+	ch->lpState = state;
 }
 
+// Adds count mono samples to what the channel sends to the reverb
+static inline void S_SendToReverb( const channel_t *ch, const short *src, int count, int bufferOffset )
+{
+	if ( !s_reverbActive || ch->reverbvol <= 0 )
+		return;
+
+	const int rvol = ch->reverbvol * snd_vol;
+	int *pDest = &reverbBuffer[bufferOffset];
+
+	for ( int i = 0; i < count; i++ )
+		pDest[i] += (src[i] * rvol)>>8;
+}
+
+// Paints count mono samples from the position of the channel, panned between the speakers by its volumes
+static void S_PaintMono( channel_t *ch, const short *src, int count, int bufferOffset )
+{
+	const int leftvol = ch->leftvol*snd_vol;
+	const int rightvol = ch->rightvol*snd_vol;
+	portable_samplepair_t *samp = &paintbuffer[ bufferOffset ];
+
+	for ( int i = 0; i < count; i++ )
+	{
+		const int data = src[i];
+
+		samp[i].left += (data * leftvol)>>8;
+		samp[i].right += (data * rightvol)>>8;
+	}
+
+	S_SendToReverb( ch, src, count, bufferOffset );
+}
 
 // Paints count (<= PAINTBUFFER_SIZE) mono samples as if they came from the direction of the channel (s_hrtf), by
 // filtering them differently for each ear. The channel's volumes are the same for both ears here (the distance).
@@ -330,6 +313,8 @@ static void S_PaintChannelHRTF( channel_t *ch, const short *src, int count, int 
 		pSamplesDest[i].left  += (l * iLeftVol )>>8;
 		pSamplesDest[i].right += (r * iRightVol)>>8;
 	}
+
+	S_SendToReverb( ch, src, count, bufferOffset );
 }
 
 
@@ -337,33 +322,38 @@ static void S_PaintChannelHRTF( channel_t *ch, const short *src, int count, int 
 //
 void ChannelPaint(channel_t *ch, sfx_t *sc, int count, int sampleOffset, int bufferOffset)
 {
+	static short	mp3Samples[PAINTBUFFER_SIZE], obstructed[PAINTBUFFER_SIZE];
+	const short		*src;
+
 	switch (sc->eSoundCompressionMethod)
 	{
 		case ct_16:
 
-			if ( ch->hrtf && ch->pHrtfState )
-				S_PaintChannelHRTF		(ch, sc->pSoundData + sampleOffset, count, bufferOffset);
-			else
-				S_PaintChannelFrom16	(ch, sc, count, sampleOffset, bufferOffset);
+			src = sc->pSoundData + sampleOffset;
 			break;
 
 		case ct_MP3:
 
-			if ( ch->hrtf && ch->pHrtfState )
-			{
-				static short mono[PAINTBUFFER_SIZE];
-				S_FetchMP3Samples		(ch, count, sampleOffset, mono);
-				S_PaintChannelHRTF		(ch, mono, count, bufferOffset);
-			}
-			else
-				S_PaintChannelFromMP3	(ch, sc, count, sampleOffset, bufferOffset);
+			S_FetchMP3Samples( ch, count, sampleOffset, mp3Samples );
+			src = mp3Samples;
 			break;
 
 		default:
 
 			assert(0);	// debug aid, ignored in release. FIXME: Should we ERR_DROP here for badness-catch?
-			break;
+			return;
 	}
+
+	if ( ch->obstruct > 0.01f )
+	{
+		S_ObstructSamples( ch, src, count, obstructed );
+		src = obstructed;
+	}
+
+	if ( ch->hrtf && ch->pHrtfState )
+		S_PaintChannelHRTF( ch, src, count, bufferOffset );
+	else
+		S_PaintMono( ch, src, count, bufferOffset );
 }
 
 
@@ -415,6 +405,9 @@ void S_PaintChannels( int endtime ) {
 				paintbuffer[i-s_paintedtime].right = 0;
 			}
 		}
+
+		if ( s_reverbActive )
+			memset( reverbBuffer, 0, ( end - s_paintedtime ) * sizeof( int ) );
 
 		// paint in the channels.
 		ch = s_channels;
@@ -491,6 +484,39 @@ void S_PaintChannels( int endtime ) {
 			}
 		}
 */
+		if ( s_reverbActive )
+		{
+			// what the room does to the sounds that were sent to it, added to the mix
+			const int n = end - s_paintedtime;
+			float in[PAINTBUFFER_SIZE], wetLeft[PAINTBUFFER_SIZE], wetRight[PAINTBUFFER_SIZE];
+
+			for ( i = 0; i < n; i++ )
+				in[i] = (float)reverbBuffer[i];
+			S_Reverb_Process( in, n, wetLeft, wetRight );
+			for ( i = 0; i < n; i++ )
+			{
+				paintbuffer[i].left += (int)wetLeft[i];
+				paintbuffer[i].right += (int)wetRight[i];
+			}
+		}
+
+		if ( s_underwater > 0.01f )
+		{
+			// everything is muffled underwater: a low pass filter, from 20kHz (just under the surface) to 800Hz
+			static float stateLeft, stateRight;
+			const int n = end - s_paintedtime;
+			const float cutoff = 20000.0f * powf( 0.04f, s_underwater );
+			const float a = 1.0f - expf( -2.0f * (float)M_PI * cutoff / dma.speed );
+
+			for ( i = 0; i < n; i++ )
+			{
+				stateLeft += a * ( paintbuffer[i].left - stateLeft );
+				stateRight += a * ( paintbuffer[i].right - stateRight );
+				paintbuffer[i].left = (int)stateLeft;
+				paintbuffer[i].right = (int)stateRight;
+			}
+		}
+
 		// transfer out according to DMA format
 		S_TransferPaintBuffer( end );
 		s_paintedtime = end;
