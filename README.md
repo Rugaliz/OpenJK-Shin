@@ -57,6 +57,8 @@ Extract the contents of the file into the Jedi Academy `GameData/` folder. For S
 - [Compilation guide](https://github.com/JACoders/OpenJK/wiki/Compilation-guide)
 - [Debugging guide](https://github.com/JACoders/OpenJK/wiki/Debugging)
 
+This version uses [SDL3](https://libsdl.org) (3.2.0 or newer) for the window, input and sound. CMake uses the one installed on the system if there is one; if there isn't, or on Windows, configure with `-DUseInternalSDL3=ON` (the default on Windows) and it downloads and builds SDL3 itself, which needs an internet connection the first time. SDL2 is no longer supported.
+
 ### Contributing to OpenJK
 
 - [Fork](https://github.com/JACoders/OpenJK/fork) the project on GitHub
@@ -85,7 +87,7 @@ Leads:
 - [Cat](https://github.com/deepy) (infra)
 - [Didz](https://github.com/dionrhys)
 - [eezstreet](https://github.com/eezstreet)
-- exidl (SDL2, platform support)
+- exidl (SDL, platform support)
 - [ImperatorPrime](https://github.com/ImperatorPrime) (JK2)
 - [mrwonko](https://github.com/mrwonko)
 - [redsaurus](https://github.com/redsaurus)

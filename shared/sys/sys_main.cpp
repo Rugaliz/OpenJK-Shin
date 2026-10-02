@@ -32,6 +32,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "sys_public.h"
 #include "con_local.h"
 
+#ifndef DEDICATED
+#include <SDL3/SDL_main.h>	// (makes the entry point main() work on every platform, must be included in the file that has it)
+#endif
+
 static char binaryPath[ MAX_OSPATH ] = { 0 };
 static char installPath[ MAX_OSPATH ] = { 0 };
 
@@ -108,6 +112,8 @@ char *Sys_GetClipboardData( void ) {
 		return NULL;
 
 	char *cbText = SDL_GetClipboardText();
+	if ( !cbText )
+		return NULL;
 	size_t len = strlen( cbText ) + 1;
 
 	char *buf = (char *)Z_Malloc( len, TAG_CLIPBOARD );
@@ -211,7 +217,7 @@ static void Sys_ErrorDialog( const char *error )
 		fclose( fp );
 
 		const char *errorMessage = va( "%s\n\nThe crash log was written to %s", error, crashLogPath );
-		if ( SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Error", errorMessage, NULL ) < 0 )
+		if ( !SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Error", errorMessage, NULL ) )
 		{
 			fprintf( stderr, "%s", errorMessage );
 		}
@@ -224,7 +230,7 @@ static void Sys_ErrorDialog( const char *error )
 
 		const char *errorMessage = va( "%s\nCould not write the crash log file, but we printed it to stderr.\n"
 										"Try running the game using a command line interface.", error );
-		if ( SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Error", errorMessage, NULL ) < 0 )
+		if ( !SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Error", errorMessage, NULL ) )
 		{
 			// We really have hit rock bottom here :(
 			fprintf( stderr, "%s", errorMessage );
@@ -780,14 +786,11 @@ int main ( int argc, char* argv[] )
 	Com_Init (commandLine);
 
 #ifndef DEDICATED
-	SDL_version compiled;
-	SDL_version linked;
+	const int compiled = SDL_VERSION;
+	const int linked = SDL_GetVersion();
 
-	SDL_VERSION( &compiled );
-	SDL_GetVersion( &linked );
-
-	Com_Printf( "SDL Version Compiled: %d.%d.%d\n", compiled.major, compiled.minor, compiled.patch );
-	Com_Printf( "SDL Version Linked: %d.%d.%d\n", linked.major, linked.minor, linked.patch );
+	Com_Printf( "SDL Version Compiled: %d.%d.%d\n", SDL_VERSIONNUM_MAJOR( compiled ), SDL_VERSIONNUM_MINOR( compiled ), SDL_VERSIONNUM_MICRO( compiled ) );
+	Com_Printf( "SDL Version Linked: %d.%d.%d\n", SDL_VERSIONNUM_MAJOR( linked ), SDL_VERSIONNUM_MINOR( linked ), SDL_VERSIONNUM_MICRO( linked ) );
 #endif
 
 	// main game loop

@@ -64,13 +64,13 @@ option(UseUndefinedSanitizer "Whether to enable runtime Undefined Behavior sanit
 set(UseInternalZlibDefault   OFF)
 set(UseInternalPNGDefault    OFF)
 set(UseInternalJPEGDefault   OFF)
-set(UseInternalSDL2Default   OFF)
+set(UseInternalSDL3Default   OFF)
 
 if(UseInternalLibs OR WIN32)
   set(UseInternalZlibDefault   ON)
   set(UseInternalPNGDefault    ON)
   set(UseInternalJPEGDefault   ON)
-  set(UseInternalSDL2Default   ON)
+  set(UseInternalSDL3Default   ON)
 endif()
 
 if(APPLE)
@@ -81,7 +81,7 @@ endif()
 option(UseInternalZlib   "If set, use bundled zlib."    ${UseInternalZlibDefault})
 option(UseInternalPNG    "If set, use bundled libpng."  ${UseInternalPNGDefault})
 option(UseInternalJPEG   "If set, use bundled libjpeg." ${UseInternalJPEGDefault})
-option(UseInternalSDL2   "If set, use bundled SDL2."    ${UseInternalSDL2Default})
+option(UseInternalSDL3   "If set, download and build SDL3 instead of using the one installed on the system." ${UseInternalSDL3Default})
 
 #=============================================================================
 #
@@ -395,6 +395,26 @@ if(UseInternalPNG)
   add_subdirectory(lib/libpng)
 else()
   find_package(PNG REQUIRED)
+endif()
+
+# SDL3 (window, input, audio). Either the one installed on the system (version 3.2.0 or newer), or one that is
+# downloaded and built as part of this build (static, so there is nothing extra to ship).
+if(UseInternalSDL3)
+	include(FetchContent)
+	set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+	set(SDL_STATIC ON CACHE BOOL "" FORCE)
+	set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+	set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+	set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+	set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+	FetchContent_Declare(SDL3
+		URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.16/SDL3-3.4.16.tar.gz
+		URL_HASH SHA256=7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68
+		DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+		)
+	FetchContent_MakeAvailable(SDL3)
+else()
+	find_package(SDL3 3.2.0 REQUIRED CONFIG)
 endif()
 
 # Always use bundled minizip (sets MINIZIP_{LIBRARIES,INCLUDE_DIR})
