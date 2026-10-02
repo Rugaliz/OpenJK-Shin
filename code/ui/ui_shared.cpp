@@ -1034,20 +1034,16 @@ Hacks to fix issues with Team Arena menu scripts
 ===============
 */
 static void Item_ApplyHacks( itemDef_t *item ) {
-#if !defined(_WIN32) || ( defined(_WIN32) && defined(idx64) )
-	// Fix length of favorite address in createfavorite.menu
+	// The stock sound menu has a row for EAX, the hardware reverb of the sound cards of the time, which the sound
+	// system here doesn't use. Use the row for binaural positioning for headphones (s_hrtf) instead.
 	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "s_UseOpenAL" ) ) {
-		if( item->parent )
-		{
-			menuDef_t *parent = (menuDef_t *)item->parent;
-			VectorSet4( parent->disableColor, 0.5f, 0.5f, 0.5f, 1.0f );
-			item->disabled = qtrue;
-			// Just in case it had focus
-			item->window.flags &= ~WINDOW_MOUSEOVER;
-			Com_Printf( "Disabling eax field because current platform does not support EAX.\n");
-		}
+		item->cvar = String_Alloc( "s_hrtf" );
+		item->text = (char *)String_Alloc( "HEADPHONE 3D (HRTF)" );
+		item->descText = String_Alloc( "Positions sounds in 3D around your head. For headphones, leave off for speakers." );
+		item->action = String_Alloc( "play \"sound/interface/button1.wav\" ;" );	// (it used to restart the sound system)
 	}
 
+	// ... and the EAX logo that goes with it is not wanted
 	if ( item->type == ITEM_TYPE_TEXT && item->window.name && !Q_stricmp( item->window.name, "eax_icon") && item->cvarTest && !Q_stricmp( item->cvarTest, "s_UseOpenAL" ) && item->enableCvar && (item->cvarFlags & CVAR_HIDE) ) {
 		if( item->parent )
 		{
@@ -1056,10 +1052,8 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 			item->disabled = item->disabledHidden = qtrue;
 			// Just in case it had focus
 			item->window.flags &= ~WINDOW_MOUSEOVER;
-			Com_Printf( "Hiding eax_icon object because current platform does not support EAX.\n");
 		}
 	}
-#endif
 
 	if ( item->type == ITEM_TYPE_MULTI && item->window.name && !Q_stricmp( item->window.name, "sound_quality") ) {
 		multiDef_t *multiPtr = (multiDef_t *)item->typeData;

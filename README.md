@@ -93,3 +93,7 @@ Leads:
 - [Sil](https://github.com/TheSil)
 - [smcv](https://github.com/smcv) (debian packaging)
 - [Tristamus](https://tristamus.com>) (icon)
+
+## Third-party data
+
+- The binaural (HRTF) sound positioning uses the KEMAR head measurements by Bill Gardner and Keith Martin, MIT Media Lab (Copyright 1994, free to use with attribution), see [docs/hrtf.md](docs/hrtf.md).

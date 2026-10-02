@@ -182,6 +182,7 @@ cvar_t *s_debugdynamic;
 cvar_t *s_dynamix;
 cvar_t *s_initsound;
 cvar_t *s_khz;
+cvar_t *s_hrtf;
 cvar_t *s_quality;
 cvar_t *s_language;	// note that this is distinct from "g_language"
 cvar_t *s_lip_threshold_1;
@@ -321,6 +322,7 @@ void S_Init( void ) {
 	s_debugdynamic      = Cvar_Get( "s_debugdynamic",      "0",       0 );
 	s_initsound         = Cvar_Get( "s_initsound",         "1",       CVAR_ARCHIVE | CVAR_LATCH );
 	s_khz               = Cvar_Get( "s_khz",               "0",       CVAR_ARCHIVE | CVAR_LATCH );	// 0 or 44 = rate of the output device, 11 or 22 = low rates, or a rate in Hz
+	s_hrtf              = Cvar_Get( "s_hrtf",              "0",       CVAR_ARCHIVE );	// 1 = binaural positioning for headphones
 	s_quality           = Cvar_Get( "s_quality",           "2",       CVAR_ARCHIVE );	// 0 = fast, 1 = good, 2 = best
 	s_language          = Cvar_Get( "s_language",          "english", CVAR_ARCHIVE | CVAR_NORESTART );
 	s_lip_threshold_1   = Cvar_Get( "s_threshold1",        "0.3",     0 );
@@ -756,7 +758,89 @@ S_SpatializeOrigin
 Used for spatializing s_channels
 =================
 */
-static void S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left_vol, int *right_vol, soundChannel_t channel)
+// Binaural positioning (s_hrtf) is in use this frame. Set by S_Respatialize.
+static qboolean	s_hrtfActive = qfalse;
+
+// One shot sounds keep their filter history here, per channel; looping sounds (whose channels are cleared every frame)
+// in a table by sfx, so the history carries on from frame to frame
+static hrtfState_t	s_hrtfPool[MAX_CHANNELS];
+
+#define MAX_HRTF_LOOPS	48
+static struct
+{
+	const sfx_t	*sfx;
+	int			lastFrame;
+	hrtfState_t	state;
+} s_hrtfLoops[MAX_HRTF_LOOPS];
+
+// direction (x right, y ahead, z up, as given by S_SpatializeOrigin) to azimuth and elevation in degrees
+static void S_HrtfAngles( const vec3_t dir, float *azimuth, float *elevation )
+{
+	const float len = sqrtf( dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2] );
+
+	*azimuth = 0.0f;
+	*elevation = 0.0f;
+	if ( len < 0.0001f )
+	{
+		return;	// right on top of the listener, call it straight ahead
+	}
+
+	float up = dir[2] / len;
+	if ( up > 1.0f )		up = 1.0f;
+	else if ( up < -1.0f )	up = -1.0f;
+
+	*elevation = asinf( up ) * (180.0f / M_PI);
+	if ( fabsf( dir[0] ) > 0.0001f || fabsf( dir[1] ) > 0.0001f )
+	{
+		*azimuth = atan2f( dir[0], dir[1] ) * (180.0f / M_PI);
+	}
+}
+
+static void S_HrtfSetupChannel( channel_t *ch, int channelNum, const vec3_t dir )
+{
+	ch->hrtf = qtrue;
+	S_HrtfAngles( dir, &ch->hrtfAzimuth, &ch->hrtfElevation );
+	ch->pHrtfState = &s_hrtfPool[channelNum];
+	if ( !ch->hrtfInit )
+	{
+		S_HRTF_ResetState( ch->pHrtfState );
+		ch->hrtfInit = qtrue;
+	}
+}
+
+static void S_HrtfSetupLoop( channel_t *ch, const sfx_t *sfx, const vec3_t dir, int frame )
+{
+	int i, use = -1, oldest = 0;
+
+	for ( i = 0; i < MAX_HRTF_LOOPS; i++ )
+	{
+		if ( s_hrtfLoops[i].sfx == sfx && s_hrtfLoops[i].lastFrame >= frame - 2 )
+		{
+			use = i;	// carried on from the last frames
+			break;
+		}
+		if ( s_hrtfLoops[i].lastFrame < s_hrtfLoops[oldest].lastFrame )
+		{
+			oldest = i;
+		}
+	}
+	if ( use < 0 )
+	{
+		use = oldest;
+		s_hrtfLoops[use].sfx = sfx;
+		S_HRTF_ResetState( &s_hrtfLoops[use].state );
+	}
+	s_hrtfLoops[use].lastFrame = frame;
+
+	ch->hrtf = qtrue;
+	S_HrtfAngles( dir, &ch->hrtfAzimuth, &ch->hrtfElevation );
+	ch->pHrtfState = &s_hrtfLoops[use].state;
+}
+
+// returns qtrue if the sound is to be positioned binaurally, in which case left_vol and right_vol are the same (the
+// distance has been allowed for, the sides are the HRTF's business) and dirOut, if given, is the direction of the
+// sound relative to the listener (x right, y ahead, z up)
+static qboolean S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left_vol, int *right_vol, soundChannel_t channel, vec3_t dirOut = NULL)
 {
     vec_t		dot;
     vec_t		dist;
@@ -799,6 +883,24 @@ static void S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left
 
 	dot = -DotProduct(listener_axis[1], source_vec);
 
+	if (s_hrtfActive)
+	{
+		if (dirOut)
+		{
+			dirOut[0] = dot;										// right
+			dirOut[1] = DotProduct(listener_axis[0], source_vec);	// ahead
+			dirOut[2] = DotProduct(listener_axis[2], source_vec);	// up
+		}
+
+		scale = (1.0f - dist);
+		*right_vol = *left_vol = (int) (master_vol * scale);
+		if (*right_vol < 0)
+		{
+			*right_vol = *left_vol = 0;
+		}
+		return qtrue;
+	}
+
 	if (dma.channels == 1)	// || !dist_mult)
 	{ // no attenuation = no spatialization
 		rscale = SOUND_FMAXVOL;
@@ -834,6 +936,8 @@ static void S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left
 	{
 		*left_vol = 0;
 	}
+
+	return qfalse;
 }
 
 // =======================================================================
@@ -1277,6 +1381,8 @@ void S_AddLoopSounds (void)
 
 		// find the total contribution of all sounds of this type
 		left_total = right_total = 0;
+		vec3_t	dirTotal = { 0, 0, 0 };	// where they come from, for binaural positioning (louder ones count for more)
+		qboolean bBinaural = qfalse;
 
 		for ( j = i ; j < numLoopSounds ; j++) {
 			loop2 = &loopSounds[j];
@@ -1285,7 +1391,12 @@ void S_AddLoopSounds (void)
 			}
 			loop2->mergeFrame = loopFrame;	// don't check this again later
 
-			S_SpatializeOrigin( loop2->origin, loop2->volume, &left, &right, loop2->entchan);
+			vec3_t	dir;
+			if ( S_SpatializeOrigin( loop2->origin, loop2->volume, &left, &right, loop2->entchan, dir) )
+			{
+				bBinaural = qtrue;
+				VectorMA( dirTotal, (float)left, dir, dirTotal );
+			}
 
 			left_total += left;
 			right_total += right;
@@ -1306,6 +1417,10 @@ void S_AddLoopSounds (void)
 		ch->leftvol = left_total;
 		ch->rightvol = right_total;
 		ch->loopSound = qtrue;	// remove next frame
+		if ( bBinaural )
+		{
+			S_HrtfSetupLoop( ch, loop->sfx, dirTotal, loopFrame );
+		}
 		ch->thesfx = loop->sfx;
 
 		// you cannot use MP3 files here because they offer only streaming access, not random
@@ -1740,6 +1855,15 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 		return;
 	}
 
+		// binaural positioning needs the filters made for the output rate (the first time this is wanted, and again if
+		// the rate changed), and stereo output
+		const qboolean bWasHrtf = s_hrtfActive;
+		s_hrtfActive = (qboolean)( s_hrtf->integer && dma.channels == 2 && S_HRTF_Init( dma.speed ) );
+		if ( s_hrtfActive != bWasHrtf )
+		{
+			Com_DPrintf( "Sound: binaural (HRTF) positioning %s (%d taps at %d Hz)\n", s_hrtfActive ? "on" : "off", S_HRTF_NumTaps(), dma.speed );
+		}
+
 		listener_number = entityNum;
 		VectorCopy(head, listener_origin);
 		VectorCopy(axis[0], listener_axis[0]);
@@ -1761,6 +1885,7 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 			if (ch->entnum == listener_number || ch->entchannel == CHAN_VOICE_GLOBAL || ch->entchannel == CHAN_ANNOUNCER) {
 				ch->leftvol = ch->master_vol;
 				ch->rightvol = ch->master_vol;
+				ch->hrtf = qfalse;
 			} else {
 				const vec3_t	*origin;
 				if (ch->fixed_origin) {
@@ -1769,7 +1894,15 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 					origin = &s_entityPosition[ ch->entnum ];
 				}
 
-				S_SpatializeOrigin (*origin, (float)ch->master_vol, &ch->leftvol, &ch->rightvol, ch->entchannel);
+				vec3_t	dir;
+				if ( S_SpatializeOrigin (*origin, (float)ch->master_vol, &ch->leftvol, &ch->rightvol, ch->entchannel, dir) )
+				{
+					S_HrtfSetupChannel( ch, i, dir );
+				}
+				else
+				{
+					ch->hrtf = qfalse;
+				}
 			}
 
 			//NOTE: Made it so that voice sounds keep playing, even out of range
@@ -1782,6 +1915,23 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 
 		// add loopsounds
 		S_AddLoopSounds ();
+
+		if ( s_hrtfActive && com_developer->integer )
+		{
+			static int iLastReport;
+			if ( Sys_Milliseconds() - iLastReport > 5000 )
+			{
+				int nBinaural = 0;
+				ch = s_channels;
+				for ( i = 0 ; i < MAX_CHANNELS ; i++, ch++ )
+				{
+					if ( ch->thesfx && ch->hrtf )
+						nBinaural++;
+				}
+				Com_DPrintf( "Sound: %d sounds positioned binaurally\n", nBinaural );
+				iLastReport = Sys_Milliseconds();
+			}
+		}
 
 	return;
 }
