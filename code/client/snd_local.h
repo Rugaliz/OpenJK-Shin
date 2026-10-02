@@ -30,6 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../qcommon/qcommon.h"
 #include "snd_public.h"
 #include "snd_resample.h"
+#include "snd_hrtf.h"
 #include "../mp3code/mp3struct.h"
 
 
@@ -111,7 +112,15 @@ typedef struct
 	byte		MP3SlidingDecodeBuffer[50000/*12000*/];	// typical back-request = -3072, so roughly double is 6000 (safety), then doubled again so the 6K pos is in the middle of the buffer)
 	int			iMP3SlidingDecodeWritePos;
 	int			iMP3SlidingDecodeWindowPos;
-
+	//
+	// binaural positioning (s_hrtf): the direction of the sound relative to the listener, set by S_Respatialize,
+	// and the filter history of the sound. For a sound that persists (a one shot sound) the state lives in a pool
+	// indexed by channel, for a looping sound (whose channel is made afresh every frame) in a table by sfx.
+	qboolean	hrtf;
+	qboolean	hrtfInit;		// the pool entry of a one shot sound has been cleared for this sound
+	float		hrtfAzimuth;	// degrees, 0 = ahead, positive to the right
+	float		hrtfElevation;	// degrees, positive upwards
+	hrtfState_t	*pHrtfState;
 
 } channel_t;
 
@@ -148,6 +157,7 @@ extern	dma_t	dma;
 #define	MUSIC_RAW_LOOKAHEAD	16384
 extern	portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 
+extern	cvar_t	*s_hrtf;			// 1 = position sounds binaurally (head-related transfer functions) for headphones
 extern	cvar_t	*s_quality;			// 0 fast, 1 good, 2 best: quality of sample rate conversion when loading sounds
 portable_samplepair_t *S_GetRawSamplePointer();	// TA added this, but it just returns the s_rawsamples[] array above. Oh well...
 

@@ -212,6 +212,51 @@ static void S_PaintChannelFrom16( channel_t *ch, const sfx_t *sfx, int count, in
 // MP3SlidingDecodeBuffer in snd_local.h), which also sizes the source buffer used when converting the rate.
 #define MP3_PAINT_MAX_SOURCE	3000
 
+// Gets count (<= PAINTBUFFER_SIZE) samples of an MP3 sound, starting at sampleOffset, at the output rate
+static void S_FetchMP3Samples( channel_t *ch, int count, int sampleOffset, short *dst )
+{
+	if ( dma.speed == MP3_SAMPLE_RATE )
+	{
+		MP3Stream_GetSamples( ch, sampleOffset, count, dst, qfalse );	// qfalse = not stereo
+		return;
+	}
+
+	// The MP3 is always decoded at its own rate, so convert to the output rate here. The position of every output
+	// sample is worked out from its number alone (so, unlike the pieces of a stream, the pieces this is called
+	// with need nothing carried over between them), and only the source samples around it are decoded.
+	static short srcBuffer[MP3_PAINT_MAX_SOURCE + 8];
+	const double dStep = (double)MP3_SAMPLE_RATE / dma.speed;	// source samples per output sample
+	resampleFilter_t filter;
+	S_Resample_SetupFilter( &filter, dStep );
+
+	int maxRun = (int)( ( MP3_PAINT_MAX_SOURCE - 2.0 * filter.support - 8.0 ) / dStep );
+	if ( maxRun < 1 )
+		maxRun = 1;
+
+	while ( count > 0 )
+	{
+		const int n = ( count < maxRun ) ? count : maxRun;
+		const int iFirst = (int)ceil( sampleOffset * dStep - filter.support ) - 1;
+		const int iLast = (int)floor( ( sampleOffset + n - 1 ) * dStep + filter.support ) + 1;
+		const int iFetchFirst = ( iFirst < 0 ) ? 0 : iFirst;	// before the start of the sound is silence
+		const int iFetchCount = iLast - iFetchFirst + 1;
+
+		MP3Stream_GetSamples( ch, iFetchFirst, iFetchCount, srcBuffer, qfalse );	// qfalse = not stereo
+
+		for ( int i = 0; i < n; i++ )
+		{
+			float f;
+			S_Resample_Interp( srcBuffer, 1, iFetchCount, ( sampleOffset + i ) * dStep - iFetchFirst, &filter, &f );
+			if ( f > 32767.0f )			f = 32767.0f;
+			else if ( f < -32768.0f )	f = -32768.0f;
+			*dst++ = (short)floorf( f + 0.5f );
+		}
+
+		sampleOffset += n;
+		count -= n;
+	}
+}
+
 void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset )
 {
 	int data;
@@ -221,56 +266,13 @@ void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampl
 	portable_samplepair_t	*samp;
 	static short tempMP3Buffer[PAINTBUFFER_SIZE];
 
+	S_FetchMP3Samples( ch, count, sampleOffset, tempMP3Buffer );
+
 	leftvol = ch->leftvol*snd_vol;
 	rightvol = ch->rightvol*snd_vol;
-	samp = &paintbuffer[ bufferOffset ];
-
-	if ( dma.speed != MP3_SAMPLE_RATE )
-	{
-		// The MP3 is always decoded at its own rate, so convert to the output rate here. The position of every output
-		// sample is worked out from its number alone (so, unlike the pieces of a stream, the pieces this is called
-		// with need nothing carried over between them), and only the source samples around it are decoded.
-		static short srcBuffer[MP3_PAINT_MAX_SOURCE + 8];
-		const double dStep = (double)MP3_SAMPLE_RATE / dma.speed;	// source samples per output sample
-		resampleFilter_t filter;
-		S_Resample_SetupFilter( &filter, dStep );
-
-		int maxRun = (int)( ( MP3_PAINT_MAX_SOURCE - 2.0 * filter.support - 8.0 ) / dStep );
-		if ( maxRun < 1 )
-			maxRun = 1;
-
-		while ( count > 0 )
-		{
-			const int n = ( count < maxRun ) ? count : maxRun;
-			const int iFirst = (int)ceil( sampleOffset * dStep - filter.support ) - 1;
-			const int iLast = (int)floor( ( sampleOffset + n - 1 ) * dStep + filter.support ) + 1;
-			const int iFetchFirst = ( iFirst < 0 ) ? 0 : iFirst;	// before the start of the sound is silence
-			const int iFetchCount = iLast - iFetchFirst + 1;
-
-			MP3Stream_GetSamples( ch, iFetchFirst, iFetchCount, srcBuffer, qfalse );	// qfalse = not stereo
-
-			for ( i = 0; i < n; i++ )
-			{
-				float f;
-				S_Resample_Interp( srcBuffer, 1, iFetchCount, ( sampleOffset + i ) * dStep - iFetchFirst, &filter, &f );
-				if ( f > 32767.0f )			f = 32767.0f;
-				else if ( f < -32768.0f )	f = -32768.0f;
-				data = (int)floorf( f + 0.5f );
-
-				samp->left += (data * leftvol)>>8;
-				samp->right += (data * rightvol)>>8;
-				samp++;
-			}
-
-			sampleOffset += n;
-			count -= n;
-		}
-		return;
-	}
-
-	MP3Stream_GetSamples( ch, sampleOffset, count, tempMP3Buffer, qfalse );	// qfalse = not stereo
-
 	sfx = tempMP3Buffer;
+
+	samp = &paintbuffer[ bufferOffset ];
 
 	while ( count & 3 ) {
 		data = *sfx;
@@ -302,6 +304,35 @@ void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampl
 }
 
 
+// Paints count (<= PAINTBUFFER_SIZE) mono samples as if they came from the direction of the channel (s_hrtf), by
+// filtering them differently for each ear. The channel's volumes are the same for both ears here (the distance).
+static void S_PaintChannelHRTF( channel_t *ch, const short *src, int count, int bufferOffset )
+{
+	float	left[PAINTBUFFER_SIZE], right[PAINTBUFFER_SIZE];
+	hrtfFilter_t	filter;
+
+	S_HRTF_GetFilter( ch->hrtfAzimuth, ch->hrtfElevation, &filter );
+	S_HRTF_Process( ch->pHrtfState, &filter, src, count, left, right );
+
+	const int iLeftVol	= ch->leftvol  * snd_vol;
+	const int iRightVol	= ch->rightvol * snd_vol;
+	portable_samplepair_t *pSamplesDest = &paintbuffer[ bufferOffset ];
+
+	for ( int i = 0; i < count; i++ )
+	{
+		int l = (int)floorf( left[i] + 0.5f );
+		int r = (int)floorf( right[i] + 0.5f );
+		if ( l > 32767 )		l = 32767;
+		else if ( l < -32768 )	l = -32768;
+		if ( r > 32767 )		r = 32767;
+		else if ( r < -32768 )	r = -32768;
+
+		pSamplesDest[i].left  += (l * iLeftVol )>>8;
+		pSamplesDest[i].right += (r * iRightVol)>>8;
+	}
+}
+
+
 // subroutinised to save code dup (called twice)	-ste
 //
 void ChannelPaint(channel_t *ch, sfx_t *sc, int count, int sampleOffset, int bufferOffset)
@@ -310,12 +341,22 @@ void ChannelPaint(channel_t *ch, sfx_t *sc, int count, int sampleOffset, int buf
 	{
 		case ct_16:
 
-			S_PaintChannelFrom16		(ch, sc, count, sampleOffset, bufferOffset);
+			if ( ch->hrtf && ch->pHrtfState )
+				S_PaintChannelHRTF		(ch, sc->pSoundData + sampleOffset, count, bufferOffset);
+			else
+				S_PaintChannelFrom16	(ch, sc, count, sampleOffset, bufferOffset);
 			break;
 
 		case ct_MP3:
 
-			S_PaintChannelFromMP3		(ch, sc, count, sampleOffset, bufferOffset);
+			if ( ch->hrtf && ch->pHrtfState )
+			{
+				static short mono[PAINTBUFFER_SIZE];
+				S_FetchMP3Samples		(ch, count, sampleOffset, mono);
+				S_PaintChannelHRTF		(ch, mono, count, bufferOffset);
+			}
+			else
+				S_PaintChannelFromMP3	(ch, sc, count, sampleOffset, bufferOffset);
 			break;
 
 		default:
