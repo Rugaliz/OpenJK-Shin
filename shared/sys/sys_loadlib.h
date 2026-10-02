@@ -36,11 +36,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #		define Sys_LibraryError() dlerror()
 #	endif
 #else
-#	include <SDL.h>
-#	include <SDL_loadso.h>
-#	define Sys_LoadLibrary(f) SDL_LoadObject(f)
-#	define Sys_UnloadLibrary(h) SDL_UnloadObject(h)
-#	define Sys_LoadFunction(h,fn) SDL_LoadFunction(h,fn)
+#	include <SDL3/SDL.h>
+#	include <SDL3/SDL_loadso.h>
+#	define Sys_LoadLibrary(f) ((void *)SDL_LoadObject(f))
+#	define Sys_UnloadLibrary(h) SDL_UnloadObject((SDL_SharedObject *)(h))
+#	define Sys_LoadFunction(h,fn) ((void *)SDL_LoadFunction((SDL_SharedObject *)(h),fn))
 #	define Sys_LibraryError() SDL_GetError()
 #endif
 

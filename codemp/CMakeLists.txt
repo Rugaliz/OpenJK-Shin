@@ -364,35 +364,7 @@ if(BuildMPEngine)
 		set(MPEngineLibraries ${MPEngineLibraries} ${OPENGL_LIBRARIES})
 	endif()
 
-	if(UseInternalSDL2)
-		if(CMAKE_SIZEOF_VOID_P EQUAL 4)
-			set(MPEngineLibraries
-				${MPEngineLibraries}
-				${OpenJKLibDir}/SDL2/lib/x86/SDL2main.lib
-				${OpenJKLibDir}/SDL2/lib/x86/SDL2.lib
-				)
-		else()
-			set(MPEngineLibraries
-				${MPEngineLibraries}
-				${OpenJKLibDir}/SDL2/lib/x64/SDL2main.lib
-				${OpenJKLibDir}/SDL2/lib/x64/SDL2.lib
-				)
-		endif()
-
-		set(MPEngineIncludeDirectories
-			${MPEngineIncludeDirectories}
-			${OpenJKLibDir}/SDL2/include
-			)
-	else()
-		find_package(SDL2 REQUIRED CONFIG)
-		if (TARGET SDL2::SDL2)
-			set(SDL2_INCLUDE_DIRS "")
-			set(SDL2_LIBRARIES SDL2::SDL2)
-		endif()
-		string(STRIP ${SDL2_LIBRARIES} SDL2_LIBRARIES)
-		set(MPEngineIncludeDirectories ${MPEngineIncludeDirectories} ${SDL2_INCLUDE_DIRS})
-		set(MPEngineLibraries ${MPEngineLibraries} ${SDL2_LIBRARIES})
-	endif()
+	set(MPEngineLibraries ${MPEngineLibraries} SDL3::SDL3)
 
 	#    Source Files
 
@@ -530,17 +502,6 @@ if(BuildMPEngine)
 
 	if(WIN32)
 		add_executable(${MPEngine} WIN32 ${MPEngineFiles})
-		if(UseInternalSDL2)
-			if(CMAKE_SIZEOF_VOID_P EQUAL 4)
-				set(MPEngineExtraInstallFiles
-					${OpenJKLibDir}/SDL2/bin/x86/SDL2.dll
-					)
-			else()
-				set(MPEngineExtraInstallFiles
-					${OpenJKLibDir}/SDL2/bin/x64/SDL2.dll
-					)
-			endif()
-		endif()
 	else(WIN32)
 		add_executable(${MPEngine} ${MPEngineFiles})
 	endif(WIN32)
@@ -549,11 +510,6 @@ if(BuildMPEngine)
 		RUNTIME
 		DESTINATION ${JKAInstallDir}
 		COMPONENT ${JKAMPClientComponent})
-	if(MPEngineExtraInstallFiles)
-		install(FILES ${MPEngineExtraInstallFiles}
-			DESTINATION ${JKAInstallDir}
-			COMPONENT ${JKAMPClientComponent})
-	endif()
 
 	set_target_properties(${MPEngine} PROPERTIES COMPILE_DEFINITIONS "${MPEngineDefines}")
 
