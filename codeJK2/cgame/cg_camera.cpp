@@ -92,6 +92,7 @@ void CGCam_Enable( void )
 	client_camera.FOV2	= CAMERA_DEFAULT_FOV;
 
 	in_camera = true;
+	gi.cvar_set("inCutscene", "1");	// (the engine lets escape skip it)
 
 	client_camera.next_roff_time = 0;
 
@@ -136,6 +137,7 @@ CGCam_Disable
 void CGCam_Disable( void )
 {
 	in_camera = false;
+	gi.cvar_set("inCutscene", "0");
 
 	client_camera.bar_alpha = 1.0f;
 	client_camera.bar_time = cg.time;

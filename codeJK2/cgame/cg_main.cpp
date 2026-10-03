@@ -1792,6 +1792,7 @@ Called before every level change or subsystem restart
 void CG_Shutdown( void )
 {
 	in_camera = false;
+	gi.cvar_set("inCutscene", "0");
 	FX_Free();
 }
 

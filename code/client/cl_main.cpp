@@ -55,6 +55,7 @@ cvar_t	*cl_avidemo;
 cvar_t	*cl_pano;
 cvar_t	*cl_panoNumShots;
 cvar_t	*cl_skippingcin;
+cvar_t	*cl_incutscene;
 cvar_t	*cl_endcredits;
 
 cvar_t	*cl_freelook;
@@ -1249,6 +1250,7 @@ void CL_Init( void ) {
 	cl_pano = Cvar_Get ("pano", "0", 0);
 	cl_panoNumShots= Cvar_Get ("panoNumShots", "10", CVAR_ARCHIVE_ND);
 	cl_skippingcin = Cvar_Get ("skippingCinematic", "0", CVAR_ROM);
+	cl_incutscene = Cvar_Get ("inCutscene", "0", CVAR_ROM);	// set by the cgame while a scripted cutscene (camera) is playing
 	cl_endcredits = Cvar_Get ("cg_endcredits", "0", 0);
 
 	cl_yawspeed = Cvar_Get ("cl_yawspeed", "140", CVAR_ARCHIVE_ND);
