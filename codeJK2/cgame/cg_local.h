@@ -331,6 +331,9 @@ typedef struct {
 	qboolean	hyperspace;				// true if prediction has hit a trigger_teleport
 	playerState_t	predicted_player_state;
 	qboolean	validPPS;				// clear until the first call to CG_PredictPlayerState
+	float		psLagAvg;				// average snapshot time - ps.commandTime (msec), see CG_SnapshotPlayerOrigin
+	int			psLagSnapTime;
+	qboolean	psLagValid;
 	int			predictedErrorTime;
 	vec3_t		predictedError;
 

@@ -315,6 +315,57 @@ qboolean CG_OnMovingPlat( playerState_t *ps )
 	return qfalse;
 }
 /*
+===============
+CG_SnapshotPlayerOrigin
+
+The player state in a snapshot is the state after the last usercmd the server
+processed (ps.commandTime), but the snapshot is labelled with the fixed 20 Hz
+server tick time. The gap between the two jitters by up to a frame with the
+phase of the frame rate against that tick, so interpolating between snapshots
+made the player's speed wobble by several percent at 20 Hz (5-7% at 125/144
+fps). Move the origin along the velocity to where the player was at a constant
+offset from the snapshot time (the slowly tracked average gap), which removes
+the jitter and leaves the overall lag unchanged.
+===============
+*/
+static void CG_SnapshotPlayerOrigin( const snapshot_t *snap, vec3_t origin )
+{
+	const int	lag = snap->serverTime - snap->ps.commandTime;
+
+	VectorCopy( snap->ps.origin, origin );
+
+	if ( snap->ps.pm_type != PM_NORMAL || lag < 0 || lag > 200 )
+	{//not following the player's commands (cutscene, pause, dead, ...)
+		return;
+	}
+
+	if ( !cg.psLagValid )
+	{
+		cg.psLagAvg = lag;
+		cg.psLagSnapTime = snap->serverTime;
+		cg.psLagValid = qtrue;
+	}
+	else if ( snap->serverTime > cg.psLagSnapTime )
+	{//once per snapshot
+		if ( fabs( lag - cg.psLagAvg ) < 20.0f )
+		{
+			cg.psLagAvg += ( lag - cg.psLagAvg ) * 0.125f;
+		}
+		else
+		{//the gap changed for good (or a hitch): start over
+			cg.psLagAvg = lag;
+		}
+		cg.psLagSnapTime = snap->serverTime;
+	}
+
+	const float	error = lag - cg.psLagAvg;
+	if ( fabs( error ) < 20.0f )
+	{
+		VectorMA( origin, error * 0.001f, snap->ps.velocity, origin );
+	}
+}
+
+/*
 ========================
 CG_InterpolatePlayerState
 
@@ -372,9 +423,13 @@ void CG_InterpolatePlayerState( qboolean grabAngles ) {
 		}
 		out->bobCycle = prev->ps.bobCycle + f * ( i - prev->ps.bobCycle );
 
+		vec3_t	prevOrigin, nextOrigin;
+		CG_SnapshotPlayerOrigin( prev, prevOrigin );
+		CG_SnapshotPlayerOrigin( next, nextOrigin );
+
 		for ( i = 0 ; i < 3 ; i++ )
 		{
-			out->origin[i] = prev->ps.origin[i] + f * (next->ps.origin[i] - prev->ps.origin[i] );
+			out->origin[i] = prevOrigin[i] + f * ( nextOrigin[i] - prevOrigin[i] );
 			if ( !grabAngles )
 			{
 				out->viewangles[i] = LerpAngle(
