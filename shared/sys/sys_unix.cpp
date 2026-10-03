@@ -23,6 +23,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <time.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -128,6 +129,13 @@ int Sys_Milliseconds (bool baseTime)
 int Sys_Milliseconds2( void )
 {
     return Sys_Milliseconds(false);
+}
+
+int64_t Sys_Microseconds( void )
+{
+	struct timespec ts;
+	clock_gettime( CLOCK_MONOTONIC, &ts );
+	return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
 /*

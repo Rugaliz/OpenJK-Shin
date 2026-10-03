@@ -165,7 +165,8 @@ void Sys_Init( void ) {
 	com_unfocused = Cvar_Get( "com_unfocused", "0", CVAR_ROM );
 	com_minimized = Cvar_Get( "com_minimized", "0", CVAR_ROM );
 #ifdef _JK2EXE
-	com_maxfps = Cvar_Get ("com_maxfps", "125", CVAR_ARCHIVE );
+	// Singleplayer: above any common refresh rate, so vsync (r_swapInterval) is what paces the game
+	com_maxfps = Cvar_Get ("com_maxfps", "250", CVAR_ARCHIVE );
 #else
 	com_maxfps = Cvar_Get( "com_maxfps", "125", CVAR_ARCHIVE, "Maximum frames per second" );
 #endif
