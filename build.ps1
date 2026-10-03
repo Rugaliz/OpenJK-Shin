@@ -388,7 +388,7 @@ if (-not $NoInstall) {
     Write-Host ''
     Write-Host 'Copy the contents of each folder into the matching game''s GameData folder (next to the base folder),'
     $suffix = switch ($Arch) { 'x64' { 'x86_64' } 'x86' { 'x86' } 'arm64' { 'arm64' } }
-    Write-Host "then run the executable: openjo_sp.$suffix.exe for Jedi Outcast, openjk_sp.$suffix.exe / openjk.$suffix.exe for Jedi Academy."
+    Write-Host "then run the executable: openjo_sp.$suffix.exe / openjo.$suffix.exe for Jedi Outcast, openjk_sp.$suffix.exe / openjk.$suffix.exe for Jedi Academy."
 
 } else {
     Write-Host "  The programs are in $BuildDir"
