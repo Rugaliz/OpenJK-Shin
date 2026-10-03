@@ -1055,31 +1055,6 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 		}
 	}
 
-	if ( item->type == ITEM_TYPE_MULTI && item->window.name && !Q_stricmp( item->window.name, "sound_quality") ) {
-		multiDef_t *multiPtr = (multiDef_t *)item->typeData;
-		int i;
-		qboolean found = qfalse;
-		for( i = 0; i < multiPtr->count; i++ )
-		{
-			if ( multiPtr->cvarValue[i] == 44 )
-			{
-				found = qtrue;
-				break;
-			}
-		}
-		if ( !found && multiPtr->count < MAX_MULTI_CVARS )
-		{
-#ifdef JK2_MODE
-			multiPtr->cvarList[multiPtr->count] = String_Alloc("@MENUS0_VERY_HIGH");
-#else
-			multiPtr->cvarList[multiPtr->count] = String_Alloc("@MENUS_VERY_HIGH");
-#endif
-			multiPtr->cvarValue[multiPtr->count] = 44;
-			multiPtr->count++;
-			Com_Printf( "Extended sound quality field to contain very high option.\n");
-		}
-	}
-
 	if ( item->type == ITEM_TYPE_MULTI && item->window.name && !Q_stricmp( item->window.name, "voice") && item->cvar && !Q_stricmp( item->cvar, "g_subtitles" ) ) {
 		multiDef_t *multiPtr = (multiDef_t *)item->typeData;
 		int i;
@@ -1237,35 +1212,58 @@ qboolean MenuParse_itemDef( itemDef_t *item )
 		menu->itemCount++;
 		Item_ApplyHacks( newItem );
 
-		// The sound menu has a free row between the sound quality and the (former) EAX row. Make it a copy of the row
-		// that was made for HRTF, for the sound of the room (reverb).
-		if ( newItem->type == ITEM_TYPE_MULTI && newItem->cvar && !Q_stricmp( newItem->cvar, "s_hrtf" ) && menu->itemCount < MAX_MENUITEMS )
+		// The stock sound menu has a row for the sound quality, the sample rate to mix at. The sound system here always
+		// mixes at the rate of the output device, so the row is of no use. Use it for the sound of the room (reverb)
+		// instead, above the row that was made for HRTF, which moves up to take the row that was freed.
+		if ( newItem->type == ITEM_TYPE_MULTI && newItem->cvar && !Q_stricmp( newItem->cvar, "s_hrtf" ) )
 		{
-			itemDef_t *row = menu->items[menu->itemCount] = (struct itemDef_s *) UI_Alloc(sizeof(itemDef_t));
+			itemDef_t *row = NULL;
 
-			memcpy( row, newItem, sizeof( itemDef_t ) );
-			row->window.name = (char *)String_Alloc( "reverb" );
-			row->cvar = String_Alloc( "s_reverb" );
-			row->text = (char *)String_Alloc( "ROOM ECHO (REVERB)" );
-			row->descText = String_Alloc( "Gives sounds the echo of the room they are in, muffles them behind walls and under water." );
-			row->window.rectClient.y = 291;	// (the rectangle as it is in the menu file, the others are worked out from it)
-
-			// its own highlight bar: highlight7 (the one for the row above the one this was copied from, highlight8)
-			for ( int pass = 0; pass < 2; pass++ )
+			for ( int i = 0; i < menu->itemCount - 1; i++ )
 			{
-				const char *script = pass ? newItem->mouseExit : newItem->mouseEnter;
-				if ( script )
+				itemDef_t *other = menu->items[i];
+				if ( other->type == ITEM_TYPE_MULTI && other->window.name && !Q_stricmp( other->window.name, "sound_quality" ) )
 				{
-					char *copy = (char *)String_Alloc( script );	// (a string is made for each, the stock ones stay as they are)
-					char *at = strstr( copy, "highlight8" );
-					if ( at )
-						at[9] = '7';
-					if ( pass )		row->mouseExit = copy;
-					else			row->mouseEnter = copy;
+					row = other;
+					break;
 				}
 			}
-			menu->itemCount++;
-			Com_DPrintf( "Sound menu: row \"%s\" (cvar %s) at %.0f %.0f, row \"%s\" (cvar %s) at %.0f %.0f, size %.0f x %.0f\n", newItem->window.name, newItem->cvar, newItem->window.rectClient.x, newItem->window.rectClient.y, row->window.name, row->cvar, row->window.rectClient.x, row->window.rectClient.y, row->window.rectClient.w, row->window.rectClient.h );
+
+			if ( row )
+			{
+				*(multiDef_t *)row->typeData = *(multiDef_t *)newItem->typeData;	// (off and on, as for HRTF)
+				row->window.name = (char *)String_Alloc( "reverb" );
+				row->cvar = String_Alloc( "s_reverb" );
+				row->cvarTest = NULL;
+				row->cvarFlags = 0;
+				row->text = (char *)String_Alloc( "ROOM ECHO (REVERB)" );
+				row->descText = String_Alloc( "Gives sounds the echo of the room they are in, muffles them behind walls and under water." );
+				row->action = newItem->action;	// (it used to restart the sound system)
+
+				// HRTF moves to the row between this and where it was, its textalignx matches the others and its highlight
+				// bar is the one after the one of this row
+				const char *barAt = row->mouseEnter ? strstr( row->mouseEnter, "highlight" ) : NULL;
+				const char *oldBarAt = newItem->mouseEnter ? strstr( newItem->mouseEnter, "highlight" ) : NULL;
+				if ( barAt && oldBarAt && barAt[9] >= '1' && barAt[9] < '9' )
+				{
+					for ( int pass = 0; pass < 2; pass++ )
+					{
+						const char *script = pass ? newItem->mouseExit : newItem->mouseEnter;
+						if ( script )
+						{
+							char *copy = (char *)String_Alloc( script );	// (a string is made for each, the stock ones stay as they are)
+							char *at = strstr( copy, "highlight" );
+							if ( at )
+								at[9] = barAt[9] + 1;
+							if ( pass )	newItem->mouseExit = copy;
+							else		newItem->mouseEnter = copy;
+						}
+					}
+					newItem->window.rectClient.y = ( row->window.rectClient.y + newItem->window.rectClient.y ) / 2.0f;	// (the rectangle as it is in the menu file, the others are worked out from it)
+					newItem->textalignx = row->textalignx;
+				}
+				Com_DPrintf( "Sound menu: row \"%s\" (cvar %s) at %.0f %.0f, row \"%s\" (cvar %s) at %.0f %.0f, size %.0f x %.0f\n", row->window.name, row->cvar, row->window.rectClient.x, row->window.rectClient.y, newItem->window.name, newItem->cvar, newItem->window.rectClient.x, newItem->window.rectClient.y, newItem->window.rectClient.w, newItem->window.rectClient.h );
+			}
 		}
 	}
 	else

@@ -327,7 +327,7 @@ void S_Init( void ) {
 	s_allowDynamicMusic = Cvar_Get( "s_allowDynamicMusic", "1",       CVAR_ARCHIVE_ND );
 	s_debugdynamic      = Cvar_Get( "s_debugdynamic",      "0",       0 );
 	s_initsound         = Cvar_Get( "s_initsound",         "1",       CVAR_ARCHIVE | CVAR_LATCH );
-	s_khz               = Cvar_Get( "s_khz",               "0",       CVAR_ARCHIVE | CVAR_LATCH );	// 0 or 44 = rate of the output device, 11 or 22 = low rates, or a rate in Hz
+	s_khz               = Cvar_Get( "s_khz",               "0",       CVAR_ARCHIVE | CVAR_LATCH );	// 0 = rate of the output device (also 11, 22, 44 in JK2, the values the old sound menu saved), or a rate in Hz
 	s_hrtf              = Cvar_Get( "s_hrtf",              "0",       CVAR_ARCHIVE );	// 1 = binaural positioning for headphones
 	s_reverb            = Cvar_Get( "s_reverb",            "1",       CVAR_ARCHIVE );	// the sound of the room: reverb, walls, water
 	s_reverbLevel       = Cvar_Get( "s_reverbLevel",       "1",       CVAR_ARCHIVE );	// how much reverb (1 = as worked out from the room)
