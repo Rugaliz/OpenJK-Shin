@@ -156,8 +156,13 @@ qboolean	Sys_IsLANAddress (const netadr_t *adr);
 void		Sys_ShowIP(void);
 
 
+#ifdef JK2_MODE
+#define	MAX_MSGLEN				16384		// max length of a message, which may
+											// be fragmented into multiple packets
+#else
 #define	MAX_MSGLEN				49152		// max length of a message, which may
 											// be fragmented into multiple packets
+#endif
 
 //rww - 6/28/02 - Changed from 16384 to match sof2's. This does seem rather huge, but I guess it doesn't really hurt anything.
 
@@ -211,10 +216,17 @@ PROTOCOL
 ==============================================================
 */
 
+#ifdef JK2_MODE
+#define	PROTOCOL_VERSION	16		// Jedi Outcast 1.04 (1.02 and 1.03 are 15)
+
+#define	UPDATE_SERVER_NAME			"updatejk2.ravensoft.com"
+#define MASTER_SERVER_NAME			"masterjk2.ravensoft.com"
+#else
 #define	PROTOCOL_VERSION	26
 
 #define	UPDATE_SERVER_NAME			"updatejk3.ravensoft.com"
 #define MASTER_SERVER_NAME			"masterjk3.ravensoft.com"
+#endif
 
 #define JKHUB_MASTER_SERVER_NAME	"master.jkhub.org"
 #define JKHUB_UPDATE_SERVER_NAME	"update.jkhub.org"
@@ -237,7 +249,9 @@ enum svc_ops_e {
 	svc_serverCommand,			// [string] to be executed by client game module
 	svc_download,				// [short] size [size bytes]
 	svc_snapshot,
+#ifndef JK2_MODE
 	svc_setgame,
+#endif
 	svc_mapchange,
 	svc_EOF
 };
@@ -263,6 +277,101 @@ VIRTUAL MACHINE
 ==============================================================
 */
 
+#ifdef JK2_MODE
+typedef union {
+	float		f;
+	int			i;
+	unsigned	ui;
+} floatint_t;
+
+// which module a cvar or command was made by
+typedef enum vmSlots_e {
+	VM_GAME=0,
+	VM_CGAME,
+	VM_UI
+} vmSlots_t;
+
+typedef struct vm_s vm_t;
+
+typedef enum {
+	VMI_NATIVE,
+	VMI_BYTECODE,
+	VMI_COMPILED
+} vmInterpret_t;
+
+typedef enum {
+	TRAP_MEMSET = 100,
+	TRAP_MEMCPY,
+	TRAP_STRNCPY,
+	TRAP_SIN,
+	TRAP_COS,
+	TRAP_ATAN2,
+	TRAP_SQRT,
+	TRAP_MATRIXMULTIPLY,
+	TRAP_ANGLEVECTORS,
+	TRAP_PERPENDICULARVECTOR,
+	TRAP_FLOOR,
+	TRAP_CEIL,
+
+	TRAP_TESTPRINTINT,
+	TRAP_TESTPRINTFLOAT
+} sharedTraps_t;
+
+#define	MAX_VM		3
+
+extern const char *vmStrs[MAX_VM];	// the names of the modules, for messages
+extern vm_t *currentVM;				// the module that is running (the one that called in, while a system call is made)
+
+void	VM_Init( void );
+vm_t	*VM_Create( const char *module, intptr_t (*systemCalls)(intptr_t *), vmInterpret_t interpret );
+// module should be bare: "cgame", not "cgame.dll" or "vm/cgame.qvm"
+
+void	VM_Free( vm_t *vm );
+void	VM_Clear( void );
+vm_t	*VM_Restart( vm_t *vm );
+
+intptr_t QDECL VM_Call( vm_t *vm, int callnum, ... );
+
+void	VM_Debug( int level );
+
+void	*VM_ArgPtr( int syscall, intptr_t intValue, int32_t size );
+void	*VM_ArgArray( int syscall, intptr_t intValue, uint32_t size, int32_t num );
+char	*VM_ArgString( int syscall, intptr_t intValue );
+intptr_t	VM_strncpy( intptr_t dest, intptr_t src, intptr_t size );
+void	VM_LocateGameDataCheck( const void *data, int entitySize, int num_entities );
+
+QINLINE float _vmf( intptr_t x )
+{
+	floatint_t fi;
+	fi.i = (int)x;
+	return fi.f;
+}
+
+// macros for vm-safe translation of SysCall arguments
+
+// float
+#define	VMF(x)				_vmf(args[x])
+// single variable of type "type"
+#define VMAV(x, type)		((type *) VM_ArgPtr(args[0], args[x], sizeof(type)))
+// single variable of incomplete "type"
+#define VMAIV(x, type, size)((type *) VM_ArgPtr(args[0], args[x], size))
+// static-length array of "type" variables
+#define VMAP(x, type, num)	((type *) VM_ArgPtr(args[0], args[x], sizeof(type) * num))
+// dynamic-length array of "type" variables
+#define VMAA(x, type, num)	((type *) VM_ArgArray(args[0], args[x], sizeof(type), num))
+// NULL-terminated string (first char is always safe to use)
+#define VMAS(x)				VM_ArgString(args[0], args[x])
+
+char	*VM_ExplicitArgString( vm_t *vm, intptr_t intValue );
+
+// the renderer, which is a library of its own, asks which module is running: the first members of vm_t (vm_local.h)
+typedef struct vmView_s {
+	int			programStack;
+	intptr_t	(*systemCall)( intptr_t *parms );
+	vmSlots_t	slot;
+} vmView_t;
+#define VM_SLOT(vm)			( ((const vmView_t *)(vm))->slot )
+#else
 typedef enum vmSlots_e {
 	VM_GAME=0,
 	VM_CGAME,
@@ -285,6 +394,8 @@ typedef struct vm_s {
 		intptr_t	(QDECL *syscall)( intptr_t *parms );	// engine syscall handler
 	} legacy;
 } vm_t;
+
+#define VM_SLOT(vm)			((vm)->slot)
 
 extern vm_t *currentVM;
 
@@ -335,6 +446,7 @@ float			_vmf( intptr_t x );
 
 #define	VMA(x) VM_ArgPtr( args[x] )
 #define	VMF(x) _vmf( args[x] )
+#endif
 
 /*
 ==============================================================
@@ -568,7 +680,9 @@ issues.
 
 #define	MAX_FILE_HANDLES	64
 
-#ifdef DEDICATED
+#ifdef JK2_MODE
+#	define Q3CONFIG_CFG "jk2mpconfig.cfg"	// (the same file as the original game)
+#elif defined(DEDICATED)
 #	define Q3CONFIG_CFG PRODUCT_NAME "_server.cfg"
 #else
 #	define Q3CONFIG_CFG PRODUCT_NAME ".cfg"

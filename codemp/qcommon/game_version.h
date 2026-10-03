@@ -37,7 +37,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define VERSION_STRING XSTRING(VERSION_MAJOR_RELEASE) ", " XSTRING(VERSION_MINOR_RELEASE) ", " XSTRING(VERSION_EXTERNAL_BUILD) ", " XSTRING(VERSION_INTERNAL_BUILD) // "a, b, c, d"
 #define VERSION_STRING_DOTTED XSTRING(VERSION_MAJOR_RELEASE) "." XSTRING(VERSION_MINOR_RELEASE) "." XSTRING(VERSION_EXTERNAL_BUILD) "." XSTRING(VERSION_INTERNAL_BUILD) // "a.b.c.d"
 
-#if defined(_DEBUG)
+#if defined(JK2_MODE)
+	// Jedi Outcast 1.04, the version that this speaks the protocol of
+	#define	JK_VERSION		"JK2MP: v1.04"
+	#define JK_VERSION_OLD	"JK2MP: v1.04"
+#elif defined(_DEBUG)
 	#define	JK_VERSION		"(debug)OpenJK-MP: " GIT_TAG
 	#define JK_VERSION_OLD	"(debug)JAmp: v" VERSION_STRING_DOTTED
 #else

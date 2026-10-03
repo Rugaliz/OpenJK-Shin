@@ -25,9 +25,14 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // common.c -- misc functions used in client and server
 
 #include "stringed_ingame.h"
+#ifdef JK2_MODE
+#include "jk2/qcommon/strip.h"
+#endif
 #include "qcommon/cm_public.h"
 #include "qcommon/game_version.h"
+#ifndef JK2_MODE
 #include "../server/NPCNav/navigator.h"
+#endif
 #include "../shared/sys/sys_local.h"
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -1168,7 +1173,9 @@ void Com_Init( char *commandLine ) {
 		Com_InitZoneMemory();
 		Cvar_Init ();
 
+#ifndef JK2_MODE
 		navigator.Init();
+#endif
 
 		// prepare enough of the subsystems to handle
 		// cvar and command buffer management
@@ -1277,7 +1284,11 @@ void Com_Init( char *commandLine ) {
 
 		com_version = Cvar_Get ("version", JK_VERSION " " PLATFORM_STRING " " SOURCE_DATE, CVAR_ROM | CVAR_SERVERINFO );
 
+#ifdef JK2_MODE
+		SP_Init();	// the string packages (strip/*.sp)
+#else
 		SE_Init();
+#endif
 
 		Sys_Init();
 
@@ -1708,6 +1719,10 @@ void Com_Shutdown (void)
 		FS_FCloseFile( com_journalFile );
 		com_journalFile = 0;
 	}
+
+#ifdef JK2_MODE
+	SP_Shutdown();
+#endif
 
 	MSG_shutdownHuffman();
 /*

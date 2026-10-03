@@ -465,8 +465,10 @@ void SV_CreateClientGameStateMessage( client_t *client, msg_t *msg ) {
 	// write the checksum feed
 	MSG_WriteLong( msg, sv.checksumFeed);
 
+#ifndef JK2_MODE
 	// For old RMG system.
 	MSG_WriteShort ( msg, 0 );
+#endif
 }
 
 /*

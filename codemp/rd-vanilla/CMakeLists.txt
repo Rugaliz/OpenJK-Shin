@@ -132,30 +132,42 @@ set(MPVanillaRendererIncludeDirectories ${MPVanillaRendererIncludeDirectories} $
 set(MPVanillaRendererLibraries ${MPVanillaRendererLibraries} ${OPENGL_LIBRARIES})
 
 set(MPVanillaRendererIncludeDirectories ${MPVanillaRendererIncludeDirectories} ${OpenJKLibDir})
-add_library(${MPVanillaRenderer} SHARED ${MPVanillaRendererFiles})
+# the renderer is made twice, for Jedi Academy and for Jedi Outcast (JK2_MODE: the models of Outcast use their own skeleton)
+function(add_mp_vanilla_renderer_project TargetName Defines IncludeDirectories)
+	add_library(${TargetName} SHARED ${MPVanillaRendererFiles})
 
-if(NOT MSVC)
-	# remove "lib" prefix for .so/.dylib files
-	set_target_properties(${MPVanillaRenderer} PROPERTIES PREFIX "")
-endif()
+	if(NOT MSVC)
+		# remove "lib" prefix for .so/.dylib files
+		set_target_properties(${TargetName} PROPERTIES PREFIX "")
+	endif()
 
-if(WIN32)
-	install(TARGETS ${MPVanillaRenderer}
-		RUNTIME
-		DESTINATION ${JKAInstallDir}
-		COMPONENT ${JKAMPClientComponent})
-else(WIN32)
-	install(TARGETS ${MPVanillaRenderer}
-		LIBRARY
-		DESTINATION ${JKAInstallDir}
-		COMPONENT ${JKAMPClientComponent})
-endif()
+	if(WIN32)
+		install(TARGETS ${TargetName}
+			RUNTIME
+			DESTINATION ${InstallDir}
+			COMPONENT ${JKAMPClientComponent})
+	else(WIN32)
+		install(TARGETS ${TargetName}
+			LIBRARY
+			DESTINATION ${InstallDir}
+			COMPONENT ${JKAMPClientComponent})
+	endif()
 
-set_target_properties(${MPVanillaRenderer} PROPERTIES COMPILE_DEFINITIONS "${SharedDefines}")
+	set_target_properties(${TargetName} PROPERTIES COMPILE_DEFINITIONS "${Defines}")
 
-# Hide symbols not explicitly marked public.
-set_property(TARGET ${MPVanillaRenderer} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
+	# Hide symbols not explicitly marked public.
+	set_property(TARGET ${TargetName} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
 
-set_target_properties(${MPVanillaRenderer} PROPERTIES INCLUDE_DIRECTORIES "${MPVanillaRendererIncludeDirectories}")
-set_target_properties(${MPVanillaRenderer} PROPERTIES PROJECT_LABEL "MP Vanilla Renderer")
-target_link_libraries(${MPVanillaRenderer} ${MPVanillaRendererLibraries})
+	set_target_properties(${TargetName} PROPERTIES INCLUDE_DIRECTORIES "${IncludeDirectories}")
+	set_target_properties(${TargetName} PROPERTIES PROJECT_LABEL "MP Vanilla Renderer")
+	target_link_libraries(${TargetName} ${MPVanillaRendererLibraries})
+endfunction(add_mp_vanilla_renderer_project)
+
+if(BuildMPRdVanilla)
+	set(InstallDir ${JKAInstallDir})
+	add_mp_vanilla_renderer_project(${MPVanillaRenderer} "${SharedDefines}" "${MPVanillaRendererIncludeDirectories}")
+endif(BuildMPRdVanilla)
+if(BuildJK2MPRdVanilla)
+	set(InstallDir ${JK2InstallDir})
+	add_mp_vanilla_renderer_project(${JK2MPVanillaRenderer} "${SharedDefines};JK2_MODE" "${MPVanillaRendererIncludeDirectories}")
+endif(BuildJK2MPRdVanilla)

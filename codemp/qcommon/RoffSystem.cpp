@@ -943,8 +943,10 @@ qboolean CROFFSystem::ApplyROFF( SROFFEntity *roff_ent, CROFFSystem::CROFF *roff
 	roff_ent->mNextROFFTime = sv.time + roff->mFrameTime;
 
 	//rww - npcs need to know when they're getting roff'd
+#ifndef JK2_MODE	// (a field of the Jedi Academy game entity)
 	if ( !roff_ent->mIsClient )
 		ent->next_roff_time = roff_ent->mNextROFFTime;
+#endif
 
 
 	return qtrue;

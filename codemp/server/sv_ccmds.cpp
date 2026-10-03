@@ -1362,7 +1362,9 @@ static void SV_ForceToggle_f( void ) {
 const char *weaponToggleNamePrints[WP_NUM_WEAPONS] = {
 	"NO WEAPON",
 	"STUN BATON",
+#ifndef JK2_MODE
 	"MELEE",
+#endif
 	"SABER",
 	"BRYAR PISTOL",
 	"BLASTER",
@@ -1375,8 +1377,10 @@ const char *weaponToggleNamePrints[WP_NUM_WEAPONS] = {
 	"THERMAL",
 	"TRIP MINE",
 	"DET PACK",
+#ifndef JK2_MODE
 	"CONCUSSION",
 	"BRYAR OLD",
+#endif
 	"EMPLACED GUN",
 	"TURRET"
 };
@@ -1387,11 +1391,14 @@ static void SV_WeaponToggle_f( void ) {
 	char *s;
 	const char *cvarStr = NULL;
 
+#ifndef JK2_MODE	// (no duel specific weapon disable in Jedi Outcast)
 	if ( sv_gametype->integer == GT_DUEL || sv_gametype->integer == GT_POWERDUEL ) {
 		cvarStr = "g_duelWeaponDisable";
 		bits = Cvar_VariableIntegerValue( "g_duelWeaponDisable" );
 	}
-	else {
+	else
+#endif
+	{
 		cvarStr = "g_weaponDisable";
 		bits = Cvar_VariableIntegerValue( "g_weaponDisable" );
 	}

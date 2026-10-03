@@ -123,6 +123,14 @@ typedef struct clientActive_s {
 	int			cgameForceSelection;
 	int			cgameInvenSelection;
 
+#ifdef JK2_MODE
+	// the limits of the view in the yaw (on an emplaced gun), the cgame module sets them (CG_SETCLIENTTURNEXTENT)
+	float		cgameTurnExtentAdd;
+	float		cgameTurnExtentSub;
+	int			cgameTurnExtentTime;
+	float		lastViewYaw;
+#endif
+
 	qboolean	gcmdSendValue;
 	qboolean	gcmdSentValue;
 	byte		gcmdValue;

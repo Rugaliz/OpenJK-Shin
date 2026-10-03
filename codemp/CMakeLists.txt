@@ -39,9 +39,9 @@ if(BuildMPUI)
 endif(BuildMPUI)
 
 #	 Add Vanilla JKA Renderer Project
-if(BuildMPRdVanilla)
+if(BuildMPRdVanilla OR BuildJK2MPRdVanilla)
 	add_subdirectory("${MPDir}/rd-vanilla")
-endif(BuildMPRdVanilla)
+endif(BuildMPRdVanilla OR BuildJK2MPRdVanilla)
 
 #	Add rend2 JKA Renderer Project
 if(BuildMPRend2)
@@ -49,7 +49,7 @@ if(BuildMPRend2)
 endif(BuildMPRend2)
 
 #    Common things between Engine and Dedicated Server
-if(BuildMPEngine OR BuildMPDed)
+if(BuildMPEngine OR BuildMPDed OR BuildJK2MPEngine OR BuildJK2MPDed)
 
 	#    Botlib
 	# the files could arguably just be put into the engine and dedicated projects without having a library for it.
@@ -161,14 +161,23 @@ if(BuildMPEngine OR BuildMPDed)
 	source_group("server" FILES ${MPBotlibServerFiles})
 	set(MPBotlibFiles ${MPBotlibFiles} ${MPBotlibServerFiles})
 
-	add_library(${MPBotLib} STATIC ${MPBotlibFiles})
+	# the botlib is made twice, for Jedi Academy and for Jedi Outcast (JK2_MODE: the structures it shares with the game differ)
+	function(add_mp_botlib TargetName Defines IncludeDirectories)
+		add_library(${TargetName} STATIC ${MPBotlibFiles})
 
-	# Hide symbols not explicitly marked public.
-	set_property(TARGET ${MPBotLib} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
+		# Hide symbols not explicitly marked public.
+		set_property(TARGET ${TargetName} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
 
-	set_target_properties(${MPBotLib} PROPERTIES COMPILE_DEFINITIONS "${MPBotlibDefines}")
-	set_target_properties(${MPBotLib} PROPERTIES INCLUDE_DIRECTORIES "${MPBotlibIncludeDirectories}")
-	set_target_properties(${MPBotLib} PROPERTIES PROJECT_LABEL "Bot Library")
+		set_target_properties(${TargetName} PROPERTIES COMPILE_DEFINITIONS "${Defines}")
+		set_target_properties(${TargetName} PROPERTIES INCLUDE_DIRECTORIES "${IncludeDirectories}")
+		set_target_properties(${TargetName} PROPERTIES PROJECT_LABEL "Bot Library")
+	endfunction(add_mp_botlib)
+	if(BuildMPEngine OR BuildMPDed)
+		add_mp_botlib(${MPBotLib} "${MPBotlibDefines}" "${MPBotlibIncludeDirectories}")
+	endif()
+	if(BuildJK2MPEngine OR BuildJK2MPDed)
+		add_mp_botlib(${JK2MPBotLib} "${MPBotlibDefines};JK2_MODE" "${MPDir}/jk2;${MPBotlibIncludeDirectories}")
+	endif()
 
 	#    Common files/libraries/defines of both Engine and Dedicated Server
 
@@ -340,16 +349,48 @@ if(BuildMPEngine OR BuildMPDed)
 	source_group("ui" FILES ${MPEngineAndDedUiFiles})
 	set(MPEngineAndDedFiles ${MPEngineAndDedFiles} ${MPEngineAndDedUiFiles})
 
+	# Jedi Outcast: the virtual machine for the game modules (they are QVM files in the game's pk3 files) and the
+	# interface of the modules to the server and the client
+	set(MPJK2Files
+		"${MPDir}/jk2/qcommon/vm.cpp"
+		"${MPDir}/jk2/qcommon/vm_interpreted.cpp"
+		"${MPDir}/jk2/qcommon/vm_local.h"
+		"${MPDir}/jk2/qcommon/g2_vmhandles.cpp"
+		"${MPDir}/jk2/qcommon/g2_vmhandles.h"
+		"${MPDir}/jk2/qcommon/strip.cpp"
+		"${MPDir}/jk2/qcommon/strip.h"
+		)
+	set(MPJK2ServerFiles
+		"${MPDir}/jk2/server/sv_game.cpp"
+		)
+	# Jedi Academy only: ICARUS scripting and the NPC navigation system do not exist in Jedi Outcast multiplayer
+	set(MPJK2NotUsedFiles
+		"${MPDir}/icarus/BlockStream.cpp"
+		"${MPDir}/icarus/GameInterface.cpp"
+		"${MPDir}/icarus/Instance.cpp"
+		"${MPDir}/icarus/Interface.cpp"
+		"${MPDir}/icarus/Memory.cpp"
+		"${MPDir}/icarus/Q3_Interface.cpp"
+		"${MPDir}/icarus/Q3_Registers.cpp"
+		"${MPDir}/icarus/Sequence.cpp"
+		"${MPDir}/icarus/Sequencer.cpp"
+		"${MPDir}/icarus/TaskManager.cpp"
+		"${MPDir}/server/NPCNav/navigator.cpp"
+		)
+	set(MPJK2ClientFiles
+		"${MPDir}/jk2/client/cl_cgame.cpp"
+		"${MPDir}/jk2/client/cl_ui.cpp"
+		)
 	set(MPEngineAndDedSysFiles
 		"${SharedDir}/sys/snapvector.cpp"
 		)
 	set(MPEngineAndDedFiles ${MPEngineAndDedFiles} ${MPEngineAndDedSysFiles})
 	source_group("sys" FILES ${MPEngineAndDedSysFiles})
-endif(BuildMPEngine OR BuildMPDed)
+endif(BuildMPEngine OR BuildMPDed OR BuildJK2MPEngine OR BuildJK2MPDed)
 
 #        Engine/Executable (jamp.exe)
 
-if(BuildMPEngine)
+if(BuildMPEngine OR BuildJK2MPEngine)
 	set(MPEngineLibraries ${MPEngineAndDedLibraries})
 	set(MPEngineIncludeDirectories ${MPEngineAndDedIncludeDirectories})
 	set(MPEngineFiles ${MPEngineAndDedFiles})
@@ -500,30 +541,54 @@ if(BuildMPEngine)
 	set(MPEngineFiles ${MPEngineFiles} ${MPEngineSysFiles})
 	source_group("sys" FILES ${MPEngineSysFiles})
 
-	if(WIN32)
-		add_executable(${MPEngine} WIN32 ${MPEngineFiles})
-	else(WIN32)
-		add_executable(${MPEngine} ${MPEngineFiles})
-	endif(WIN32)
+	function(add_mp_engine_project TargetName Label Defines IncludeDirectories Libraries InstallDir Files)
+		if(WIN32)
+			add_executable(${TargetName} WIN32 ${Files})
+		else(WIN32)
+			add_executable(${TargetName} ${Files})
+		endif(WIN32)
 
-	install(TARGETS ${MPEngine}
-		RUNTIME
-		DESTINATION ${JKAInstallDir}
-		COMPONENT ${JKAMPClientComponent})
+		install(TARGETS ${TargetName}
+			RUNTIME
+			DESTINATION ${InstallDir}
+			COMPONENT ${JKAMPClientComponent})
 
-	set_target_properties(${MPEngine} PROPERTIES COMPILE_DEFINITIONS "${MPEngineDefines}")
+		set_target_properties(${TargetName} PROPERTIES COMPILE_DEFINITIONS "${Defines}")
 
-	# Hide symbols not explicitly marked public.
-	set_property(TARGET ${MPEngine} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
+		# Hide symbols not explicitly marked public.
+		set_property(TARGET ${TargetName} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
 
-	set_target_properties(${MPEngine} PROPERTIES INCLUDE_DIRECTORIES "${MPEngineIncludeDirectories}")
-	set_target_properties(${MPEngine} PROPERTIES PROJECT_LABEL "MP Client")
-	target_link_libraries(${MPEngine} ${MPEngineLibraries})
-endif(BuildMPEngine)
+		set_target_properties(${TargetName} PROPERTIES INCLUDE_DIRECTORIES "${IncludeDirectories}")
+		set_target_properties(${TargetName} PROPERTIES PROJECT_LABEL "${Label}")
+		target_link_libraries(${TargetName} ${Libraries})
+	endfunction(add_mp_engine_project)
+
+	if(BuildMPEngine)
+		add_mp_engine_project(${MPEngine} "MP Client" "${MPEngineDefines}" "${MPEngineIncludeDirectories}" "${MPEngineLibraries}" ${JKAInstallDir} "${MPEngineFiles}")
+	endif(BuildMPEngine)
+	if(BuildJK2MPEngine)
+		# Jedi Outcast: the same engine built with JK2_MODE; the headers in codemp/jk2 are used in place of the Jedi Academy ones
+		set(JK2MPEngineLibraries ${MPEngineLibraries})
+		# the files that are not the same for Jedi Outcast: the module interfaces and the virtual machine
+		set(JK2MPEngineFiles ${MPEngineFiles})
+		list(REMOVE_ITEM JK2MPEngineFiles
+			"${MPDir}/qcommon/vm.cpp"
+			"${MPDir}/server/sv_game.cpp"
+			"${MPDir}/server/sv_gameapi.cpp"
+			"${MPDir}/client/cl_cgame.cpp"
+			"${MPDir}/client/cl_cgameapi.cpp"
+			"${MPDir}/client/cl_ui.cpp"
+			"${MPDir}/client/cl_uiapi.cpp"
+			${MPJK2NotUsedFiles})
+		set(JK2MPEngineFiles ${JK2MPEngineFiles} ${MPJK2Files} ${MPJK2ServerFiles} ${MPJK2ClientFiles})
+		list(TRANSFORM JK2MPEngineLibraries REPLACE "^${MPBotLib}$" "${JK2MPBotLib}")
+		add_mp_engine_project(${JK2MPEngine} "JK2 MP Client" "${MPEngineDefines};JK2_MODE" "${MPDir}/jk2;${MPEngineIncludeDirectories}" "${JK2MPEngineLibraries}" ${JK2InstallDir} "${JK2MPEngineFiles}")
+	endif(BuildJK2MPEngine)
+endif(BuildMPEngine OR BuildJK2MPEngine)
 
 #        Dedicated Server (Engine) (jampded.exe)
 
-if(BuildMPDed)
+if(BuildMPDed OR BuildJK2MPDed)
 	set(MPDedLibraries ${MPEngineAndDedLibraries})
 	set(MPDedIncludeDirectories ${MPEngineAndDedIncludeDirectories})
 	set(MPDedFiles ${MPEngineAndDedFiles})
@@ -597,18 +662,36 @@ if(BuildMPDed)
 		set(MPDedFiles ${MPDedFiles} ${MPDedSysFiles})
 	endif(WIN32)
 
-	add_executable(${MPDed} ${MPDedFiles})
-	install(TARGETS ${MPDed}
-		RUNTIME
-		DESTINATION ${JKAInstallDir}
-		COMPONENT ${JKAMPServerComponent})
+	function(add_mp_ded_project TargetName Label Defines IncludeDirectories Libraries InstallDir Files)
+		add_executable(${TargetName} ${Files})
+		install(TARGETS ${TargetName}
+			RUNTIME
+			DESTINATION ${InstallDir}
+			COMPONENT ${JKAMPServerComponent})
 
-	set_target_properties(${MPDed} PROPERTIES COMPILE_DEFINITIONS "${MPDedDefines}")
+		set_target_properties(${TargetName} PROPERTIES COMPILE_DEFINITIONS "${Defines}")
 
-	# Hide symbols not explicitly marked public.
-	set_property(TARGET ${MPDed} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
+		# Hide symbols not explicitly marked public.
+		set_property(TARGET ${TargetName} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
 
-	set_target_properties(${MPDed} PROPERTIES INCLUDE_DIRECTORIES "${MPDedIncludeDirectories}")
-	set_target_properties(${MPDed} PROPERTIES PROJECT_LABEL "MP Dedicated Server")
-	target_link_libraries(${MPDed} ${MPDedLibraries})
-endif(BuildMPDed)
+		set_target_properties(${TargetName} PROPERTIES INCLUDE_DIRECTORIES "${IncludeDirectories}")
+		set_target_properties(${TargetName} PROPERTIES PROJECT_LABEL "${Label}")
+		target_link_libraries(${TargetName} ${Libraries})
+	endfunction(add_mp_ded_project)
+
+	if(BuildMPDed)
+		add_mp_ded_project(${MPDed} "MP Dedicated Server" "${MPDedDefines}" "${MPDedIncludeDirectories}" "${MPDedLibraries}" ${JKAInstallDir} "${MPDedFiles}")
+	endif(BuildMPDed)
+	if(BuildJK2MPDed)
+		set(JK2MPDedLibraries ${MPDedLibraries})
+		set(JK2MPDedFiles ${MPDedFiles})
+		list(REMOVE_ITEM JK2MPDedFiles
+			"${MPDir}/qcommon/vm.cpp"
+			"${MPDir}/server/sv_game.cpp"
+			"${MPDir}/server/sv_gameapi.cpp"
+			${MPJK2NotUsedFiles})
+		set(JK2MPDedFiles ${JK2MPDedFiles} ${MPJK2Files} ${MPJK2ServerFiles})
+		list(TRANSFORM JK2MPDedLibraries REPLACE "^${MPBotLib}$" "${JK2MPBotLib}")
+		add_mp_ded_project(${JK2MPDed} "JK2 MP Dedicated Server" "${MPDedDefines};JK2_MODE" "${MPDir}/jk2;${MPDedIncludeDirectories}" "${JK2MPDedLibraries}" ${JK2InstallDir} "${JK2MPDedFiles}")
+	endif(BuildJK2MPDed)
+endif(BuildMPDed OR BuildJK2MPDed)

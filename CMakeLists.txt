@@ -51,6 +51,10 @@ option(BuildJK2SPEngine "Whether to create projects for the jk2 SP engine (openj
 option(BuildJK2SPGame "Whether to create projects for the jk2 sp gamecode mod (jk2gamex86.dll)" OFF)
 option(BuildJK2SPRdVanilla "Whether to create projects for the jk2 sp renderer (rdjosp-vanilla_x86.dll)" OFF)
 
+option(BuildJK2MPEngine "Whether to create projects for the jk2 MP client (openjo.exe)" OFF)
+option(BuildJK2MPDed "Whether to create projects for the jk2 MP dedicated server (openjoded.exe)" OFF)
+option(BuildJK2MPRdVanilla "Whether to create projects for the jk2 MP renderer (rdjomp-vanilla_x86.dll)" OFF)
+
 option(BuildTests "Whether to build automatic unit tests (requires Boost)" OFF)
 option(UseAddressSanitizer "Whether to enable runtime address sanitizer" OFF)
 option(UseUndefinedSanitizer "Whether to enable runtime Undefined Behavior sanitizer" OFF)
@@ -165,9 +169,13 @@ set(MPRend2 "rd-rend2_${Architecture}")
 set(JK2SPEngine "openjo_sp.${Architecture}")
 set(JK2SPGame "jospgame${Architecture}")
 set(JK2SPVanillaRenderer "rdjosp-vanilla_${Architecture}")
+set(JK2MPEngine "openjo.${Architecture}")
+set(JK2MPDed "openjoded.${Architecture}")
+set(JK2MPVanillaRenderer "rdjomp-vanilla_${Architecture}")
 set(AssetsPk3 "openjk-${Architecture}.pk3")
 # Library names
 set(MPBotLib "botlib")
+set(JK2MPBotLib "botlib_jk2mp")
 set(SharedLib "shared")
 
 #=============================================================================
