@@ -160,6 +160,7 @@ typedef struct {
 
 // if a full pmove isn't done on the client, you can just update the angles
 void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent );
+int PM_StepTicks( const playerState_t *ps, int timeStart, int timeEnd );
 void Pmove( pmove_t *pmove );
 
 

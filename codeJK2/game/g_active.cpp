@@ -2487,28 +2487,30 @@ extern cvar_t	*g_skippingcin;
 	{//Client sets ucmds and such for speed alterations
 		if ( ent->client->ps.vehicleModel != 0 && ent->health > 0 )
 		{
+			// these speed steps are per pmove step; count them in 8 msec ticks so they do not depend on the frame rate
+			const int speedTicks = PM_StepTicks( &client->ps, client->ps.commandTime, ucmd->serverTime );
 			if ( client->ps.speed || client->ps.groundEntityNum == ENTITYNUM_NONE || ucmd->forwardmove > 0 || ucmd->upmove > 0)
 			{
 				if ( ucmd->forwardmove > 0 )
 				{
-					client->ps.speed += 20;
+					client->ps.speed += 20 * speedTicks;
 				}
 				else if ( ucmd->forwardmove < 0 )
 				{
 					if ( client->ps.speed > 800 )
 					{
-						client->ps.speed -= 20;
+						client->ps.speed -= 20 * speedTicks;
 					}
 					else
 					{
-						client->ps.speed -= 5;
+						client->ps.speed -= 5 * speedTicks;
 					}
 				}
 				else
 				{//accelerate to cruising speed only, otherwise, just coast
 					if ( client->ps.speed < 800 )
 					{
-						client->ps.speed += 10;
+						client->ps.speed += 10 * speedTicks;
 						if ( client->ps.speed > 800 )
 						{
 							client->ps.speed = 800;
