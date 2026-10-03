@@ -4,7 +4,7 @@
 #	include <GL/gl.h>
 #elif defined( _WIN32 )
 #	include <windows.h>
-#	include <gl/gl.h>
+#	include <GL/gl.h>
 #elif defined(MACOS_X)
 #	include <OpenGL/gl3.h>
 #elif defined( __linux__ )
