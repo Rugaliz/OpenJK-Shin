@@ -178,8 +178,11 @@ static int SNDDMA_ExpandSampleFrequencyKHzToHz(int khz)
 	{
 #ifdef _JK2EXE
 		// 0 is the default of the cvar, 44 what the stock default.cfg sets it to ("very high" in the sound menu):
-		//	both mean the output device's own rate, which is at least as good as 44.1kHz
+		//	both mean the output device's own rate, which is at least as good as 44.1kHz. 11 and 22 are what the
+		//	"low" and "high" of that menu (no longer there) saved, a low rate is asked for with its exact rate in Hz.
 		case 0:
+		case 11:
+		case 22:
 		case 44: return SNDDMA_ChooseFrequency();
 		default:
 			if (khz >= 8000 && khz <= 192000)
@@ -189,8 +192,10 @@ static int SNDDMA_ExpandSampleFrequencyKHzToHz(int khz)
 		default:
 		case 44: return 44100;
 #endif
+#ifndef _JK2EXE
 		case 22: return 22050;
 		case 11: return 11025;
+#endif
 	}
 }
 
