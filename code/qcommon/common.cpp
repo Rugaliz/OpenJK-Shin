@@ -1077,6 +1077,8 @@ static void Com_CatchError ( int code )
 Com_Init
 =================
 */
+static void Com_MigrateConfig( void );
+
 void Com_Init( char *commandLine ) {
 	char	*s;
 
@@ -1173,6 +1175,8 @@ void Com_Init( char *commandLine ) {
 
 		Sys_Init();	// this also detects CPU type, so I can now do this CPU check below...
 
+		Com_MigrateConfig();
+
 		Sys_SetProcessorAffinity();
 
 		Netchan_Init( Com_Milliseconds() & 0xffff );	// pick a port value that should be nice and random
@@ -1217,6 +1221,29 @@ void Com_Init( char *commandLine ) {
 }
 
 //==================================================================
+
+/*
+===============
+Com_MigrateConfig
+
+Config files written by older versions saved the old defaults (com_maxfps 125,
+r_swapInterval 0), which cannot be told apart from a deliberate choice and would
+hold a high refresh rate display at 125 fps with tearing. Reset them once.
+===============
+*/
+#define COM_CONFIG_VERSION	1
+
+static void Com_MigrateConfig( void ) {
+	cvar_t *version = Cvar_Get( "com_configVersion", "0", CVAR_ARCHIVE_ND );
+
+	if ( version->integer >= COM_CONFIG_VERSION ) {
+		return;
+	}
+
+	Cvar_Set( "com_maxfps", "0" );
+	Cvar_Set( "r_swapInterval", "1" );
+	Cvar_Set( "com_configVersion", va( "%d", COM_CONFIG_VERSION ) );
+}
 
 void Com_WriteConfigToFile( const char *filename ) {
 	fileHandle_t	f;
@@ -1363,6 +1390,11 @@ void G2Time_ResetTimers(void);
 void G2Time_ReportTimers(void);
 #endif
 
+// Safety ceiling for com_maxfps 0 (auto). Vsync normally keeps the game at the
+// refresh rate; this only matters when vsync is off or ignored by the driver.
+// Above ~300 fps the 1 msec time resolution starts to distort timescale effects.
+#define COM_AUTO_MAXFPS	250
+
 void Com_Frame( void ) {
 	try
 	{
@@ -1392,7 +1424,7 @@ void Com_Frame( void ) {
 		else if(com_maxfps->integer > 0)
 			frameTime = 1000000 / com_maxfps->integer;
 		else
-			frameTime = 1000;
+			frameTime = 1000000 / COM_AUTO_MAXFPS;	// com_maxfps 0 = auto: vsync paces the game, this is the safety ceiling
 
 		// nextFrameTime is when this frame may start. It advances by exactly one
 		// frame time per frame, so wake-up jitter does not accumulate; after a
