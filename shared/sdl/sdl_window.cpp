@@ -49,6 +49,7 @@ cvar_t	*r_centerWindow;
 cvar_t	*r_customwidth;
 cvar_t	*r_customheight;
 cvar_t	*r_swapInterval;
+cvar_t	*r_adaptiveVsync;
 cvar_t	*r_stereo;
 cvar_t	*r_mode;
 cvar_t	*r_displayRefresh;
@@ -186,6 +187,29 @@ void GLimp_Minimize(void)
 	SDL_MinimizeWindow( screen );
 }
 
+/*
+===============
+GLimp_ApplySwapInterval
+
+With r_adaptiveVsync, vsync on (1) is upgraded to adaptive vsync (-1) where the
+driver offers it: synced to the display like vsync, but a late frame tears
+instead of waiting for the next refresh (which would halve the frame rate).
+===============
+*/
+static void GLimp_ApplySwapInterval( void )
+{
+	if ( r_swapInterval->integer == 1 && r_adaptiveVsync->integer && SDL_GL_SetSwapInterval( -1 ) )
+	{
+		Com_Printf( "Vertical sync: adaptive\n" );
+		return;
+	}
+
+	if ( !SDL_GL_SetSwapInterval( r_swapInterval->integer ) )
+	{
+		Com_DPrintf( "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError() );
+	}
+}
+
 void WIN_Present( window_t *window )
 {
 	if ( window->api == GRAPHICS_API_OPENGL )
@@ -195,10 +219,7 @@ void WIN_Present( window_t *window )
 		if ( r_swapInterval->modified )
 		{
 			r_swapInterval->modified = qfalse;
-			if ( !SDL_GL_SetSwapInterval( r_swapInterval->integer ) )
-			{
-				Com_DPrintf( "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError() );
-			}
+			GLimp_ApplySwapInterval();
 		}
 	}
 
@@ -659,10 +680,7 @@ static rserr_t GLimp_SetMode(glconfig_t *glConfig, const windowDesc_t *windowDes
 				continue;
 			}
 
-			if ( !SDL_GL_SetSwapInterval( r_swapInterval->integer ) )
-			{
-				Com_DPrintf( "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError() );
-			}
+			GLimp_ApplySwapInterval();
 
 			glConfig->colorBits = testColorBits;
 			glConfig->depthBits = testDepthBits;
@@ -807,6 +825,11 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 	r_swapInterval		= Cvar_Get( "r_swapInterval",		"1",		CVAR_ARCHIVE_ND );
 #else
 	r_swapInterval		= Cvar_Get( "r_swapInterval",		"0",		CVAR_ARCHIVE_ND );
+#endif
+#ifdef _JK2EXE
+	r_adaptiveVsync		= Cvar_Get( "r_adaptiveVsync",		"1",		CVAR_ARCHIVE_ND );
+#else
+	r_adaptiveVsync		= Cvar_Get( "r_adaptiveVsync",		"0",		CVAR_ARCHIVE_ND );
 #endif
 	r_stereo			= Cvar_Get( "r_stereo",				"0",		CVAR_ARCHIVE_ND|CVAR_LATCH );
 #ifdef _JK2EXE
