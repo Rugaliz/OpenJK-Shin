@@ -526,11 +526,13 @@ void SVC_Info( const netadr_t *from ) {
 	Info_SetValueForKey( infostring, "gametype", va("%i", sv_gametype->integer ) );
 	Info_SetValueForKey( infostring, "needpass", va("%i", sv_needpass->integer ) );
 	Info_SetValueForKey( infostring, "truejedi", va("%i", Cvar_VariableIntegerValue( "g_jediVmerc" ) ) );
+#ifndef JK2_MODE	// (no duel specific weapon disable in Jedi Outcast)
 	if ( sv_gametype->integer == GT_DUEL || sv_gametype->integer == GT_POWERDUEL )
 	{
 		wDisable = Cvar_VariableIntegerValue( "g_duelWeaponDisable" );
 	}
 	else
+#endif
 	{
 		wDisable = Cvar_VariableIntegerValue( "g_weaponDisable" );
 	}

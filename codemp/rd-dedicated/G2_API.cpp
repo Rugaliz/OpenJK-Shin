@@ -550,7 +550,7 @@ qboolean G2_ShouldRegisterServer(void)
 
 	vm_t *currentVM = ri.GetCurrentVM();
 
-	if ( currentVM && currentVM->slot == VM_GAME )
+	if ( currentVM && VM_SLOT( currentVM ) == VM_GAME )
 	{
 		if ( ri.Cvar_VariableIntegerValue( "cl_running" ) &&
 			ri.Com_TheHunkMarkHasBeenMade() && ShaderHashTableExists())

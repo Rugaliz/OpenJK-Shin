@@ -32,6 +32,7 @@ void		GVM_RunFrame						( int levelTime );
 qboolean	GVM_ConsoleCommand					( void );
 int			GVM_BotAIStartFrame					( int time );
 void		GVM_ROFF_NotetrackCallback			( int entID, const char *notetrack );
+#ifndef JK2_MODE	// (Jedi Outcast has no RMG, ICARUS or NPC navigation: these are calls into the Jedi Academy game module)
 void		GVM_SpawnRMGEntity					( void );
 int			GVM_ICARUS_PlaySound				( void );
 qboolean	GVM_ICARUS_Set						( void );
@@ -60,6 +61,7 @@ qboolean	GVM_NAV_EntIsBreakable				( int entityNum );
 qboolean	GVM_NAV_EntIsRemovableUsable		( int entNum );
 void		GVM_NAV_FindCombatPointWaypoints	( void );
 int			GVM_BG_GetItemIndexByTag			( int tag, int type );
+#endif
 
 void SV_BindGame( void );
 void SV_UnbindGame( void );

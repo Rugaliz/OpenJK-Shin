@@ -28,6 +28,15 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_public.h"
 #include "mp3code/mp3struct.h"
 
+#ifdef JK2_MODE
+// the sound channels that Jedi Academy has and Jedi Outcast does not: no sound has them (a negative number), but the
+// code for them stays as it is. The ambient channel is the one the first channel after the body sounds is in Jedi Academy
+#define CHAN_VOICE_ATTEN	(-1)
+#define CHAN_VOICE_GLOBAL	(-2)
+#define CHAN_LESS_ATTEN		(-3)
+#define CHAN_AMBIENT		CHAN_LOCAL_SOUND
+#endif
+
 
 //from SND_AMBIENT
 extern void AS_Init( void );

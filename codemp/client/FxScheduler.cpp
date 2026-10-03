@@ -787,6 +787,10 @@ void GetRGB_Colors( CPrimitiveTemplate *fx, vec3_t outStartRGB, vec3_t outEndRGB
 // Return:
 //	none
 //------------------------------------------------------
+#ifdef JK2_MODE
+int g_fxFollowEntityNum = -1;	// for the next PlayEffect: the entity the effect follows (-1 = none), see FX_PlayEntityEffectID
+#endif
+
 void CFxScheduler::PlayEffect( int id, vec3_t origin, matrix3_t axis, const int boltInfo, CGhoul2Info_v *ghoul2, int fxParm /*-1*/, int vol, int rad, bool isPortal/*false*/, int iLoopTime/*0*/,  bool isRelative )
 {
 	SEffectTemplate			*fx;
@@ -813,6 +817,16 @@ void CFxScheduler::PlayEffect( int id, vec3_t origin, matrix3_t axis, const int 
 
 	int						modelNum = 0, boltNum = -1;
 	int						entityNum = -1;
+
+#ifdef JK2_MODE
+	// Jedi Outcast: an effect that is played for an entity (and not on a bolt of its model) follows the origin of the
+	// entity, which the game module tells with the call that plays the effect
+	if ( boltInfo <= 0 )
+	{
+		entityNum = g_fxFollowEntityNum;
+	}
+	g_fxFollowEntityNum = -1;
+#endif
 
 	if ( boltInfo > 0 )
 	{

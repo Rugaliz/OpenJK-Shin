@@ -29,6 +29,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "qcommon/stringed_ingame.h"
 #include "qcommon/game_version.h"
 #include "qcommon/q_version.h"
+#ifdef JK2_MODE
+// the strings of Jedi Outcast are in string packages (strip.h), not in the ones of Jedi Academy
+#include "qcommon/strip.h"
+#define SE_GetString( reference )	SP_GetStringTextString( reference )
+#endif
 
 
 int g_console_field_width = 78;
@@ -831,13 +836,21 @@ void Con_DrawNotify (void)
 	{
 		if (chat_team)
 		{
+#ifdef JK2_MODE
+			chattext = "say_team:";
+#else
 			chattext = SE_GetString("MP_SVGAME", "SAY_TEAM");
+#endif
 			SCR_DrawBigString (8, v, chattext, 1.0f, qfalse );
 			skip = strlen(chattext)+1;
 		}
 		else
 		{
+#ifdef JK2_MODE
+			chattext = "say:";
+#else
 			chattext = SE_GetString("MP_SVGAME", "SAY");
+#endif
 			SCR_DrawBigString (8, v, chattext, 1.0f, qfalse );
 			skip = strlen(chattext)+1;
 		}

@@ -888,10 +888,12 @@ qboolean ServerLoadMDXM( model_t *mod, void *buffer, const char *mod_name, qbool
 	}
 
 	bool isAnOldModelFile = false;
+#ifndef JK2_MODE	// (the models of Jedi Outcast are native, they use their own skeleton)
 	if (mdxm->numBones == 72 && strstr(mdxm->animName,"_humanoid") )
 	{
 		isAnOldModelFile = true;
 	}
+#endif
 
 	surfInfo = (mdxmSurfHierarchy_t *)( (byte *)mdxm + mdxm->ofsSurfHierarchy);
 #ifdef Q3_BIG_ENDIAN

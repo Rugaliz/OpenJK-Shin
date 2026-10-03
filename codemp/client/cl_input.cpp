@@ -358,7 +358,10 @@ void IN_GenCMD31( void )
 static bool g_clAutoMapMode = false;
 void IN_AutoMapButton(void)
 {
+#ifndef JK2_MODE
+	// Jedi Outcast has no automap
 	g_clAutoMapMode = !g_clAutoMapMode;
+#endif
 }
 
 //toggle between automap, radar, nothing
@@ -389,7 +392,10 @@ void IN_VoiceChatButton(void)
 	{ //ui not loaded so this command is useless
 		return;
 	}
+#ifndef JK2_MODE
+	// Jedi Outcast has no voice chat menu
 	UIVM_SetActiveMenu( UIMENU_VOICECHAT );
+#endif
 }
 
 void IN_KeyDown( kbutton_t *b ) {
@@ -1251,8 +1257,13 @@ void CL_FinishMove( usercmd_t *cmd ) {
 	if (cl.gcmdSendValue)
 	{
 		cmd->generic_cmd = cl.gcmdValue;
+#ifdef JK2_MODE
+		// Jedi Outcast: the command goes with one user command only
+		cl.gcmdSendValue = qfalse;
+#else
 		//cl.gcmdSendValue = qfalse;
 		cl.gcmdSentValue = qtrue;
+#endif
 	}
 	else
 	{
@@ -1263,13 +1274,83 @@ void CL_FinishMove( usercmd_t *cmd ) {
 	// can be determined without allowing cheating
 	cmd->serverTime = cl.serverTime;
 
+#ifdef JK2_MODE
+	qboolean didForce = qfalse;
+#endif
+
 	if (cl.cgameViewAngleForceTime > cl.serverTime)
 	{
 		cl.cgameViewAngleForce[YAW] -= SHORT2ANGLE(cl.snap.ps.delta_angles[YAW]);
 
 		cl.viewangles[YAW] = cl.cgameViewAngleForce[YAW];
 		cl.cgameViewAngleForceTime = 0;
+#ifdef JK2_MODE
+		didForce = qtrue;
+#endif
 	}
+
+#ifdef JK2_MODE
+	// Jedi Outcast: the view may be limited in the yaw (on an emplaced gun), the cgame module tells the limits
+	if (cl.viewangles[YAW] < 0)
+	{
+		cl.viewangles[YAW] += 360;
+		cl.lastViewYaw += 360;
+	}
+	if (cl.viewangles[YAW] > 360)
+	{
+		cl.viewangles[YAW] -= 360;
+		cl.lastViewYaw -= 360;
+	}
+
+	if (!didForce && cl.cgameTurnExtentTime > cl.serverTime)
+	{ //Do not allow crossing the extents in any direction
+		qboolean forceBack = qfalse;
+		float extentAdd = cl.cgameTurnExtentAdd;
+		float extentSub = cl.cgameTurnExtentSub;
+
+		extentAdd -= SHORT2ANGLE(cl.snap.ps.delta_angles[YAW]);
+		extentSub -= SHORT2ANGLE(cl.snap.ps.delta_angles[YAW]);
+
+		if (extentAdd < 0)
+		{
+			extentAdd += 360;
+		}
+		if (extentSub < 0)
+		{
+			extentSub += 360;
+		}
+
+		if (cl.viewangles[YAW] > extentAdd &&
+			cl.lastViewYaw < extentAdd)
+		{
+			forceBack = qtrue;
+		}
+		else if (cl.viewangles[YAW] > extentSub &&
+			cl.lastViewYaw < extentSub)
+		{
+			forceBack = qtrue;
+		}
+		else if (cl.viewangles[YAW] < extentAdd &&
+			cl.lastViewYaw > extentAdd)
+		{
+			forceBack = qtrue;
+		}
+		else if (cl.viewangles[YAW] < extentSub &&
+			cl.lastViewYaw > extentSub)
+		{
+			forceBack = qtrue;
+		}
+
+		if (forceBack)
+		{
+			cl.viewangles[YAW] = cl.lastViewYaw;
+		}
+
+		cl.cgameTurnExtentTime = 0;
+	}
+
+	cl.lastViewYaw = cl.viewangles[YAW];
+#endif
 
 	if ( cl_crazyShipControls )
 	{

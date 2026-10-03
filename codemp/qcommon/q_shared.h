@@ -27,12 +27,21 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // q_shared.h -- included first by ALL program modules.
 // A user mod should never modify this file
 
+#ifdef JK2_MODE
+#define PRODUCT_NAME			"openjo_mp"
+
+#define CLIENT_WINDOW_TITLE "OpenJO (MP)"
+#define CLIENT_CONSOLE_TITLE "OpenJO Console (MP)"
+#define HOMEPATH_NAME_UNIX "openjo"
+#define HOMEPATH_NAME_WIN "OpenJO"
+#else
 #define PRODUCT_NAME			"openjk"
 
 #define CLIENT_WINDOW_TITLE "OpenJK (MP)"
 #define CLIENT_CONSOLE_TITLE "OpenJK Console (MP)"
 #define HOMEPATH_NAME_UNIX "openjk"
 #define HOMEPATH_NAME_WIN "OpenJK"
+#endif
 #define HOMEPATH_NAME_MACOSX HOMEPATH_NAME_WIN
 
 #define	BASEGAME "base"
@@ -148,6 +157,10 @@ typedef union fileBuffer_u {
 } fileBuffer_t;
 
 typedef int32_t qhandle_t, thandle_t, fxHandle_t, sfxHandle_t, fileHandle_t, clipHandle_t;
+#ifdef JK2_MODE
+// what a game module (a QVM, it cannot hold a pointer) has for a Ghoul2 instance, see jk2/qcommon/g2_vmhandles.h
+typedef int32_t g2handle_t;
+#endif
 
 #define NULL_HANDLE ((qhandle_t)0)
 #define NULL_SOUND ((sfxHandle_t)0)
@@ -800,6 +813,25 @@ typedef CollisionRecord_t G2Trace_t[MAX_G2_COLLISIONS];	// map that describes al
 Ghoul2 Insert End
 */
 // a trace is returned when a box is swept through the world
+#ifdef JK2_MODE
+typedef struct {
+	qboolean	allsolid;	// if true, plane is not valid
+	qboolean	startsolid;	// if true, the initial point was in a solid area
+	float		fraction;	// time completed, 1.0 = didn't hit anything
+	vec3_t		endpos;		// final position
+	cplane_t	plane;		// surface normal at impact, transformed to world space
+	int			surfaceFlags;	// surface hit
+	int			contents;	// contents on other side of surface hit
+	int			entityNum;	// entity the contacted sirface is a part of
+/*
+Ghoul2 Insert Start
+*/
+	CollisionRecord_t G2CollisionMap[MAX_G2_COLLISIONS];	// map that describes all of the parts of ghoul2 models that got hit
+/*
+Ghoul2 Insert End
+*/
+} trace_t;
+#else
 typedef struct trace_s {
 	byte		allsolid;	// if true, plane is not valid
 	byte		startsolid;	// if true, the initial point was in a solid area
@@ -819,6 +851,8 @@ Ghoul2 Insert Start
 Ghoul2 Insert End
 */
 } trace_t;
+#endif
+
 
 // trace->entityNum can also be 0 to (MAX_GENTITIES-1)
 // or ENTITYNUM_NONE, ENTITYNUM_WORLD
@@ -851,6 +885,18 @@ typedef struct orientation_s {
 // sound channels
 // channel 0 never willingly overrides
 // other channels will allways override a playing sound on that channel
+#ifdef JK2_MODE
+typedef enum {
+	CHAN_AUTO,
+	CHAN_LOCAL,		// menu sounds, etc
+	CHAN_WEAPON,
+	CHAN_VOICE,
+	CHAN_ITEM,
+	CHAN_BODY,
+	CHAN_LOCAL_SOUND,	// chat messages, etc
+	CHAN_ANNOUNCER		// announcer voices, etc
+} soundChannel_t;
+#else
 typedef enum {
 	CHAN_AUTO,	//## %s !!"W:\game\base\!!sound\*.wav;*.mp3" # Auto-picks an empty channel to play sound on
 	CHAN_LOCAL,	//## %s !!"W:\game\base\!!sound\*.wav;*.mp3" # menu sounds, etc
@@ -867,6 +913,8 @@ typedef enum {
 	CHAN_VOICE_GLOBAL,  //## %s !!"W:\game\base\!!sound\voice\*.wav;*.mp3" # Causes mouth animation and is broadcast, like announcer
 	CHAN_MUSIC,	//## %s !!"W:\game\base\!!sound\*.wav;*.mp3" #music played as a looping sound - added by BTO (VV)
 } soundChannel_t;
+#endif
+
 
 
 /*
@@ -917,10 +965,18 @@ typedef enum {
 
 
 // these are also in be_aas_def.h - argh (rjr)
+#ifdef JK2_MODE
+#define	MAX_MODELS			256		// these are sent over the net as 8 bits
+#else
 #define	MAX_MODELS			512		// these are sent over the net as -12 bits
+#endif
 #define	MAX_SOUNDS			256		// so they cannot be blindly increased
 #define MAX_ICONS			64		// max registered icons you can have per map
 #define MAX_FX				64		// max effects strings, I'm hoping that 64 will be plenty
+#ifdef JK2_MODE
+#define MAX_STRING_PACKAGES	30		// the string packages (strip/*.sp) that are told to the clients
+#define	MAX_CHARSKINS		64		// character skins
+#endif
 
 #define MAX_SUB_BSP			32 //rwwRMG - added
 
@@ -934,7 +990,11 @@ Ghoul2 Insert End
 
 #define MAX_AMBIENT_SETS		256 //rww - ambient soundsets must be sent over in config strings.
 
+#ifdef JK2_MODE
+#define	MAX_CONFIGSTRINGS	1400
+#else
 #define	MAX_CONFIGSTRINGS	1700 //this is getting pretty high. Try not to raise it anymore than it already is.
+#endif
 
 // these are the only configstrings that the system reserves, all the
 // other ones are strictly for servergame to clientgame communication
@@ -965,6 +1025,66 @@ typedef enum {
 
 #define TRACK_CHANNEL_MAX (NUM_TRACK_CHANNELS-50)
 
+#ifdef JK2_MODE
+typedef struct forcedata_s {
+	int			forcePowerDebounce[NUM_FORCE_POWERS];	//for effects that must have an interval
+	int			forcePowersKnown;
+	int			forcePowersActive;
+	int			forcePowerSelected;
+	int			forceButtonNeedRelease;
+	int			forcePowerDuration[NUM_FORCE_POWERS];
+	int			forcePower;
+	int			forcePowerMax;
+	int			forcePowerRegenDebounceTime;
+	int			forcePowerLevel[NUM_FORCE_POWERS];		//so we know the max forceJump power you have
+	int			forcePowerBaseLevel[NUM_FORCE_POWERS];
+	int			forceUsingAdded;
+	float		forceJumpZStart;					//So when you land, you don't get hurt as much
+	float		forceJumpCharge;					//you're current forceJump charge-up level, increases the longer you hold the force jump button down
+	int			forceJumpSound;
+	int			forceJumpAddTime;
+	int			forceGripEntityNum;					//what entity I'm gripping
+	int			forceGripDamageDebounceTime;		//debounce for grip damage
+	float		forceGripBeingGripped;				//if > level.time then client is in someone's grip
+	int			forceGripCripple;					//if != 0 then make it so this client can't move quickly (he's being gripped)
+	int			forceGripUseTime;					//can't use if > level.time
+	float		forceGripSoundTime;
+	float		forceGripStarted;					//level.time when the grip was activated
+	float		forceSpeedSmash;
+	float		forceSpeedDoDamage;
+	int			forceSpeedHitIndex;					//if we hit another player and got hurt, hurt them too
+	int			forceHealTime;
+	int			forceHealAmount;
+
+	//This hurts me somewhat to do, but there's no other real way to allow completely "dynamic" mindtricking.
+	int			forceMindtrickTargetIndex; //0-15
+	int			forceMindtrickTargetIndex2; //16-32
+	int			forceMindtrickTargetIndex3; //33-48
+	int			forceMindtrickTargetIndex4; //49-64
+
+	int			forceRageRecoveryTime;
+	int			forceDrainEntNum;
+	float		forceDrainTime;
+
+	int			forceDoInit;
+
+	int			forceSide;
+	int			forceRank;
+
+	int			forceDeactivateAll;
+
+	int			killSoundEntIndex[TRACK_CHANNEL_MAX]; //this goes here so it doesn't get wiped over respawn
+
+	qboolean	sentryDeployed;
+
+	int			saberAnimLevel;
+	int			saberDrawAnimLevel;
+
+	int			suicides;
+
+	int			privateDuelTime;
+} forcedata_t;
+#else
 typedef struct forcedata_s {
 	int			forcePowerDebounce[NUM_FORCE_POWERS];	//for effects that must have an interval
 	int			forcePowersKnown;
@@ -1021,6 +1141,8 @@ typedef struct forcedata_s {
 
 	int			privateDuelTime;
 } forcedata_t;
+#endif
+
 
 
 typedef enum {
@@ -1034,9 +1156,15 @@ typedef enum {
 #define	MAX_STATS				16
 #define	MAX_PERSISTANT			16
 #define	MAX_POWERUPS			16
+#ifdef JK2_MODE
+#define	MAX_WEAPONS				16
+#define MAX_AMMO_TRANSMIT		16
+#define MAX_AMMO				MAX_WEAPONS
+#else
 #define	MAX_WEAPONS				19
 #define MAX_AMMO_TRANSMIT		16 // This is needed because the ammo array is 19 but only 16 sized array is networked
 #define MAX_AMMO				MAX_WEAPONS
+#endif
 
 #define	MAX_PS_EVENTS			2
 
@@ -1053,7 +1181,18 @@ typedef enum {
 //Crazy optimization attempt to take all those 1 bit values and shove them into a single
 //send. May help us not have to send so many 1/0 bits to acknowledge modified values. -rww
 
+#ifndef JK2_MODE
 #define _OPTIMIZED_VEHICLE_NETWORKING
+#endif
+
+// the vehicle a player is riding (Jedi Outcast has no vehicles)
+#ifdef JK2_MODE
+#define PS_VEHICLE_NUM(ps)	0
+#define ES_IS_PORTAL(es)	qfalse
+#else
+#define PS_VEHICLE_NUM(ps)	((ps).m_iVehicleNum)
+#define ES_IS_PORTAL(es)	((es).isPortalEnt)
+#endif
 //Instead of sending 2 full playerStates for the pilot and the vehicle, send a smaller,
 //specialized pilot playerState and vehicle playerState.  Also removes some vehicle
 //fields from the normal playerState -mcg
@@ -1068,6 +1207,207 @@ typedef enum {
 // playerState_t is a full superset of entityState_t as it is used by players,
 // so if a playerState_t is transmitted, the entityState_t can be fully derived
 // from it.
+#ifdef JK2_MODE
+typedef struct playerState_s {
+	int			commandTime;	// cmd->serverTime of last executed command
+	int			pm_type;
+	int			bobCycle;		// for view bobbing and footstep generation
+	int			pm_flags;		// ducked, jump_held, etc
+	int			pm_time;
+
+	vec3_t		origin;
+	vec3_t		velocity;
+	int			weaponTime;
+	int			weaponChargeTime;
+	int			weaponChargeSubtractTime;
+	int			gravity;
+	int			speed;
+	int			basespeed; //used in prediction to know base server g_speed value when modifying speed between updates
+	int			delta_angles[3];	// add to command angles to get view direction
+									// changed by spawns, rotating objects, and teleporters
+
+	int			useTime;
+
+	int			groundEntityNum;// ENTITYNUM_NONE = in air
+
+	int			legsTimer;		// don't change low priority animations until this runs out
+	int			legsAnim;		// mask off ANIM_TOGGLEBIT
+
+	int			torsoTimer;		// don't change low priority animations until this runs out
+	int			torsoAnim;		// mask off ANIM_TOGGLEBIT
+
+	int			movementDir;	// a number 0 to 7 that represents the reletive angle
+								// of movement to the view angle (axial and diagonals)
+								// when at rest, the value will remain unchanged
+								// used to twist the legs during strafing
+
+	int			eFlags;			// copied to entityState_t->eFlags
+
+	int			eventSequence;	// pmove generated events
+	int			events[MAX_PS_EVENTS];
+	int			eventParms[MAX_PS_EVENTS];
+
+	int			externalEvent;	// events set on player from another source
+	int			externalEventParm;
+	int			externalEventTime;
+
+	int			clientNum;		// ranges from 0 to MAX_CLIENTS-1
+	int			weapon;			// copied to entityState_t->weapon
+	int			weaponstate;
+
+	vec3_t		viewangles;		// for fixed views
+	int			viewheight;
+
+	// damage feedback
+	int			damageEvent;	// when it changes, latch the other parms
+	int			damageYaw;
+	int			damagePitch;
+	int			damageCount;
+	int			damageType;
+
+	int			painTime;		// used for both game and client side to process the pain twitch - NOT sent across the network
+	int			painDirection;	// NOT sent across the network
+	float		yawAngle;		// NOT sent across the network
+	qboolean	yawing;			// NOT sent across the network
+	float		pitchAngle;		// NOT sent across the network
+	qboolean	pitching;		// NOT sent across the network
+
+	int			stats[MAX_STATS];
+	int			persistant[MAX_PERSISTANT];	// stats that aren't cleared on death
+	int			powerups[MAX_POWERUPS];	// level.time that the powerup runs out
+	int			ammo[MAX_WEAPONS];
+
+	int			generic1;
+	int			loopSound;
+	int			jumppad_ent;	// jumppad entity hit this frame
+
+	// not communicated over the net at all
+	int			ping;			// server to game info for scoreboard
+	int			pmove_framecount;	// FIXME: don't transmit over the network
+	int			jumppad_frame;
+	int			entityEventSequence;
+
+	int			lastOnGround;	//last time you were on the ground
+
+	qboolean	saberInFlight;
+	qboolean	saberActive;
+
+	int			saberMove;
+	int			saberBlocking;
+	int			saberBlocked;
+
+	int			saberLockTime;
+	int			saberLockEnemy;
+	int			saberLockFrame; //since we don't actually have the ability to get the current anim frame
+	int			saberLockHits; //every x number of buttons hits, allow one push forward in a saber lock (server only)
+	qboolean	saberLockAdvance; //do an advance (sent across net as 1 bit)
+
+	int			saberEntityNum;
+	float		saberEntityDist;
+	int			saberEntityState;
+	int			saberThrowDelay;
+	qboolean	saberCanThrow;
+	int			saberDidThrowTime;
+	int			saberDamageDebounceTime;
+	int			saberHitWallSoundDebounceTime;
+	int			saberEventFlags;
+
+	int			rocketLockIndex;
+	float		rocketLastValidTime;
+	float		rocketLockTime;
+	float		rocketTargetTime;
+
+	int			emplacedIndex;
+	float		emplacedTime;
+
+	qboolean	isJediMaster;
+	qboolean	forceRestricted;
+	qboolean	trueJedi;
+	qboolean	trueNonJedi;
+	int			saberIndex;
+
+	int			genericEnemyIndex;
+	float		droneFireTime;
+	float		droneExistTime;
+
+	int			activeForcePass;
+
+	qboolean	hasDetPackPlanted; //better than taking up an eFlag isn't it?
+
+	float		holocronsCarried[NUM_FORCE_POWERS];
+	int			holocronCantTouch;
+	float		holocronCantTouchTime; //for keeping track of the last holocron that just popped out of me (if any)
+	int			holocronBits;
+
+	int			legsAnimExecute;
+	int			torsoAnimExecute;
+	int			fullAnimExecute;
+
+	int			electrifyTime;
+
+	int			saberAttackSequence;
+	int			saberIdleWound;
+	int			saberAttackWound;
+	int			saberBlockTime;
+
+	int			otherKiller;
+	int			otherKillerTime;
+	int			otherKillerDebounceTime;
+
+	forcedata_t	fd;
+	qboolean	forceJumpFlip;
+	int			forceHandExtend;
+	int			forceHandExtendTime;
+
+	int			forceRageDrainTime;
+
+	int			forceDodgeAnim;
+	qboolean	quickerGetup;
+
+	int			groundTime;		// time when first left ground
+
+	int			footstepTime;
+
+	int			otherSoundTime;
+	float		otherSoundLen;
+
+	int			forceGripMoveInterval;
+	int			forceGripChangeMovetype;
+
+	int			forceKickFlip;
+
+	int			duelIndex;
+	int			duelTime;
+	qboolean	duelInProgress;
+
+	int			saberAttackChainCount;
+
+	qboolean	saberHolstered;
+
+	qboolean	usingATST;
+	qboolean	atstAltFire;
+	int			holdMoveTime;
+
+	int			forceAllowDeactivateTime;
+
+	// zoom key
+	int			zoomMode;		// 0 - not zoomed, 1 - disruptor weapon
+	int			zoomTime;
+	qboolean	zoomLocked;
+	float		zoomFov;
+	int			zoomLockTime;
+
+	int			fallingToDeath;
+
+	int			useDelay;
+
+	qboolean	inAirAnim;
+
+	qboolean	dualBlade;
+
+	vec3_t		lastHitLoc;
+} playerState_t;
+#else
 typedef struct playerState_s {
 	int			commandTime;	// cmd->serverTime of last executed command
 	int			pm_type;
@@ -1333,6 +1673,8 @@ typedef struct playerState_s {
 	int			deltaNumBits;
 #endif
 } playerState_t;
+#endif
+
 
 typedef struct siegePers_s
 {
@@ -1563,6 +1905,88 @@ typedef struct trajectory_s {
 // Different eTypes may use the information in different ways
 // The messages are delta compressed, so it doesn't really matter if
 // the structure size is fairly large
+#ifdef JK2_MODE
+typedef struct entityState_s {
+	int		number;			// entity index
+	int		eType;			// entityType_t
+	int		eFlags;
+
+	trajectory_t	pos;	// for calculating position
+	trajectory_t	apos;	// for calculating angles
+
+	int		time;
+	int		time2;
+
+	vec3_t	origin;
+	vec3_t	origin2;
+
+	vec3_t	angles;
+	vec3_t	angles2;
+
+	//rww - these were originally because we shared g2 info client and server side. Now they
+	//just get used as generic values everywhere.
+	int		bolt1;
+	int		bolt2;
+
+	//rww - this is necessary for determining player visibility during a jedi mindtrick
+	int		trickedentindex; //0-15
+	int		trickedentindex2; //16-32
+	int		trickedentindex3; //33-48
+	int		trickedentindex4; //49-64
+
+	float	speed;
+
+	int		fireflag;
+
+	int		genericenemyindex;
+
+	int		activeForcePass;
+
+	int		emplacedOwner;
+
+	int		otherEntityNum;	// shotgun sources, etc
+	int		otherEntityNum2;
+
+	int		groundEntityNum;	// -1 = in air
+
+	int		constantLight;	// r + (g<<8) + (b<<16) + (intensity<<24)
+	int		loopSound;		// constantly loop this sound
+
+	int		modelGhoul2;
+	int		g2radius;
+	int		modelindex;
+	int		modelindex2;
+	int		clientNum;		// 0 to (MAX_CLIENTS - 1), for players and corpses
+	int		frame;
+
+	qboolean	saberInFlight;
+	int			saberEntityNum;
+	int			saberMove;
+	int			forcePowersActive;
+
+	qboolean	isJediMaster;
+
+	int		solid;			// for client side prediction, trap_linkentity sets this properly
+
+	int		event;			// impulse events -- muzzle flashes, footsteps, etc
+	int		eventParm;
+
+	// so crosshair knows what it's looking at
+	int			owner;
+	int			teamowner;
+	qboolean	shouldtarget;
+
+	// for players
+	int		powerups;		// bit flags
+	int		weapon;			// determines weapon and flash model, etc
+	int		legsAnim;		// mask off ANIM_TOGGLEBIT
+	int		torsoAnim;		// mask off ANIM_TOGGLEBIT
+
+	int		forceFrame;		//if non-zero, force the anim frame
+
+	int		generic1;
+} entityState_t;
+#else
 typedef struct entityState_s {
 	int		number;			// entity index
 	int		eType;			// entityType_t
@@ -1726,6 +2150,8 @@ typedef struct entityState_s {
 	vec3_t		userVec1;
 	vec3_t		userVec2;
 } entityState_t;
+#endif
+
 
 typedef enum {
 	CA_UNINITIALIZED,

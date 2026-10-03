@@ -224,9 +224,9 @@ static void SV_WriteSnapshotToClient( client_t *client, msg_t *msg ) {
 #else
 		MSG_WriteDeltaPlayerstate( msg, &oldframe->ps, &frame->ps );
 #endif
-		if (frame->ps.m_iVehicleNum)
+		if (PS_VEHICLE_NUM(frame->ps))
 		{ //then write the vehicle's playerstate too
-			if (!oldframe->ps.m_iVehicleNum)
+			if (!PS_VEHICLE_NUM(oldframe->ps))
 			{ //if last frame didn't have vehicle, then the old vps isn't gonna delta
 				//properly (because our vps on the client could be anything)
 #ifdef _ONEBIT_COMBO
@@ -250,7 +250,7 @@ static void SV_WriteSnapshotToClient( client_t *client, msg_t *msg ) {
 #else
 		MSG_WriteDeltaPlayerstate( msg, NULL, &frame->ps );
 #endif
-		if (frame->ps.m_iVehicleNum)
+		if (PS_VEHICLE_NUM(frame->ps))
 		{ //then write the vehicle's playerstate too
 #ifdef _ONEBIT_COMBO
 			MSG_WriteDeltaPlayerstate( msg, NULL, &frame->vps, NULL, NULL, qtrue );
@@ -398,10 +398,12 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 			continue;
 		}
 
+#ifndef JK2_MODE
 		if (ent->s.eFlags & EF_PERMANENT)
 		{	// he's permanent, so don't send him down!
 			continue;
 		}
+#endif
 
 		if (ent->s.number != e) {
 			Com_DPrintf ("FIXING ENT->S.NUMBER!!!\n");
@@ -434,11 +436,13 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 		}
 
 		// entities can request not to be sent to certain clients (NOTE: always send to ourselves)
+#ifndef JK2_MODE
 		if ( e != frame->ps.clientNum && (ent->r.svFlags & SVF_BROADCASTCLIENTS)
 			&& !(ent->r.broadcastClients[frame->ps.clientNum/32] & (1 << (frame->ps.clientNum % 32))) )
 		{
 			continue;
 		}
+#endif
 		// broadcast entities are always sent, and so is the main player so we don't see noclip weirdness
 		if ( (ent->r.svFlags & SVF_BROADCAST) || e == frame->ps.clientNum
 			|| (ent->r.broadcastClients[frame->ps.clientNum/32] & (1 << (frame->ps.clientNum % 32))) )
@@ -447,7 +451,7 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
 			continue;
 		}
 
-		if (ent->s.isPortalEnt)
+		if (ES_IS_PORTAL(ent->s))
 		{ //rww - portal entities are always sent as well
 			SV_AddEntToSnapshot( svEnt, ent, eNums );
 			continue;
@@ -576,9 +580,10 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 	frame->pDeltaNumBit = &ps->deltaNumBits;
 #endif
 
-	if (ps->m_iVehicleNum)
+#ifndef JK2_MODE	// (no vehicles in Jedi Outcast)
+	if (PS_VEHICLE_NUM(*ps))
 	{ //get the vehicle's playerstate too then
-		sharedEntity_t *veh = SV_GentityNum(ps->m_iVehicleNum);
+		sharedEntity_t *veh = SV_GentityNum(PS_VEHICLE_NUM(*ps));
 
 		if (veh && veh->playerState)
 		{ //Now VMA it and we've got ourselves a playerState
@@ -591,6 +596,7 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 #endif
 		}
 	}
+#endif
 
 	int							clientNum;
 	// never send client's own entity, because it can
@@ -773,6 +779,7 @@ void SV_SendClientSnapshot( client_t *client ) {
 	byte		msg_buf[MAX_MSGLEN];
 	msg_t		msg;
 
+#ifndef JK2_MODE	// (no svc_setgame in Jedi Outcast)
 	if (!client->sentGamedir)
 	{ //rww - if this is the case then make sure there is an svc_setgame sent before this snap
 		int i = 0;
@@ -814,6 +821,7 @@ void SV_SendClientSnapshot( client_t *client ) {
 
 		client->sentGamedir = qtrue;
 	}
+#endif
 
 	// build the snapshot
 	SV_BuildClientSnapshot( client );

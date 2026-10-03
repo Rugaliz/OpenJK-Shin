@@ -32,6 +32,12 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "qcommon/MiniHeap.h"
 #include "qcommon/stringed_ingame.h"
 #include "qcommon/game_version.h"
+#ifdef JK2_MODE
+// the strings of Jedi Outcast are in string packages (strip.h), not in the ones of Jedi Academy
+#include "qcommon/strip.h"
+#define SE_GetString( reference )	SP_GetStringTextString( reference )
+#define SE_CheckForLanguageUpdates	SP_CheckForLanguageUpdates
+#endif
 #include "cl_cgameapi.h"
 #include "cl_uiapi.h"
 #include "cl_lan.h"
@@ -379,8 +385,10 @@ void CL_Record_f( void ) {
 	// write the checksum feed
 	MSG_WriteLong(&buf, clc.checksumFeed);
 
+#ifndef JK2_MODE
 	// Filler for old RMG system.
 	MSG_WriteShort ( &buf, 0 );
+#endif
 
 	// finished writing the client packet
 	MSG_WriteByte( &buf, svc_EOF );
@@ -2179,7 +2187,11 @@ CL_Frame
 */
 static unsigned int frameCount;
 static float avgFrametime=0.0;
+#ifdef JK2_MODE
+extern void SP_CheckForLanguageUpdates(void);
+#else
 extern void SE_CheckForLanguageUpdates(void);
+#endif
 void CL_Frame ( int msec ) {
 	qboolean takeVideoFrame = qfalse;
 
@@ -2412,7 +2424,11 @@ static IHeapAllocator *GetG2VertSpaceServer( void ) {
 	return G2VertSpaceServer;
 }
 
+#ifdef JK2_MODE
+#define DEFAULT_RENDER_LIBRARY "rdjomp-vanilla"
+#else
 #define DEFAULT_RENDER_LIBRARY "rd-vanilla"
+#endif
 
 void CL_InitRef( void ) {
 	static refimport_t ri;
@@ -2839,17 +2855,29 @@ void CL_Init( void ) {
 	Cvar_Get ("name", "Padawan", CVAR_USERINFO | CVAR_ARCHIVE_ND, "Player name" );
 	Cvar_Get ("rate", "25000", CVAR_USERINFO | CVAR_ARCHIVE, "Data rate" );
 	Cvar_Get ("snaps", "40", CVAR_USERINFO | CVAR_ARCHIVE, "Client snapshots per second" );
+#ifdef JK2_MODE
+	Cvar_Get ("model", "kyle/default", CVAR_USERINFO | CVAR_ARCHIVE, "Player model" );
+	Cvar_Get ("team_model", "kyle/default", CVAR_USERINFO | CVAR_ARCHIVE, "Player model in team games" );
+	Cvar_Get ("forcepowers", "7-1-032330000000001333", CVAR_USERINFO | CVAR_ARCHIVE, "Player forcepowers" );
+	Cvar_Get ("g_redTeam", "Empire", CVAR_SERVERINFO | CVAR_ARCHIVE);
+	Cvar_Get ("g_blueTeam", "Rebellion", CVAR_SERVERINFO | CVAR_ARCHIVE);
+	Cvar_Get ("color1",  "4", CVAR_USERINFO | CVAR_ARCHIVE, "Player saber color" );
+	Cvar_Get ("color2", "5", CVAR_USERINFO | CVAR_ARCHIVE, "Player saber color in team games" );
+	Cvar_Get ("teamtask", "0", CVAR_USERINFO );
+#else
 	Cvar_Get ("model", DEFAULT_MODEL"/default", CVAR_USERINFO | CVAR_ARCHIVE, "Player model" );
 	Cvar_Get ("forcepowers", "7-1-032330000000001333", CVAR_USERINFO | CVAR_ARCHIVE, "Player forcepowers" );
 //	Cvar_Get ("g_redTeam", DEFAULT_REDTEAM_NAME, CVAR_SERVERINFO | CVAR_ARCHIVE);
 //	Cvar_Get ("g_blueTeam", DEFAULT_BLUETEAM_NAME, CVAR_SERVERINFO | CVAR_ARCHIVE);
 	Cvar_Get ("color1",  "4", CVAR_USERINFO | CVAR_ARCHIVE, "Player saber1 color" );
 	Cvar_Get ("color2", "4", CVAR_USERINFO | CVAR_ARCHIVE, "Player saber2 color" );
+#endif
 	Cvar_Get ("handicap", "100", CVAR_USERINFO | CVAR_ARCHIVE, "Player handicap" );
 	Cvar_Get ("sex", "male", CVAR_USERINFO | CVAR_ARCHIVE, "Player sex" );
 	Cvar_Get ("password", "", CVAR_USERINFO, "Password to join server" );
 	Cvar_Get ("cg_predictItems", "1", CVAR_USERINFO | CVAR_ARCHIVE );
 
+#ifndef JK2_MODE	// no custom sabers and no skin tint in Jedi Outcast
 	//default sabers
 	Cvar_Get ("saber1",  DEFAULT_SABER, CVAR_USERINFO | CVAR_ARCHIVE, "Player default right hand saber" );
 	Cvar_Get ("saber2",  "none", CVAR_USERINFO | CVAR_ARCHIVE, "Player left hand saber" );
@@ -2858,6 +2886,7 @@ void CL_Init( void ) {
 	Cvar_Get ("char_color_red",  "255", CVAR_USERINFO | CVAR_ARCHIVE, "Player tint (Red)" );
 	Cvar_Get ("char_color_green",  "255", CVAR_USERINFO | CVAR_ARCHIVE, "Player tint (Green)" );
 	Cvar_Get ("char_color_blue",  "255", CVAR_USERINFO | CVAR_ARCHIVE, "Player tint (Blue)" );
+#endif
 
 	// cgame might not be initialized before menu is used
 	Cvar_Get ("cg_viewsize", "100", CVAR_ARCHIVE_ND );

@@ -299,13 +299,13 @@ void CL_ParseSnapshot( msg_t *msg ) {
 	SHOWNET( msg, "playerstate" );
 	if ( old ) {
 		MSG_ReadDeltaPlayerstate( msg, &old->ps, &newSnap.ps );
-		if (newSnap.ps.m_iVehicleNum)
+		if (PS_VEHICLE_NUM(newSnap.ps))
 		{ //this means we must have written our vehicle's ps too
 			MSG_ReadDeltaPlayerstate( msg, &old->vps, &newSnap.vps, qtrue );
 		}
 	} else {
 		MSG_ReadDeltaPlayerstate( msg, NULL, &newSnap.ps );
-		if (newSnap.ps.m_iVehicleNum)
+		if (PS_VEHICLE_NUM(newSnap.ps))
 		{ //this means we must have written our vehicle's ps too
 			MSG_ReadDeltaPlayerstate( msg, NULL, &newSnap.vps, qtrue );
 		}
@@ -357,6 +357,7 @@ void CL_ParseSnapshot( msg_t *msg ) {
 }
 
 
+#ifndef JK2_MODE	// Jedi Outcast has no svc_setgame
 /*
 ================
 CL_ParseSetGame
@@ -410,6 +411,7 @@ void CL_ParseSetGame( msg_t *msg )
 	MSG_CheckNETFPSFOverrides(qfalse);
 	MSG_CheckNETFPSFOverrides(qtrue);
 }
+#endif
 
 
 //=====================================================================
@@ -598,8 +600,10 @@ void CL_ParseGamestate( msg_t *msg ) {
 	// read the checksum feed
 	clc.checksumFeed = MSG_ReadLong( msg );
 
+#ifndef JK2_MODE
 	// Throw away the info for the old RMG system.
 	MSG_ReadShort (msg);
+#endif
 
 
 	// parse serverId and other cvars
@@ -862,9 +866,11 @@ void CL_ParseServerMessage( msg_t *msg ) {
 		case svc_snapshot:
 			CL_ParseSnapshot( msg );
 			break;
+#ifndef JK2_MODE
 		case svc_setgame:
 			CL_ParseSetGame( msg );
 			break;
+#endif
 		case svc_download:
 			CL_ParseDownload( msg );
 			break;

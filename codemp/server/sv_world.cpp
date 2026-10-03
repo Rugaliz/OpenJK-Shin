@@ -540,13 +540,32 @@ static void SV_ClipMoveToEntities( moveclip_t *clip ) {
 	int			i, num;
 	sharedEntity_t *touch;
 	int			passOwnerNum;
-	trace_t		trace, oldTrace= {0};
+	trace_t		trace, oldTrace= {};
 	clipHandle_t	clipHandle;
 	float		*origin, *angles;
 	int			thisOwnerShared = 1;
 
 	num = SV_AreaEntities( clip->boxmins, clip->boxmaxs, touchlist, MAX_GENTITIES);
 
+#ifdef JK2_MODE
+	// (SV_GentityNum checks the number, and the pass entity is ENTITYNUM_NONE for a trace that has none)
+	if ( clip->passEntityNum < 0 ) {
+		passOwnerNum = -1;	// common bad API usage in original modules
+	} else if ( clip->passEntityNum != ENTITYNUM_NONE ) {
+		const sharedEntity_t *passEnt = SV_GentityNum( clip->passEntityNum );
+
+		passOwnerNum = passEnt->r.ownerNum;
+		if ( passOwnerNum == ENTITYNUM_NONE ) {
+			passOwnerNum = -1;
+		}
+		if ( passEnt->r.svFlags & SVF_OWNERNOTSHARED )
+		{
+			thisOwnerShared = 0;
+		}
+	} else {
+		passOwnerNum = -1;
+	}
+#else
 	if ( clip->passEntityNum != ENTITYNUM_NONE ) {
 		passOwnerNum = ( SV_GentityNum( clip->passEntityNum ) )->r.ownerNum;
 		if ( passOwnerNum == ENTITYNUM_NONE ) {
@@ -560,6 +579,7 @@ static void SV_ClipMoveToEntities( moveclip_t *clip ) {
 	{
 		thisOwnerShared = 0;
 	}
+#endif
 
 	for ( i=0 ; i<num ; i++ ) {
 		if ( clip->trace.allsolid ) {
@@ -627,10 +647,12 @@ static void SV_ClipMoveToEntities( moveclip_t *clip ) {
 			origin, angles, clip->capsule);
 
 
+#ifndef JK2_MODE
 		if (clip->traceFlags & G2TRFLAG_DOGHOULTRACE)
 		{ // keep these older variables around for a bit, incase we need to replace them in the Ghoul2 Collision check
 			oldTrace = clip->trace;
 		}
+#endif
 
 		if ( trace.allsolid ) {
 			clip->trace.allsolid = qtrue;
@@ -700,7 +722,7 @@ Ghoul2 Insert Start
 				}
 			}
 		}
-#else
+#elif !defined(JK2_MODE)	// (Jedi Outcast does the Ghoul2 traces in the game, with G_G2_COLLISIONDETECT)
 		//rww - since this is multiplayer and we don't have the luxury of violating networking rules in horrible ways,
 		//this must be done somewhat differently.
 		if ((clip->traceFlags & G2TRFLAG_DOGHOULTRACE) && trace.entityNum == touch->s.number && touch->ghoul2 && ((clip->traceFlags & G2TRFLAG_HITCORPSES) || !(touch->s.eFlags & EF_DEAD)))

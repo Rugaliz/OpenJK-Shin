@@ -27,6 +27,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "qcommon/cm_public.h"
 #include "qcommon/MiniHeap.h"
 #include "qcommon/stringed_ingame.h"
+#ifdef JK2_MODE
+#include "jk2/qcommon/strip.h"
+#endif
 #include "sv_gameapi.h"
 
 /*
@@ -1013,6 +1016,11 @@ void SV_Init (void) {
 	sv_maxOOBRate = Cvar_Get("sv_maxOOBRate", "1000", CVAR_ARCHIVE, "Maximum rate of handling incoming server commands" );
 	sv_maxOOBRateIP = Cvar_Get("sv_maxOOBRateIP", "1", CVAR_ARCHIVE, "Maximum rate of handling incoming server commands per IP address" );
 	sv_autoWhitelist = Cvar_Get("sv_autoWhitelist", "1", CVAR_ARCHIVE, "Save player IPs to allow them using server during DOS attack" );
+
+#ifdef JK2_MODE
+	// the string package of the server (the game module registers the ones it needs with SP_REGISTER_SERVER_CMD)
+	SP_Register( "str_server", SP_REGISTER_REQUIRED );
+#endif
 
 	// initialize bot cvars so they are listed and can be set before loading the botlib
 	SV_BotInitCvars();
