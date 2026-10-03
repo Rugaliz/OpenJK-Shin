@@ -82,6 +82,10 @@ static struct
 	int		rate;
 	reverbParams_t	current, target;
 	float	tailGain;					// keeps the tail as loud whatever its length
+
+	// what the delays and levels were at the end of the last block: they are ramped from there to the new values
+	// across a block, because a step in a delay or a level is a click (and the room changes all the time)
+	float	lastPreSamples, lastErFirst, lastErLevel, lastTailLevel;
 	bool	ready;
 } sR;
 
@@ -138,6 +142,7 @@ void S_Reverb_Init( int sampleRate )
 	sR.current.rt60 = 1.0f;
 	sR.current.hfRatio = 0.7f;
 	sR.target = sR.current;
+	sR.lastPreSamples = -1.0f;	// (the first block starts where it ends)
 	sR.ready = true;
 }
 
@@ -230,27 +235,52 @@ void S_Reverb_Process( const float *pIn, int n, float *pOutLeft, float *pOutRigh
 	if ( erFirst < 8.0f )													erFirst = 8.0f;
 	if ( erFirst * sErTime[NUM_ER_TAPS - 1] > MAX_ER_SPAN * sR.rate )		erFirst = MAX_ER_SPAN * sR.rate / sErTime[NUM_ER_TAPS - 1];
 
-	const float erLevel = sR.current.erLevel * 0.5f;
-	const float tailLevel = sR.current.lateLevel * sR.tailGain;
+	const float erLevelEnd = sR.current.erLevel * 0.5f;
+	const float tailLevelEnd = sR.current.lateLevel * sR.tailGain;
 	const float hadamard = 0.35355339f;		// 1 / sqrt( 8 )
+
+	if ( sR.lastPreSamples < 0.0f )
+	{
+		sR.lastPreSamples = preSamples;
+		sR.lastErFirst = erFirst;
+		sR.lastErLevel = erLevelEnd;
+		sR.lastTailLevel = tailLevelEnd;
+	}
+
+	// A delay that changes is a change of pitch for what goes through it: let it move by 2% of the time that passes
+	// at the most (the room is followed for as long as it takes)
+	const float maxDelayChange = 0.02f * n;
+	preSamples = fminf( fmaxf( preSamples, sR.lastPreSamples - maxDelayChange ), sR.lastPreSamples + maxDelayChange );
+	erFirst = fminf( fmaxf( erFirst, sR.lastErFirst - maxDelayChange ), sR.lastErFirst + maxDelayChange );
+
+	const float preStep = ( preSamples - sR.lastPreSamples ) / n;
+	const float erStep = ( erFirst - sR.lastErFirst ) / n;
+	const float erLevelStep = ( erLevelEnd - sR.lastErLevel ) / n;
+	const float tailLevelStep = ( tailLevelEnd - sR.lastTailLevel ) / n;
+	float preNow = sR.lastPreSamples, erNow = sR.lastErFirst, erLevel = sR.lastErLevel, tailLevel = sR.lastTailLevel;
 
 	for ( int s = 0; s < n; s++ )
 	{
 		const float x = pIn[s];
+
+		preNow += preStep;
+		erNow += erStep;
+		erLevel += erLevelStep;
+		tailLevel += tailLevelStep;
 
 		// early reflections, straight from the input
 		Delay_Write( &sR.earlyReflections, x );
 		float erLeft = 0.0f, erRight = 0.0f;
 		for ( int t = 0; t < NUM_ER_TAPS; t++ )
 		{
-			const float v = Delay_ReadFraction( &sR.earlyReflections, erFirst * sErTime[t] ) * sErGain[t];
+			const float v = Delay_ReadFraction( &sR.earlyReflections, erNow * sErTime[t] ) * sErGain[t];
 			erLeft += v * ( 1.0f - sErPan[t] );
 			erRight += v * ( 1.0f + sErPan[t] );
 		}
 
 		// the tail: delayed, then spread out
 		Delay_Write( &sR.preDelay, x );
-		float a = Delay_ReadFraction( &sR.preDelay, preSamples );
+		float a = Delay_ReadFraction( &sR.preDelay, preNow );
 		for ( int d = 0; d < NUM_DIFFUSERS; d++ )
 		{
 			const int len = sR.diffuser[d].size;
@@ -292,4 +322,9 @@ void S_Reverb_Process( const float *pIn, int n, float *pOutLeft, float *pOutRigh
 		pOutLeft[s] = erLeft * erLevel + tailLeft * tailLevel * 0.5f;
 		pOutRight[s] = erRight * erLevel + tailRight * tailLevel * 0.5f;
 	}
+
+	sR.lastPreSamples = preSamples;
+	sR.lastErFirst = erFirst;
+	sR.lastErLevel = erLevelEnd;
+	sR.lastTailLevel = tailLevelEnd;
 }

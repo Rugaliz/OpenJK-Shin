@@ -173,6 +173,15 @@ void S_HRTF_ResetState( hrtfState_t *pState )
 	memset( pState, 0, sizeof( *pState ) );
 }
 
+void S_HRTF_SetHistory( hrtfState_t *pState, const short *pHistory, int n )
+{
+	if ( n > HRTF_MAX_TAPS )
+		n = HRTF_MAX_TAPS;
+
+	for ( int i = 0; i < n; i++ )
+		pState->history[HRTF_MAX_TAPS - n + i] = (float)pHistory[i];
+}
+
 // out[i] += h[j] * x[i - j] for a block, written so the compiler can vectorise the loop over i
 static void HRTF_ConvolveBlock( const float *pTaps, const float *pX, int n, float *pOut )
 {

@@ -170,6 +170,7 @@ extern	portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 extern	cvar_t	*s_reverb;			// 1 = the sound of the room: reverb, sounds held back by walls, muffling underwater
 extern	cvar_t	*s_reverbLevel;		// how much reverb there is (1 = as worked out from the room)
 extern	qboolean	s_reverbActive;	// the room effects are in use this frame
+void	S_Mix_ResetReverb( void );		// (the reverb has been set up again: its time starts over)
 extern	float		s_underwater;	// 0 to 1, how far under the surface the listener is
 extern	cvar_t	*s_hrtf;			// 1 = position sounds binaurally (head-related transfer functions) for headphones
 extern	cvar_t	*s_quality;			// 0 fast, 1 good, 2 best: quality of sample rate conversion when loading sounds
