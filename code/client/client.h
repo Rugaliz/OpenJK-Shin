@@ -288,6 +288,8 @@ extern	cvar_t	*cl_mouseAccel;
 extern	cvar_t	*cl_showMouseRate;
 
 extern	cvar_t	*cl_allowAltEnter;
+extern	cvar_t	*cl_skippingcin;
+extern	cvar_t	*cl_incutscene;
 
 extern	cvar_t	*cl_inGameVideo;
 

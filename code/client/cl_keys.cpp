@@ -1241,6 +1241,23 @@ void CL_KeyDownEvent( int key, unsigned time )
 		return;
 	}
 
+	// escape skips a cutscene: a video, at once (any other key has to wait a moment, so it isn't skipped by accident),
+	// or a scripted one (the same as the "exitview" key)
+	if ( key == A_ESCAPE && !Key_GetCatcher() )
+	{
+		if ( cls.state == CA_CINEMATIC || CL_IsRunningInGameCinematic() )
+		{
+			SCR_StopCinematic();
+			return;
+		}
+		if ( cls.state == CA_ACTIVE && cl_incutscene->integer )
+		{
+			if ( !cl_skippingcin->integer )	// (when it is already being skipped, the key is just ignored)
+				Cbuf_AddText( "exitview\n" );
+			return;
+		}
+	}
+
 	// keys can still be used for bound actions
 	if ( ( cls.state == CA_CINEMATIC || CL_IsRunningInGameCinematic()) && !Key_GetCatcher() )
 	{
