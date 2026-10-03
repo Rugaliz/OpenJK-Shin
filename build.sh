@@ -477,7 +477,7 @@ if [[ $DO_INSTALL -eq 1 ]]; then
 	cat <<EOF
 
 Copy the contents of each folder into the matching game's GameData folder (next to the base/ folder),
-then run the executable: openjo_sp.x86_64 for Jedi Outcast, openjk_sp.x86_64 / openjk.x86_64 for Jedi Academy.
+then run the executable: openjo_sp.x86_64 / openjo.x86_64 for Jedi Outcast, openjk_sp.x86_64 / openjk.x86_64 for Jedi Academy.
 EOF
 else
 	printf '  The programs are in %s\n' "$BUILD_DIR"

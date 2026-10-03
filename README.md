@@ -65,8 +65,9 @@ Shin comes as source code; there are no downloads yet. [Build it](#building), wh
 
 1. Copy the contents of `dist/JediOutcast/` (or `dist/JediAcademy/`) into the `GameData/` folder of that game, next to
    its `base/` folder. For Steam, that is `<Steam folder>/steamapps/common/Jedi Academy/GameData/` (or `.../Jedi Outcast/GameData/`).
-1. Run `openjo_sp.x86_64` (Jedi Outcast), `openjk_sp.x86_64` (Jedi Academy single player) or `openjk.x86_64` (Jedi
-   Academy multiplayer). On Windows these are `.exe` files.
+1. Run `openjo_sp.x86_64` (Jedi Outcast single player), `openjo.x86_64` (Jedi Outcast multiplayer),
+   `openjk_sp.x86_64` (Jedi Academy single player) or `openjk.x86_64` (Jedi Academy multiplayer). On Windows these are
+   `.exe` files. The dedicated servers are `openjoded` and `openjkded`.
 
 If you don't have the game yet, you can buy it from [Steam](https://store.steampowered.com/app/6020/) or
 [GOG](https://www.gog.com/game/star_wars_jedi_knight_jedi_academy) (Jedi Academy), and from Steam or GOG
