@@ -861,6 +861,8 @@ room is and how loud. The reverb itself is in snd_reverb.cpp, and the sounds are
 #define ROOM_RAY_LENGTH		3000.0f		// how far a ray looks (units)
 #define UNIT_TO_METERS		0.03f		// how long a unit is, about (a person is 2 metres, 56 units + a bit)
 #define SPEED_OF_SOUND		343.0f		// metres per second
+#define ROOM_UP				0.35f		// rays pointing at least this much upwards (the sine of the angle) look for a ceiling
+#define ROOM_CEILING_DISTANCE	25.0f	// (metres) a ceiling further away than this is not one that makes a room
 
 // Per material, how much of the sound a surface of it soaks up at the middle frequencies (0 to 1)
 static const float s_materialAbsorption[MATERIAL_LAST] =
@@ -916,6 +918,7 @@ static qboolean S_ReverbPrepare( void )
 	if ( s_reverbRate != dma.speed )
 	{
 		S_Reverb_Init( dma.speed );
+		S_Mix_ResetReverb();
 		s_reverbRate = dma.speed;
 		s_roomNextAnalysis = 0;		// look at the room at once, and be in it at once
 		Com_DPrintf( "Sound: reverb ready at %d Hz\n", dma.speed );
@@ -966,7 +969,7 @@ static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immedia
 		if ( !s_roomRaysMade )
 			S_MakeRoomRays();
 
-		int hits = 0;
+		int hits = 0, upRays = 0, ceilingHits = 0;
 		float distanceSum = 0.0f, nearest = ROOM_RAY_LENGTH * UNIT_TO_METERS;
 		float absorptionSum = 0.0f, softnessSum = 0.0f;
 
@@ -974,6 +977,10 @@ static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immedia
 		{
 			vec3_t end;
 			trace_t trace;
+
+			const qboolean up = (qboolean)( s_roomRays[i][2] > ROOM_UP );
+			if ( up )
+				upRays++;
 
 			VectorMA( head, ROOM_RAY_LENGTH, s_roomRays[i], end );
 			CM_BoxTrace( &trace, head, end, vec3_origin, vec3_origin, 0, CONTENTS_SOLID );
@@ -988,6 +995,8 @@ static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immedia
 			const int material = trace.surfaceFlags & MATERIAL_MASK;
 
 			hits++;
+			if ( up && distance < ROOM_CEILING_DISTANCE )
+				ceilingHits++;
 			distanceSum += distance;
 			if ( distance < nearest )
 				nearest = distance;
@@ -996,6 +1005,10 @@ static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immedia
 		}
 
 		const float hitFraction = (float)hits / ROOM_RAYS;
+
+		// Outdoors there are walls and a ground to reflect the sound but no ceiling, and that is not a room: the sound
+		// escapes upwards, there is no reverb to speak of, only the odd echo from a wall. (A canyon is not a hall.)
+		const float ceiling = upRays ? (float)ceilingHits / upRays : 0.0f;
 		const float meanDistance = hits ? distanceSum / hits : ROOM_RAY_LENGTH * UNIT_TO_METERS;
 		const float absorption = hits ? absorptionSum / hits : 0.1f;
 		const float softness = hits ? softnessSum / hits : 0.0f;
@@ -1003,7 +1016,8 @@ static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immedia
 		// How long the sound lasts: Sabine's rule, 0.161 V / A. The volume over the surface is about a third of
 		// the distance to the walls, A is what the walls take up. A bit more is soaked up than the materials say (the
 		// furniture, doorways, the rest of the level), and where there is nothing it all escapes.
-		const float absorbed = hitFraction * ( absorption + 0.08f ) + ( 1.0f - hitFraction ) * 1.0f;
+		const float closed = hitFraction * ceiling;
+		const float absorbed = closed * ( absorption + 0.08f ) + ( 1.0f - closed ) * 1.0f;
 		float rt60 = 0.053f * meanDistance / absorbed;
 		if ( rt60 < 0.12f )		rt60 = 0.12f;
 		if ( rt60 > 4.0f )		rt60 = 4.0f;
@@ -1012,13 +1026,13 @@ static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immedia
 		float hfRatio = ( 0.9f - 0.45f * softness ) / ( 1.0f + meanDistance / 50.0f );
 		if ( hfRatio < 0.15f )	hfRatio = 0.15f;
 
-		const float enclosed = hitFraction * sqrtf( hitFraction );	// (more of the sound is lost the more is open)
+		const float enclosed = hitFraction * sqrtf( hitFraction ) * ceiling * ceiling;	// (more of the sound is lost the more is open)
 
 		params.rt60 = rt60;
 		params.hfRatio = hfRatio;
 		params.preDelay = Com_Clamp( 0.004f, 0.06f, 0.004f + 0.0015f * meanDistance );
 		params.erDelay = Com_Clamp( 0.004f, 0.08f, 2.0f * nearest / SPEED_OF_SOUND );
-		params.erLevel = 0.55f * hitFraction * level;
+		params.erLevel = 0.55f * hitFraction * ( 0.15f + 0.85f * ceiling ) * level;
 		params.lateLevel = 0.55f * enclosed * level;
 
 		if ( com_developer->integer )
@@ -1027,8 +1041,8 @@ static void S_AnalyseRoom( const vec3_t head, qboolean inwater, qboolean immedia
 			if ( Sys_Milliseconds() - lastReport > 3000 )
 			{
 				lastReport = Sys_Milliseconds();
-				Com_DPrintf( "Sound: room: %d of %d rays hit, mean %.1fm, nearest %.1fm, absorption %.2f, rt60 %.2fs, hf %.2f, tail %.2f\n",
-							hits, ROOM_RAYS, meanDistance, nearest, absorption, params.rt60, params.hfRatio, params.lateLevel );
+				Com_DPrintf( "Sound: room: %d of %d rays hit, ceiling %.2f, mean %.1fm, nearest %.1fm, absorption %.2f, rt60 %.2fs, hf %.2f, early %.2f, tail %.2f\n",
+							hits, ROOM_RAYS, ceiling, meanDistance, nearest, absorption, params.rt60, params.hfRatio, params.erLevel, params.lateLevel );
 			}
 		}
 	}

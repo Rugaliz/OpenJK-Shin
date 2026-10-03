@@ -239,14 +239,73 @@ static void S_FetchMP3Samples( channel_t *ch, int count, int sampleOffset, short
 // What the sounds that are to have reverb send to it, mixed together (mono, on the scale of the paint buffer)
 static int	reverbBuffer[PAINTBUFFER_SIZE];
 
+// The mixer is not run once over each moment of sound: every update (every frame) mixes everything from just ahead of
+// what is being played to a fifth of a second ahead again, so what is ahead can change when the game does. That is
+// fine for adding sounds up but not for the reverb (and the other things that remember what went before them): they
+// have to go over each moment once, in order. So the reverb is only run for the next few milliseconds, which are not
+// going to be mixed again before they are played, and what it makes is kept for the (many) updates that mix those
+// moments again. (What is further ahead has no reverb yet; it only gets played if the game stalls.)
+#define REVERB_RING		65536
+static float	s_reverbWetLeft[REVERB_RING], s_reverbWetRight[REVERB_RING];
+static int		s_reverbTime = 0;		// the sample time the reverb has been run up to
+static int		s_lastUpdateStart = 0;
+
+// the underwater filter (below) keeps what it made for the same reason
+static float	s_uwLeft[REVERB_RING], s_uwRight[REVERB_RING];
+static int		s_uwWrittenUpTo = 0;
+static qboolean	s_uwValid = qfalse;
+
+void S_Mix_ResetReverb( void )
+{
+	s_reverbTime = 0;
+}
+
+// The mixer does not paint each moment of a sound once, in order: every update paints everything from just ahead of
+// what is being played again (see the reverb below). So filters that remember the signal that went before (the muffling
+// and the HRTF) must not carry that on from the last time they were used: that was the end of what was painted ahead,
+// not what comes before the part that is painted now. Where the sound can be read at any point, what came before it is
+// read from the sound itself (a sound loops: from its end, and before it starts there is nothing).
+#define OBSTRUCT_WARMUP		96		// samples a muffling filter needs to be in step with the signal (it has no long memory)
+
+static qboolean S_SourceHistory( const channel_t *ch, const sfx_t *sc, int sampleOffset, int n, short *out )
+{
+	if ( sc->eSoundCompressionMethod != ct_16 )
+		return qfalse;
+
+	const int length = sc->iSoundLengthInSamples;
+	for ( int k = 0; k < n; k++ )
+	{
+		int p = sampleOffset - n + k;
+		if ( p < 0 )
+		{
+			if ( !ch->loopSound || length <= 0 )
+			{
+				out[k] = 0;
+				continue;
+			}
+			p = ( ( p % length ) + length ) % length;
+		}
+		out[k] = sc->pSoundData[p];
+	}
+	return qtrue;
+}
+
 // The sound of a channel being muffled by something between the sound and the listener (ch->obstruct, 0 to 1): the
-// highs are filtered away, and it is a little quieter
-static void S_ObstructSamples( channel_t *ch, const short *src, int count, short *dst )
+// highs are filtered away, and it is a little quieter. The filter is run over the signal before the part that is
+// painted (history, if there is any, and if histOut is given the result of that is returned too) to be where it would be.
+static void S_ObstructSamples( channel_t *ch, const short *history, int numHistory, short *histOut, const short *src, int count, short *dst )
 {
 	const float cutoff = 18000.0f * powf( 0.05f, ch->obstruct );	// 18kHz down to 900Hz
 	const float a = 1.0f - expf( -2.0f * (float)M_PI * cutoff / dma.speed );
 	const float gain = 1.0f - 0.4f * ch->obstruct;
-	float state = ch->lpState;
+	float state = history ? 0.0f : ch->lpState;
+
+	for ( int i = 0; i < numHistory; i++ )
+	{
+		state += a * ( history[i] - state );
+		if ( histOut )
+			histOut[i] = (short)( state * gain );
+	}
 
 	for ( int i = 0; i < count; i++ )
 	{
@@ -344,14 +403,27 @@ void ChannelPaint(channel_t *ch, sfx_t *sc, int count, int sampleOffset, int buf
 			return;
 	}
 
-	if ( ch->obstruct > 0.01f )
+	const qboolean useHrtf = (qboolean)( ch->hrtf && ch->pHrtfState );
+	const qboolean muffled = (qboolean)( ch->obstruct > 0.01f );
+	const int hrtfHistory = useHrtf ? S_HRTF_NumTaps() - 1 : 0;
+
+	// what came before the part painted now (see S_SourceHistory), for the filters that need it
+	short	history[OBSTRUCT_WARMUP + HRTF_MAX_TAPS], historyOut[OBSTRUCT_WARMUP + HRTF_MAX_TAPS];
+	const int numHistory = ( muffled ? OBSTRUCT_WARMUP : 0 ) + hrtfHistory;
+	const qboolean haveHistory = ( numHistory > 0 ) ? S_SourceHistory( ch, sc, sampleOffset, numHistory, history ) : qfalse;
+
+	if ( muffled )
 	{
-		S_ObstructSamples( ch, src, count, obstructed );
+		S_ObstructSamples( ch, haveHistory ? history : NULL, haveHistory ? numHistory : 0, historyOut, src, count, obstructed );
 		src = obstructed;
 	}
 
-	if ( ch->hrtf && ch->pHrtfState )
+	if ( useHrtf )
+	{
+		if ( haveHistory )
+			S_HRTF_SetHistory( ch->pHrtfState, ( muffled ? historyOut : history ) + numHistory - hrtfHistory, hrtfHistory );
 		S_PaintChannelHRTF( ch, src, count, bufferOffset );
+	}
 	else
 		S_PaintMono( ch, src, count, bufferOffset );
 }
@@ -369,6 +441,14 @@ void S_PaintChannels( int endtime ) {
 
 	snd_vol = normal_vol = s_volume->value*256.0f;
 	voice_vol  = (s_volumeVoice->value*256.0f);
+
+	// how far the reverb may run in this update: past what is played before the next one (twice the time since the last)
+	const int updateStart = s_paintedtime;
+	int commitLength = 2 * ( updateStart - s_lastUpdateStart );
+	if ( commitLength < dma.speed / 40 || updateStart < s_lastUpdateStart )		commitLength = dma.speed / 40;
+	if ( commitLength > dma.speed / 10 )										commitLength = dma.speed / 10;
+	s_lastUpdateStart = updateStart;
+	const int commitEnd = updateStart + commitLength;
 
 //Com_Printf ("%i to %i\n", s_paintedtime, endtime);
 	while ( s_paintedtime < endtime ) {
@@ -484,29 +564,68 @@ void S_PaintChannels( int endtime ) {
 			}
 		}
 */
-		if ( s_reverbActive )
+		if ( s_reverbActive && s_paintedtime < commitEnd )
 		{
-			// what the room does to the sounds that were sent to it, added to the mix
-			const int n = end - s_paintedtime;
-			float in[PAINTBUFFER_SIZE], wetLeft[PAINTBUFFER_SIZE], wetRight[PAINTBUFFER_SIZE];
+			// what the room does to the sounds that were sent to it, added to the mix (see s_reverbTime)
+			const int chunkStart = s_paintedtime;
 
-			for ( i = 0; i < n; i++ )
-				in[i] = (float)reverbBuffer[i];
-			S_Reverb_Process( in, n, wetLeft, wetRight );
-			for ( i = 0; i < n; i++ )
+			if ( s_reverbTime < chunkStart || s_reverbTime - chunkStart > dma.speed / 5 )
 			{
-				paintbuffer[i].left += (int)wetLeft[i];
-				paintbuffer[i].right += (int)wetRight[i];
+				s_reverbTime = chunkStart;		// (the time was not continuous: after a pause, or a new level)
+			}
+
+			// ...what was made already
+			const int made = ( s_reverbTime < end ) ? s_reverbTime : end;
+			for ( i = chunkStart; i < made; i++ )
+			{
+				paintbuffer[i - chunkStart].left += (int)s_reverbWetLeft[i & ( REVERB_RING - 1 )];
+				paintbuffer[i - chunkStart].right += (int)s_reverbWetRight[i & ( REVERB_RING - 1 )];
+			}
+
+			// ...and what is to be made now
+			const int upTo = ( end < commitEnd ) ? end : commitEnd;
+			if ( upTo > s_reverbTime )
+			{
+				const int first = s_reverbTime - chunkStart;
+				const int n = upTo - s_reverbTime;
+				float in[PAINTBUFFER_SIZE], wetLeft[PAINTBUFFER_SIZE], wetRight[PAINTBUFFER_SIZE];
+
+				for ( i = 0; i < n; i++ )
+					in[i] = (float)reverbBuffer[first + i];
+				S_Reverb_Process( in, n, wetLeft, wetRight );
+				for ( i = 0; i < n; i++ )
+				{
+					const int time = s_reverbTime + i;
+					s_reverbWetLeft[time & ( REVERB_RING - 1 )] = wetLeft[i];
+					s_reverbWetRight[time & ( REVERB_RING - 1 )] = wetRight[i];
+					paintbuffer[first + i].left += (int)wetLeft[i];
+					paintbuffer[first + i].right += (int)wetRight[i];
+				}
+				s_reverbTime = upTo;
 			}
 		}
 
 		if ( s_underwater > 0.01f )
 		{
-			// everything is muffled underwater: a low pass filter, from 20kHz (just under the surface) to 800Hz
-			static float stateLeft, stateRight;
-			const int n = end - s_paintedtime;
+			// everything is muffled underwater: a low pass filter, from 20kHz (just under the surface) to 800Hz. It
+			// carries on from what it made for the moment before this one the last time that was painted (not from
+			// the end of the last thing painted, which is far ahead: see the reverb)
+			const int chunkStart = s_paintedtime;
+			const int n = end - chunkStart;
 			const float cutoff = 20000.0f * powf( 0.04f, s_underwater );
 			const float a = 1.0f - expf( -2.0f * (float)M_PI * cutoff / dma.speed );
+			float stateLeft, stateRight;
+
+			if ( s_uwValid && chunkStart - 1 < s_uwWrittenUpTo && chunkStart - 1 >= s_uwWrittenUpTo - REVERB_RING / 2 )
+			{
+				stateLeft = s_uwLeft[( chunkStart - 1 ) & ( REVERB_RING - 1 )];
+				stateRight = s_uwRight[( chunkStart - 1 ) & ( REVERB_RING - 1 )];
+			}
+			else
+			{
+				stateLeft = (float)paintbuffer[0].left;
+				stateRight = (float)paintbuffer[0].right;
+			}
 
 			for ( i = 0; i < n; i++ )
 			{
@@ -514,7 +633,17 @@ void S_PaintChannels( int endtime ) {
 				stateRight += a * ( paintbuffer[i].right - stateRight );
 				paintbuffer[i].left = (int)stateLeft;
 				paintbuffer[i].right = (int)stateRight;
+				s_uwLeft[( chunkStart + i ) & ( REVERB_RING - 1 )] = stateLeft;
+				s_uwRight[( chunkStart + i ) & ( REVERB_RING - 1 )] = stateRight;
 			}
+
+			if ( !s_uwValid || end > s_uwWrittenUpTo || chunkStart < s_uwWrittenUpTo - REVERB_RING / 2 )
+				s_uwWrittenUpTo = end;
+			s_uwValid = qtrue;
+		}
+		else
+		{
+			s_uwValid = qfalse;		// (the next time underwater starts over)
 		}
 
 		// transfer out according to DMA format

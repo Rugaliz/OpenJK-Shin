@@ -62,6 +62,10 @@ void	S_HRTF_GetFilter( float azimuth, float elevation, hrtfFilter_t *pFilter );
 
 void	S_HRTF_ResetState( hrtfState_t *pState );
 
+// Sets what the filter takes to be the signal before the next Process call: the n (up to the number of taps minus
+// one) samples before it, oldest first. For when the next call does not follow on from the last one.
+void	S_HRTF_SetHistory( hrtfState_t *pState, const short *pHistory, int n );
+
 // Runs n mono samples through the filter, giving n samples for each ear (the sample scale is the input's, a 16 bit
 // range signal stays in a 16 bit range). If the filter is different from the one used last time, the change is made
 // gradually over the n samples. Any n is fine, but keep the pieces of one sound in order.
