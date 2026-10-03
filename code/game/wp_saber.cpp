@@ -7222,7 +7222,7 @@ void WP_SaberThrow( gentity_t *self, usercmd_t *ucmd )
 	{
 		if ( self->client->ps.saberEntityDist > 0 )
 		{
-			self->client->ps.saberEntityDist -= 25;
+			self->client->ps.saberEntityDist -= 25 * PM_StepTicks( &self->client->ps, self->client->ps.commandTime, ucmd->serverTime );
 		}
 		if ( self->client->ps.saberEntityDist < 0 )
 		{

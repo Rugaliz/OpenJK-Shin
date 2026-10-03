@@ -1370,6 +1370,9 @@ are being updated isntead of a full move
 */
 void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 {
+	// pmove steps since the last call, in PM_StepTicks units (the cgame calls this without gent, for view angles only)
+	const int ticks = gent ? PM_StepTicks( ps, ps->commandTime - pml.msec, ps->commandTime ) : 1;
+
 	short		temp;
 	float		rootPitch = 0, pitchMin=-75, pitchMax=75, yawMin=0, yawMax=0, lockedYawValue = 0;	//just to shut up warnings
 	int			i;
@@ -1759,7 +1762,11 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 
 					if ( ps->leanofs <= 28 )
 					{
-						leanofs = ps->leanofs + 4;
+						leanofs = ps->leanofs + 4 * ticks;
+					if ( leanofs > 32 )
+					{
+						leanofs = 32;
+					}
 					}
 					else
 					{
@@ -1778,7 +1785,11 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 
 					if ( ps->leanofs >= -28 )
 					{
-						leanofs = ps->leanofs - 4;
+						leanofs = ps->leanofs - 4 * ticks;
+					if ( leanofs < -32 )
+					{
+						leanofs = -32;
+					}
 					}
 					else
 					{
@@ -1816,7 +1827,7 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 
 					if ( ps->leanofs > 0 )
 					{
-						ps->leanofs-=4;
+						ps->leanofs -= 4 * ticks;
 						if ( ps->leanofs < 0 )
 						{
 							ps->leanofs = 0;
@@ -1824,7 +1835,7 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 					}
 					else if ( ps->leanofs < 0 )
 					{
-						ps->leanofs+=4;
+						ps->leanofs += 4 * ticks;
 						if ( ps->leanofs > 0 )
 						{
 							ps->leanofs = 0;
@@ -1838,7 +1849,7 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 		{
 			if ( ps->leanofs > 0 )
 			{
-				ps->leanofs-=4;
+				ps->leanofs -= 4 * ticks;
 				if ( ps->leanofs < 0 )
 				{
 					ps->leanofs = 0;
@@ -1846,7 +1857,7 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 			}
 			else if ( ps->leanofs < 0 )
 			{
-				ps->leanofs+=4;
+				ps->leanofs += 4 * ticks;
 				if ( ps->leanofs > 0 )
 				{
 					ps->leanofs = 0;
@@ -1857,7 +1868,11 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, gentity_t *gent )
 
 	if ( ps->leanStopDebounceTime )
 	{
-		ps->leanStopDebounceTime -= 1;
+		ps->leanStopDebounceTime -= ticks;
+		if ( ps->leanStopDebounceTime < 0 )
+		{
+			ps->leanStopDebounceTime = 0;
+		}
 		cmd->rightmove = 0;
 		cmd->buttons &= ~BUTTON_USE;
 	}

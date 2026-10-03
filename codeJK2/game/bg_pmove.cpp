@@ -4856,6 +4856,32 @@ void PM_SwimFloatAnim( void )
 
 /*
 ===============
+PM_StepTicks
+
+Several pmove counters (lean speed, view sinking on death, ...) were tuned as
+"N per pmove step". The player runs one pmove step per rendered frame, so those
+counters ran faster the higher the frame rate. They now count ticks of
+PM_TICK_MSEC (the step length at 125 fps, the default frame rate cap) instead:
+the number of tick boundaries crossed between timeStart and timeEnd. Rounding
+cancels out over consecutive steps, as in PM_BobCycleAdvance.
+NPCs think in fixed steps (they are not driven by the frame rate) and keep
+counting one tick per step.
+===============
+*/
+#define PM_TICK_MSEC	8
+
+int PM_StepTicks( const playerState_t *ps, int timeStart, int timeEnd )
+{
+	if ( ps->clientNum >= MAX_CLIENTS )
+	{
+		return 1;
+	}
+
+	return timeEnd / PM_TICK_MSEC - timeStart / PM_TICK_MSEC;
+}
+
+/*
+===============
 PM_BobCycleAdvance
 
 How far bobCycle moves in this pmove step: bobmove units per msec.
@@ -8810,7 +8836,11 @@ void Pmove( pmove_t *pmove )
 		pm->cmd.upmove = 0;
 		if ( pm->ps->viewheight > -12 )
 		{//slowly sink view to ground
-			pm->ps->viewheight -= 1;
+			pm->ps->viewheight -= PM_StepTicks( pm->ps, pm->ps->commandTime - pml.msec, pm->ps->commandTime );
+			if ( pm->ps->viewheight < -12 )
+			{
+				pm->ps->viewheight = -12;
+			}
 		}
 	}
 
