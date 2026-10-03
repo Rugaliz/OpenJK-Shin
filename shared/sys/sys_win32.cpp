@@ -108,6 +108,20 @@ int Sys_Milliseconds2( void )
 	return Sys_Milliseconds(false);
 }
 
+int64_t Sys_Microseconds( void )
+{
+	static LARGE_INTEGER frequency;
+	LARGE_INTEGER counter;
+
+	if ( !frequency.QuadPart )
+		QueryPerformanceFrequency( &frequency );
+
+	QueryPerformanceCounter( &counter );
+	// split to avoid overflowing 64 bits after a few hours of uptime
+	return (int64_t)( counter.QuadPart / frequency.QuadPart ) * 1000000
+		+ ( counter.QuadPart % frequency.QuadPart ) * 1000000 / frequency.QuadPart;
+}
+
 /*
 ================
 Sys_RandomBytes

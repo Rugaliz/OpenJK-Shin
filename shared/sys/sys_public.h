@@ -21,6 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #pragma once
 
+#include <stdint.h>
 #include "qcommon/q_shared.h"
 
 #define MAXPRINTMSG 4096
@@ -115,6 +116,7 @@ void	Sys_Print( const char *msg );
 // any game related timing information should come from event timestamps
 int		Sys_Milliseconds (bool baseTime = false);
 int		Sys_Milliseconds2(void);
+int64_t	Sys_Microseconds(void);	// monotonic, arbitrary origin; used by the frame limiter
 void	Sys_Sleep( int msec );
 
 extern "C" void	Sys_SnapVector( float *v );

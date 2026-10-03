@@ -1346,26 +1346,6 @@ int Com_ModifyMsec( int msec, float &fraction )
 
 /*
 =================
-Com_TimeVal
-=================
-*/
-
-int Com_TimeVal(int minMsec)
-{
-	int timeVal;
-
-	timeVal = Sys_Milliseconds() - com_frameTime;
-
-	if(timeVal >= minMsec)
-		timeVal = 0;
-	else
-		timeVal = minMsec - timeVal;
-
-	return timeVal;
-}
-
-/*
-=================
 Com_Frame
 =================
 */
@@ -1387,9 +1367,9 @@ void Com_Frame( void ) {
 	try
 	{
 		int		timeBeforeFirstEvents = 0, timeBeforeServer = 0, timeBeforeEvents = 0, timeBeforeClient = 0, timeAfter = 0;
-		int		msec, minMsec;
-		int		timeVal;
-		static int	lastTime = 0, bias = 0;
+		int		msec;
+		static int	lastTime = 0;
+		static int64_t	nextFrameTime = 0;	// microseconds, see below
 
 		// write config file if anything changed
 		Com_WriteConfiguration();
@@ -1401,34 +1381,40 @@ void Com_Frame( void ) {
 			timeBeforeFirstEvents = Sys_Milliseconds ();
 		}
 
-		// Figure out how much time we have
+		// Figure out how much time we have. The limiter works in microseconds:
+		// a whole-millisecond limiter can only produce 125, 142, 166, 200 fps,
+		// so "com_maxfps 144" would really run at 166.
+		int64_t	frameTime;
 		if(com_minimized->integer && com_maxfpsMinimized->integer > 0)
-			minMsec = 1000 / com_maxfpsMinimized->integer;
+			frameTime = 1000000 / com_maxfpsMinimized->integer;
 		else if(com_unfocused->integer && com_maxfpsUnfocused->integer > 0)
-			minMsec = 1000 / com_maxfpsUnfocused->integer;
+			frameTime = 1000000 / com_maxfpsUnfocused->integer;
 		else if(com_maxfps->integer > 0)
-			minMsec = 1000 / com_maxfps->integer;
+			frameTime = 1000000 / com_maxfps->integer;
 		else
-			minMsec = 1;
+			frameTime = 1000;
 
-		timeVal = com_frameTime - lastTime;
-		bias += timeVal - minMsec;
+		// nextFrameTime is when this frame may start. It advances by exactly one
+		// frame time per frame, so wake-up jitter does not accumulate; after a
+		// hitch of more than a frame, start over instead of running a burst of
+		// frames to catch up.
+		int64_t	now = Sys_Microseconds();
+		if(now - nextFrameTime > frameTime)
+			nextFrameTime = now;
 
-		if (bias > minMsec)
-			bias = minMsec;
+		for(;;)
+		{
+			int64_t left = nextFrameTime - Sys_Microseconds();
+			if(left <= 0)
+				break;
 
-		// Adjust minMsec if previous frame took too long to render so
-		// that framerate is stable at the requested value.
-		minMsec -= bias;
-
-		timeVal = Com_TimeVal(minMsec);
-		do {
-			// Busy sleep the last millisecond for better timeout precision
-			if(com_busyWait->integer || timeVal < 1)
+			// Busy sleep the last couple of milliseconds for better timeout precision
+			if(com_busyWait->integer || left < 2000)
 				Sys_Sleep(0);
 			else
-				Sys_Sleep(timeVal - 1);
-		} while( (timeVal = Com_TimeVal(minMsec)) != 0 );
+				Sys_Sleep((int)(left / 1000) - 1);
+		}
+		nextFrameTime += frameTime;
 		IN_Frame();
 
 		lastTime = com_frameTime;
