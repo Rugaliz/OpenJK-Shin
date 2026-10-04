@@ -1170,6 +1170,39 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 		Com_Printf( "Replaced video mode field with %d display resolutions.\n", multiPtr->count );
 	}
 
+	// The mouse page has a row for force feedback, which the game has no use for. Use it to tell the game the DPI
+	// of the mouse, so that the sensitivity means the same on any mouse (see in_mouseDPI).
+	if ( item->type == ITEM_TYPE_YESNO && item->cvar && !Q_stricmp( item->cvar, "use_ff" ) ) {
+		static const int dpiValues[] = { 400, 800, 1000, 1200, 1600, 2000, 2400, 3200, 4000, 5000, 6000, 8000, 12000, 16000 };
+		multiDef_t *multiPtr;
+
+		item->type = ITEM_TYPE_MULTI;
+		item->typeData = NULL;
+		Item_ValidateTypeData( item );
+		multiPtr = (multiDef_t *)item->typeData;
+		memset( multiPtr, 0, sizeof( *multiPtr ) );
+		for ( int i = 0; i < (int)ARRAY_LEN( dpiValues ); i++ )
+		{
+			multiPtr->cvarList[i] = String_Alloc( va( "%d DPI", dpiValues[i] ) );
+			multiPtr->cvarValue[i] = (float)dpiValues[i];
+		}
+		multiPtr->count = ARRAY_LEN( dpiValues );
+
+		item->cvar = String_Alloc( "in_mouseDPI" );
+		item->text = (char *)String_Alloc( "Mouse DPI:" );
+		item->descText = String_Alloc( "The DPI of your mouse (see its box or software). Sensitivity is for a 400 DPI mouse, higher DPI needs a higher sensitivity." );
+		item->action = String_Alloc( "play \"sound/interface/button1.wav\" ;" );
+
+		// Jedi Academy has the row further down than the others, move it up to the gap under the sensitivity,
+		// and without the warning about applying force feedback
+		if ( item->mouseEnter && strstr( item->mouseEnter, "\"setitemrect\" \"button_glow\" \"260\" \"326\"" ) )
+		{
+			item->window.rectClient.y = 244;
+			item->mouseEnter = String_Alloc( "\"show\" \"button_glow\" \"setitemrect\" \"button_glow\" \"260\" \"242\" \"340\" \"20\" " );
+		}
+		Com_Printf( "Turned the force feedback field into a mouse DPI field.\n" );
+	}
+
 	if ( ( item->type == ITEM_TYPE_MULTI || item->type == ITEM_TYPE_SLIDER ) && item->window.name && !Q_stricmp( item->window.name, "video_mode") && item->cvar && !Q_stricmp( item->cvar, "r_ext_texture_filter_anisotropic" ) ) {
 		// The stock row only turns anisotropic filtering on or off (Jedi Outcast), or is a slider over any number
 		// (Jedi Academy). Offer the levels the graphics card supports instead.
@@ -4669,6 +4702,12 @@ qboolean ItemParse_cvarFloat( itemDef_t *item)
 		{//hehe, hook up the correct max value here.
 			editPtr->maxVal=cls.glconfig.maxTextureFilterAnisotropy;
 		}
+		else if (!Q_stricmp(item->cvar,"sensitivity"))
+		{//the stock range (2 to 30) is for the mice of 2002, today's need far less (the slider is logarithmic)
+			editPtr->defVal=1.5f;
+			editPtr->minVal=0.05f;
+			editPtr->maxVal=30.0f;
+		}
 		return qtrue;
 	}
 
@@ -7842,12 +7881,45 @@ int Item_ListBox_ThumbDrawPosition(itemDef_t *item)
 
 /*
 =================
+Slider scale
+
+The sensitivity of the mouse is wanted over a very wide range (the mice of today need a fraction of what the
+ones of 2002 did, the pro configs go up to 20), so its slider moves by ratios (logarithmic) instead of by amounts.
+=================
+*/
+static qboolean Item_Slider_IsLogarithmic( const itemDef_t *item, const editFieldDef_t *editDef )
+{
+	return (qboolean)( item->cvar && !Q_stricmp( item->cvar, "sensitivity" ) && editDef->minVal > 0.0f && editDef->maxVal > editDef->minVal );
+}
+
+// where the value is on the slider, 0 to 1
+static float Item_Slider_ValueToFraction( const itemDef_t *item, const editFieldDef_t *editDef, float value )
+{
+	if ( Item_Slider_IsLogarithmic( item, editDef ) )
+	{
+		return logf( value / editDef->minVal ) / logf( editDef->maxVal / editDef->minVal );
+	}
+	return ( value - editDef->minVal ) / ( editDef->maxVal - editDef->minVal );
+}
+
+// the value for a place on the slider, 0 to 1
+static float Item_Slider_FractionToValue( const itemDef_t *item, const editFieldDef_t *editDef, float fraction )
+{
+	if ( Item_Slider_IsLogarithmic( item, editDef ) )
+	{
+		return editDef->minVal * powf( editDef->maxVal / editDef->minVal, fraction );
+	}
+	return editDef->minVal + fraction * ( editDef->maxVal - editDef->minVal );
+}
+
+/*
+=================
 Item_Slider_ThumbPosition
 =================
 */
 float Item_Slider_ThumbPosition(itemDef_t *item)
 {
-	float value, range, x;
+	float value, x;
 	editFieldDef_t *editDef = (editFieldDef_t *) item->typeData;
 
 	if (item->text)
@@ -7875,10 +7947,7 @@ float Item_Slider_ThumbPosition(itemDef_t *item)
 		value = editDef->maxVal;
 	}
 
-	range = editDef->maxVal - editDef->minVal;
-	value -= editDef->minVal;
-	value /= range;
-	//value /= (editDef->maxVal - editDef->minVal);
+	value = Item_Slider_ValueToFraction(item, editDef, value);
 	value *= SLIDER_WIDTH;
 	x += value;
 	// vm fuckage
@@ -10801,8 +10870,7 @@ static void Scroll_Slider_ThumbFunc(void *p)
 	}
 	value = cursorx - x;
 	value /= SLIDER_WIDTH;
-	value *= (editDef->maxVal - editDef->minVal);
-	value += editDef->minVal;
+	value = Item_Slider_FractionToValue(si->item, editDef, value);
 	DC->setCVar(si->item->cvar, va("%f", value));
 }
 /*
@@ -11154,10 +11222,7 @@ qboolean Item_Slider_HandleKey(itemDef_t *item, int key, qboolean down)
 				{
 					work = DC->cursorx - x;
 					value = work / width;
-					value *= (editDef->maxVal - editDef->minVal);
-					// vm fuckage
-					// value = (((float)(DC->cursorx - x)/ SLIDER_WIDTH) * (editDef->maxVal - editDef->minVal));
-					value += editDef->minVal;
+					value = Item_Slider_FractionToValue(item, editDef, value);
 					DC->setCVar(item->cvar, va("%f", value));
 					return qtrue;
 				}
