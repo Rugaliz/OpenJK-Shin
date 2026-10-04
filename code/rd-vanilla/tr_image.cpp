@@ -458,6 +458,77 @@ static void R_MipMap2( unsigned *in, int inWidth, int inHeight ) {
 
 /*
 ================
+R_MipMapLanczos
+
+Halves the size of the texture in place with a windowed sinc (Lanczos, 3 lobes) filter, one dimension at a time.
+The box filter of the original averages 2x2 pixels, which smears the detail of every mip level; this keeps it
+sharp, so that textures seen at a grazing angle stay clear under anisotropic filtering. The textures repeat, so
+the filter wraps around the edges. Needs power of two sizes of at least 2x2.
+================
+*/
+#define MIP_LANCZOS_LOBES	3
+
+static void R_MipMapLanczos( byte *in, int inWidth, int inHeight ) {
+	static float	weights[MIP_LANCZOS_LOBES];
+	static qboolean	weightsReady = qfalse;
+	const int		outWidth = inWidth >> 1;
+	const int		outHeight = inHeight >> 1;
+	const int		widthMask = inWidth - 1;
+	const int		heightMask = inHeight - 1;
+	int				x, y, k, c;
+
+	if ( !weightsReady ) {
+		// the output pixel sits between two input pixels, the taps are at 0.5, 1.5, 2.5 input pixels away on
+		// either side, which are 0.25, 0.75, 1.25 output pixels
+		float sum = 0.0f;
+		for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
+			const float u = ( k + 0.5f ) * 0.5f;
+			const float a = M_PI * u;
+			const float b = a / MIP_LANCZOS_LOBES;
+			weights[k] = ( sinf( a ) / a ) * ( sinf( b ) / b );
+			sum += 2.0f * weights[k];
+		}
+		for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
+			weights[k] /= sum;
+		}
+		weightsReady = qtrue;
+	}
+
+	// horizontal pass: inWidth x inHeight -> outWidth x inHeight
+	float *temp = (float *) R_Malloc( outWidth * inHeight * 4 * sizeof( float ), TAG_TEMP_WORKSPACE, qfalse );
+	for ( y = 0; y < inHeight; y++ ) {
+		const byte *row = in + y * inWidth * 4;
+		float *out = temp + y * outWidth * 4;
+		for ( x = 0; x < outWidth; x++, out += 4 ) {
+			for ( c = 0; c < 4; c++ ) {
+				float total = 0.0f;
+				for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
+					total += weights[k] * ( row[( ( x * 2 - k ) & widthMask ) * 4 + c] + row[( ( x * 2 + 1 + k ) & widthMask ) * 4 + c] );
+				}
+				out[c] = total;
+			}
+		}
+	}
+
+	// vertical pass: outWidth x inHeight -> outWidth x outHeight, written back over the input
+	byte *out = in;
+	for ( y = 0; y < outHeight; y++ ) {
+		for ( x = 0; x < outWidth; x++, out += 4 ) {
+			for ( c = 0; c < 4; c++ ) {
+				float total = 0.0f;
+				for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
+					total += weights[k] * ( temp[( ( ( y * 2 - k ) & heightMask ) * outWidth + x ) * 4 + c] + temp[( ( ( y * 2 + 1 + k ) & heightMask ) * outWidth + x ) * 4 + c] );
+				}
+				out[c] = (byte) Com_Clampi( 0, 255, (int) ( total + 0.5f ) );
+			}
+		}
+	}
+
+	R_Free( temp );
+}
+
+/*
+================
 R_MipMap
 
 Operates in place, quartering the size of the texture
@@ -469,6 +540,11 @@ static void R_MipMap (byte *in, int width, int height) {
 	int		row;
 
 	if ( width == 1 && height == 1 ) {
+		return;
+	}
+
+	if ( r_simpleMipMaps->integer >= 2 && width >= 2 && height >= 2 && !( width & ( width - 1 ) ) && !( height & ( height - 1 ) ) ) {
+		R_MipMapLanczos( in, width, height );
 		return;
 	}
 

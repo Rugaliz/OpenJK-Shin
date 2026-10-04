@@ -391,6 +391,24 @@ void GL_State( uint32_t stateBits )
 			assert( 0 );
 			break;
 		}
+
+		// With multisampling the cut outs of alpha tested surfaces (leaves, fences, grates) are smoothed by
+		// converting their alpha to coverage of the samples of the pixel, instead of testing it. That's for the
+		// common 0.5 test, the others stay as they are.
+		if ( glState.alphaToCoverage && ( stateBits & GLS_ATEST_BITS ) == GLS_ATEST_GE_80 )
+		{
+			qglDisable( GL_ALPHA_TEST );
+			if ( !glState.alphaToCoverageOn )
+			{
+				qglEnable( GL_SAMPLE_ALPHA_TO_COVERAGE );
+				glState.alphaToCoverageOn = qtrue;
+			}
+		}
+		else if ( glState.alphaToCoverageOn )
+		{
+			qglDisable( GL_SAMPLE_ALPHA_TO_COVERAGE );
+			glState.alphaToCoverageOn = qfalse;
+		}
 	}
 
 	glState.glStateBits = stateBits;

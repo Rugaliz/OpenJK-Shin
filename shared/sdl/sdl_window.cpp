@@ -529,6 +529,9 @@ static rserr_t GLimp_SetMode(glconfig_t *glConfig, const windowDesc_t *windowDes
 
 	if ( windowDesc->api == GRAPHICS_API_OPENGL )
 	{
+		const int wantedColorBits = colorBits, wantedDepthBits = depthBits, wantedStencilBits = stencilBits;
+
+retryWithFewerSamples:
 		for (i = 0; i < 16; i++)
 		{
 			int testColorBits, testDepthBits, testStencilBits;
@@ -691,9 +694,23 @@ static rserr_t GLimp_SetMode(glconfig_t *glConfig, const windowDesc_t *windowDes
 			break;
 		}
 
+		if (opengl_context == NULL && samples > 0) {
+			// the display can't do that much multisampling, try with less before giving up
+			samples = samples > 2 ? samples / 2 : 0;
+			Com_Printf( "Multisampling not available, trying %d samples.\n", samples );
+			colorBits = wantedColorBits;
+			depthBits = wantedDepthBits;
+			stencilBits = wantedStencilBits;
+			goto retryWithFewerSamples;
+		}
+
 		if (opengl_context == NULL) {
 			SDL_DestroySurface(icon);
 			return RSERR_UNKNOWN;
+		}
+
+		if ( samples != r_ext_multisample->integer ) {
+			Cvar_Set( "r_ext_multisample", va( "%d", samples ) );	// (so that the menu shows what is in use)
 		}
 	}
 	else
