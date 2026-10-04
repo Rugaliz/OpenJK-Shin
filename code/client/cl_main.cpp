@@ -60,6 +60,7 @@ cvar_t	*cl_endcredits;
 
 cvar_t	*cl_freelook;
 cvar_t	*cl_sensitivity;
+cvar_t	*in_mouseDPI;
 
 cvar_t	*cl_mouseAccel;
 cvar_t	*cl_showMouseRate;
@@ -1260,7 +1261,11 @@ void CL_Init( void ) {
 	cl_packetdup = Cvar_Get ("cl_packetdup", "1", CVAR_ARCHIVE_ND );
 
 	cl_run = Cvar_Get ("cl_run", "1", CVAR_ARCHIVE_ND);
-	cl_sensitivity = Cvar_Get ("sensitivity", "5", CVAR_ARCHIVE);
+	// The default is for the mice of today (800-1600 dpi), the stock 5 was for the 400 dpi ones of 2002
+	cl_sensitivity = Cvar_Get ("sensitivity", "1.5", CVAR_ARCHIVE);
+	// The sensitivity (and with it the old configs, which are all for 400 dpi mice) is scaled by 400 / this value
+	in_mouseDPI = Cvar_Get ("in_mouseDPI", "400", CVAR_ARCHIVE_ND);
+	Cvar_CheckRange( in_mouseDPI, 100.0f, 32000.0f, qfalse );
 	cl_mouseAccel = Cvar_Get ("cl_mouseAccel", "0", CVAR_ARCHIVE_ND);
 	cl_freelook = Cvar_Get( "cl_freelook", "1", CVAR_ARCHIVE_ND );
 

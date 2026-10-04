@@ -549,7 +549,8 @@ void CL_MouseMove( usercmd_t *cmd ) {
 	cl.mouseDy[cl.mouseIndex] = 0;
 
 	rate = SQRTFAST( mx * mx + my * my ) / speed;
-	accelSensitivity = cl_sensitivity->value + rate * cl_mouseAccel->value;
+	// the sensitivity is for a 400 dpi mouse, which is what the game was made for
+	accelSensitivity = ( cl_sensitivity->value + rate * cl_mouseAccel->value ) * ( 400.0f / in_mouseDPI->value );
 
 	// scale by FOV
 	accelSensitivity *= cl.cgameSensitivity;
