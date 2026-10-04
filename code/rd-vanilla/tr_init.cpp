@@ -91,6 +91,8 @@ cvar_t	*r_ext_multitexture;
 cvar_t	*r_ext_compiled_vertex_array;
 cvar_t	*r_ext_texture_env_add;
 cvar_t	*r_ext_texture_filter_anisotropic;
+cvar_t	*r_alphaToCoverage;
+cvar_t	*r_sampleShading;
 
 cvar_t	*r_DynamicGlow;
 cvar_t	*r_DynamicGlowPasses;
@@ -191,6 +193,7 @@ PFNGLSTENCILOPSEPARATEPROC qglStencilOpSeparate;
 #endif
 
 PFNGLACTIVETEXTUREARBPROC qglActiveTextureARB;
+PFNGLMINSAMPLESHADINGARBPROC qglMinSampleShadingARB;
 PFNGLCLIENTACTIVETEXTUREARBPROC qglClientActiveTextureARB;
 PFNGLMULTITEXCOORD2FARBPROC qglMultiTexCoord2fARB;
 
@@ -454,6 +457,23 @@ static void GLimp_InitExtensions( void )
 	{
 		Com_Printf ("...GL_EXT_texture_filter_anisotropic not found\n" );
 		ri.Cvar_Set( "r_ext_texture_filter_anisotropic_avail", "0" );
+	}
+
+	// GL_ARB_sample_shading (shades every sample of a multisampled pixel instead of once per pixel, which also
+	// antialiases the textures and the alpha tested edges, at the cost of speed)
+	qglMinSampleShadingARB = NULL;
+	if ( ri.GL_ExtensionSupported( "GL_ARB_sample_shading" ) )
+	{
+		qglMinSampleShadingARB = ( PFNGLMINSAMPLESHADINGARBPROC ) ri.GL_GetProcAddress( "glMinSampleShadingARB" );
+		if ( !qglMinSampleShadingARB )
+		{
+			qglMinSampleShadingARB = ( PFNGLMINSAMPLESHADINGARBPROC ) ri.GL_GetProcAddress( "glMinSampleShading" );
+		}
+		Com_Printf ("...GL_ARB_sample_shading %s\n", qglMinSampleShadingARB ? "available" : "found, but its entry point is missing" );
+	}
+	else
+	{
+		Com_Printf ("...GL_ARB_sample_shading not found\n" );
 	}
 
 	// GL_EXT_clamp_to_edge
@@ -1177,6 +1197,26 @@ void GL_SetDefaultState( void )
 	qglDisable( GL_BLEND );
 	qglDisable( GL_ALPHA_TEST );
 	qglBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+
+	//
+	// multisampling: ask what the frame buffer really has, the display may have given fewer samples than were wanted
+	//
+	GLint samples = 0;
+	qglGetIntegerv( GL_SAMPLES, &samples );
+	glState.msaaSamples = samples > 1 ? samples : 0;
+	glState.alphaToCoverage = (qboolean)( glState.msaaSamples && r_alphaToCoverage->integer );
+	glState.alphaToCoverageOn = qfalse;
+	if ( glState.msaaSamples )
+	{
+		qglEnable( GL_MULTISAMPLE );
+		qglDisable( GL_SAMPLE_ALPHA_TO_COVERAGE );
+
+		if ( qglMinSampleShadingARB && r_sampleShading->value > 0.0f )
+		{
+			qglMinSampleShadingARB( r_sampleShading->value );
+			qglEnable( GL_SAMPLE_SHADING_ARB );
+		}
+	}
 }
 
 
@@ -1331,6 +1371,15 @@ void GfxInfo_f( void )
 			ri.Printf( PRINT_ALL, "%i)\n", (int)glConfig.maxTextureFilterAnisotropy);
 		else
 			ri.Printf( PRINT_ALL, "%f)\n", glConfig.maxTextureFilterAnisotropy);
+	}
+	if ( glState.msaaSamples )
+	{
+		ri.Printf( PRINT_ALL, "multisampling: %dx%s%s\n", glState.msaaSamples, glState.alphaToCoverage ? ", alpha to coverage" : "",
+			( qglMinSampleShadingARB && r_sampleShading->value > 0.0f ) ? va( ", sample shading %.2f", r_sampleShading->value ) : "" );
+	}
+	else
+	{
+		ri.Printf( PRINT_ALL, "multisampling: %s\n", enablestrings[0] );
 	}
 	ri.Printf( PRINT_ALL, "Dynamic Glow: %s\n", enablestrings[r_DynamicGlow->integer ? 1 : 0] );
 	if (g_bTextureRectangleHack) Com_Printf ("Dynamic Glow ATI BAD DRIVER HACK %s\n", enablestrings[g_bTextureRectangleHack] );
@@ -1522,6 +1571,9 @@ void R_Register( void )
 	r_ext_compiled_vertex_array = ri.Cvar_Get( "r_ext_compiled_vertex_array", "1", CVAR_ARCHIVE_ND | CVAR_LATCH);
 	r_ext_texture_env_add = ri.Cvar_Get( "r_ext_texture_env_add", "1", CVAR_ARCHIVE_ND | CVAR_LATCH);
 	r_ext_texture_filter_anisotropic = ri.Cvar_Get( "r_ext_texture_filter_anisotropic", "16", CVAR_ARCHIVE_ND );
+	r_alphaToCoverage = ri.Cvar_Get( "r_alphaToCoverage", "1", CVAR_ARCHIVE_ND );	// smooth the edges of alpha tested surfaces (leaves, fences...) when multisampling
+	r_sampleShading = ri.Cvar_Get( "r_sampleShading", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 0 off, up to 1 = shade every sample (needs GL_ARB_sample_shading, slow)
+	ri.Cvar_CheckRange( r_sampleShading, 0, 1, qfalse );
 
 	r_DynamicGlow = ri.Cvar_Get( "r_DynamicGlow", "0", CVAR_ARCHIVE_ND );
 	r_DynamicGlowPasses = ri.Cvar_Get( "r_DynamicGlowPasses", "5", CVAR_ARCHIVE_ND );
@@ -1539,7 +1591,8 @@ void R_Register( void )
 	r_texturebitslm = ri.Cvar_Get( "r_texturebitslm", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_mapOverBrightBits = ri.Cvar_Get( "r_mapOverBrightBits", "0", CVAR_ARCHIVE_ND|CVAR_LATCH );
-	r_simpleMipMaps = ri.Cvar_Get( "r_simpleMipMaps", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_simpleMipMaps = ri.Cvar_Get( "r_simpleMipMaps", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );	// how the smaller mip levels are made: 0 blur, 1 box (original), 2 Lanczos
+	ri.Cvar_CheckRange( r_simpleMipMaps, 0, 2, qtrue );
 	r_vertexLight = ri.Cvar_Get( "r_vertexLight", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_subdivisions = ri.Cvar_Get ("r_subdivisions", "4", CVAR_ARCHIVE_ND | CVAR_LATCH);
 	ri.Cvar_CheckRange( r_subdivisions, 0, 80, qfalse );

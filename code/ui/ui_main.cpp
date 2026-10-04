@@ -3512,6 +3512,7 @@ static void UI_Update(const char *name)
 				Cvar_SetValue( "ui_r_fastSky", 0 );
 				Cvar_SetValue( "ui_r_inGameVideo", 1 );
 				//Cvar_SetValue( "ui_cg_shadows", 2 );//stencil
+				Cvar_SetValue( "ui_r_ext_multisample", 4 );
 				Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 				break;
 
@@ -3526,6 +3527,7 @@ static void UI_Update(const char *name)
 				Cvar_SetValue( "ui_r_fastSky", 0 );
 				Cvar_SetValue( "ui_r_inGameVideo", 1 );
 				//Cvar_SetValue( "ui_cg_shadows", 2 );
+				Cvar_SetValue( "ui_r_ext_multisample", 2 );
 				Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 				break;
 
@@ -3541,6 +3543,7 @@ static void UI_Update(const char *name)
 				Cvar_SetValue( "ui_r_fastSky", 1 );
 				Cvar_SetValue( "ui_r_inGameVideo", 0 );
 				//Cvar_SetValue( "ui_cg_shadows", 1 );
+				Cvar_SetValue( "ui_r_ext_multisample", 0 );
 				Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
 				break;
 
@@ -3556,6 +3559,7 @@ static void UI_Update(const char *name)
 				Cvar_SetValue( "ui_r_fastSky", 1 );
 				Cvar_SetValue( "ui_r_inGameVideo", 0 );
 				//Cvar_SetValue( "ui_cg_shadows", 0 );
+				Cvar_SetValue( "ui_r_ext_multisample", 0 );
 				Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
 			break;
 		}
@@ -4224,6 +4228,7 @@ void UI_UpdateVideoSetup ( void )
 	Cvar_Set ( "r_texturemode", Cvar_VariableString ( "ui_r_texturemode" ) );
 	Cvar_Set ( "r_detailtextures", Cvar_VariableString ( "ui_r_detailtextures" ) );
 	Cvar_Set ( "r_ext_compress_textures", Cvar_VariableString ( "ui_r_ext_compress_textures" ) );
+	Cvar_Set ( "r_ext_multisample", Cvar_VariableString ( "ui_r_ext_multisample" ) );
 	Cvar_Set ( "r_depthbits", Cvar_VariableString ( "ui_r_depthbits" ) );
 	Cvar_Set ( "r_subdivisions", Cvar_VariableString ( "ui_r_subdivisions" ) );
 	Cvar_Set ( "r_fastSky", Cvar_VariableString ( "ui_r_fastSky" ) );
@@ -4258,6 +4263,7 @@ void UI_GetVideoSetup ( void )
 	Cvar_Register ( NULL, "ui_r_texturemode",			"0", CVAR_ROM );
 	Cvar_Register ( NULL, "ui_r_detailtextures",		"0", CVAR_ROM );
 	Cvar_Register ( NULL, "ui_r_ext_compress_textures",	"0", CVAR_ROM );
+	Cvar_Register ( NULL, "ui_r_ext_multisample",		"0", CVAR_ROM );
 	Cvar_Register ( NULL, "ui_r_depthbits",				"0", CVAR_ROM );
 	Cvar_Register ( NULL, "ui_r_subdivisions",			"0", CVAR_ROM );
 	Cvar_Register ( NULL, "ui_r_fastSky",				"0", CVAR_ROM );
@@ -4285,6 +4291,7 @@ void UI_GetVideoSetup ( void )
 	Cvar_Set ( "ui_r_texturemode", Cvar_VariableString ( "r_texturemode" ) );
 	Cvar_Set ( "ui_r_detailtextures", Cvar_VariableString ( "r_detailtextures" ) );
 	Cvar_Set ( "ui_r_ext_compress_textures", Cvar_VariableString ( "r_ext_compress_textures" ) );
+	Cvar_Set ( "ui_r_ext_multisample", Cvar_VariableString ( "r_ext_multisample" ) );
 	Cvar_Set ( "ui_r_depthbits", Cvar_VariableString ( "r_depthbits" ) );
 	Cvar_Set ( "ui_r_subdivisions", Cvar_VariableString ( "r_subdivisions" ) );
 	Cvar_Set ( "ui_r_fastSky", Cvar_VariableString ( "r_fastSky" ) );

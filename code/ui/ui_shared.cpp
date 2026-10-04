@@ -1170,25 +1170,62 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 		Com_Printf( "Replaced video mode field with %d display resolutions.\n", multiPtr->count );
 	}
 
+	if ( ( item->type == ITEM_TYPE_MULTI || item->type == ITEM_TYPE_SLIDER ) && item->window.name && !Q_stricmp( item->window.name, "video_mode") && item->cvar && !Q_stricmp( item->cvar, "r_ext_texture_filter_anisotropic" ) ) {
+		// The stock row only turns anisotropic filtering on or off (Jedi Outcast), or is a slider over any number
+		// (Jedi Academy). Offer the levels the graphics card supports instead.
+		multiDef_t *multiPtr;
+
 #ifdef JK2_MODE
-	if ( item->type == ITEM_TYPE_MULTI && item->window.name && !Q_stricmp( item->window.name, "video_mode") && item->cvar && !Q_stricmp( item->cvar, "r_ext_texture_filter_anisotropic" ) ) {
-		{
-			memset(item->typeData, 0, sizeof(multiDef_t));
-		}
-		editFieldDef_t *editPtr = NULL;
-
-		item->cvarFlags = CVAR_DISABLE;
-		item->type = ITEM_TYPE_SLIDER;
-
-		Item_ValidateTypeData(item);
-
-		editPtr = (editFieldDef_t *)item->typeData;
-		editPtr->minVal = 0.5f;
-		editPtr->maxVal = cls.glconfig.maxTextureFilterAnisotropy;
-		editPtr->defVal = 1.0f;
-		Com_Printf( "Converted anisotropic filter field to slider.\n");
-	}
+		item->cvarFlags = CVAR_DISABLE;	// (greyed out rather than hidden when the card can't do it)
 #endif
+		if ( item->type != ITEM_TYPE_MULTI )
+		{
+			item->type = ITEM_TYPE_MULTI;
+			item->typeData = NULL;
+			Item_ValidateTypeData( item );
+		}
+		multiPtr = (multiDef_t *)item->typeData;
+		memset( multiPtr, 0, sizeof( *multiPtr ) );
+		multiPtr->cvarList[0] = String_Alloc( "Off" );
+		multiPtr->cvarValue[0] = 0;
+		multiPtr->count = 1;
+		for ( int level = 2; level <= 16 && level <= cls.glconfig.maxTextureFilterAnisotropy; level *= 2 )
+		{
+			multiPtr->cvarList[multiPtr->count] = String_Alloc( va( "%dx", level ) );
+			multiPtr->cvarValue[multiPtr->count] = (float)level;
+			multiPtr->count++;
+		}
+		item->descText = String_Alloc( "Keeps textures sharp on floors and walls seen at a slant. Higher is sharper." );
+		Com_Printf( "Replaced anisotropic filter field with %d levels.\n", multiPtr->count );
+	}
+
+	// The stock video menu has a row for compressed textures that is not shown any more. Use it for antialiasing.
+	if ( item->type == ITEM_TYPE_MULTI && item->window.name && !Q_stricmp( item->window.name, "compress_textures") && item->cvar && !Q_stricmp( item->cvar, "ui_r_ext_compress_textures" ) ) {
+		multiDef_t *multiPtr = (multiDef_t *)item->typeData;
+
+		memset( multiPtr, 0, sizeof( *multiPtr ) );
+		multiPtr->cvarList[0] = String_Alloc( "Off" );
+		multiPtr->cvarValue[0] = 0;
+		multiPtr->count = 1;
+		for ( int samples = 2; samples <= 8; samples *= 2 )
+		{
+			multiPtr->cvarList[multiPtr->count] = String_Alloc( va( "%dx", samples ) );
+			multiPtr->cvarValue[multiPtr->count] = (float)samples;
+			multiPtr->count++;
+		}
+		item->window.group = (char *)String_Alloc( "video" );	// (the group is what makes the row appear with the others)
+		item->window.name = (char *)String_Alloc( "antialiasing" );
+		item->cvar = String_Alloc( "ui_r_ext_multisample" );
+		item->text = (char *)String_Alloc( "Anti-Aliasing:" );
+		item->descText = String_Alloc( "Smooths the jagged edges of everything. Higher is smoother and slower. Needs Apply Changes." );
+#ifndef JK2_MODE
+		// the rows of Jedi Academy are 14 apart and the one for video sync is the last, put this one below it
+		item->window.rectClient.y = 342;
+		item->mouseEnter = String_Alloc( "\"show\" \"button_glow\" \"setitemrect\" \"button_glow\" \"260\" \"342\" \"340\" \"20\" " );
+		item->mouseExit = String_Alloc( "\"hide\" \"button_glow\" " );
+#endif
+		Com_Printf( "Turned the compressed textures field into an antialiasing field.\n" );
+	}
 }
 
 /*
