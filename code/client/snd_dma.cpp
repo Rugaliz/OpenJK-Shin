@@ -2143,6 +2143,10 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 			Com_DPrintf( "Sound: binaural (HRTF) positioning %s (%d taps at %d Hz)\n", s_hrtfActive ? "on" : "off", S_HRTF_NumTaps(), dma.speed );
 		}
 
+		// While a scripted cutscene plays the listener is the camera, not somebody in a room: the dialogue is heard as in
+		// a film (no echo of the room, and no wall between the camera and the speaker muffles it)
+		const qboolean inCutscene = (qboolean)( Cvar_VariableIntegerValue( "inCutscene" ) != 0 );
+
 		listener_number = entityNum;
 		VectorCopy(head, listener_origin);
 		VectorCopy(axis[0], listener_axis[0]);
@@ -2167,7 +2171,8 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 				ch->hrtf = qfalse;
 
 				// the player's own sounds are in the room too, announcements and the like are not
-				ch->reverbvol = ( ch->entchannel == CHAN_VOICE_GLOBAL || ch->entchannel == CHAN_ANNOUNCER || !s_reverbActive ) ? 0 : (int)( ch->master_vol * 0.7f );
+				const qboolean bVoice = (qboolean)( ch->entchannel == CHAN_VOICE || ch->entchannel == CHAN_VOICE_ATTEN || ch->entchannel == CHAN_VOICE_GLOBAL );
+				ch->reverbvol = ( ch->entchannel == CHAN_VOICE_GLOBAL || ch->entchannel == CHAN_ANNOUNCER || !s_reverbActive || ( inCutscene && bVoice ) ) ? 0 : (int)( ch->master_vol * 0.7f );
 				ch->obstruct = ch->obstructTarget = 0.0f;
 			} else {
 				const vec3_t	*origin;
@@ -2188,7 +2193,15 @@ void S_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], qboolean 
 				}
 
 				ch->reverbvol = S_ReverbSend( (float)ch->master_vol, 0.5f * ( ch->leftvol + ch->rightvol ) );
-				S_UpdateObstruction( ch, *origin, now, seconds );
+				if ( inCutscene )
+				{
+					if ( ch->entchannel == CHAN_VOICE || ch->entchannel == CHAN_VOICE_ATTEN || ch->entchannel == CHAN_VOICE_GLOBAL )
+						ch->reverbvol = 0;
+					ch->obstruct = ch->obstructTarget = 0.0f;
+					ch->obstructNextTime = 0;
+				}
+				else
+					S_UpdateObstruction( ch, *origin, now, seconds );
 			}
 
 			//NOTE: Made it so that voice sounds keep playing, even out of range
