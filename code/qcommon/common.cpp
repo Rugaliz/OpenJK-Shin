@@ -1229,9 +1229,13 @@ Com_MigrateConfig
 Config files written by older versions saved the old defaults (com_maxfps 125,
 r_swapInterval 0), which cannot be told apart from a deliberate choice and would
 hold a high refresh rate display at 125 fps with tearing. Reset them once.
+
+Version 2 raised the defaults of r_lodscale (models drop to their coarse levels
+of detail twice as far away) and r_shadowRange (character shadows are drawn up
+to 2000 units).  Saved configs only change if they still hold the old default.
 ===============
 */
-#define COM_CONFIG_VERSION	1
+#define COM_CONFIG_VERSION	2
 
 static void Com_MigrateConfig( void ) {
 	cvar_t *version = Cvar_Get( "com_configVersion", "0", CVAR_ARCHIVE_ND );
@@ -1240,8 +1244,16 @@ static void Com_MigrateConfig( void ) {
 		return;
 	}
 
-	Cvar_Set( "com_maxfps", "0" );
-	Cvar_Set( "r_swapInterval", "1" );
+	if ( version->integer < 1 ) {
+		Cvar_Set( "com_maxfps", "0" );
+		Cvar_Set( "r_swapInterval", "1" );
+	}
+	if ( !strcmp( Cvar_VariableString( "r_lodscale" ), "10" ) ) {
+		Cvar_Set( "r_lodscale", "20" );
+	}
+	if ( !strcmp( Cvar_VariableString( "r_shadowRange" ), "1000" ) ) {
+		Cvar_Set( "r_shadowRange", "2000" );
+	}
 	Cvar_Set( "com_configVersion", va( "%d", COM_CONFIG_VERSION ) );
 }
 

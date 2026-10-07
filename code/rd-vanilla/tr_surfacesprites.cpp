@@ -160,6 +160,17 @@ static void R_SurfaceSpriteFrameUpdate(void)
 		}
 	}
 
+	// A wider field of view than the standard one used to shorten the ranges to save time.
+	// Today's hardware does not need that, and with a horizontal field of view that grows
+	// with the aspect ratio it would cut the draw distance on every wide screen.
+	if (rangescalefactor < 1.0f)
+	{
+		rangescalefactor = 1.0f;
+	}
+
+	// The shaders were written for the hardware of 2002, let the player stretch their ranges.
+	rangescalefactor *= Com_Clamp( 0.25f, 8.0f, r_surfaceSpriteRange->value );
+
 	// Create a set of four right vectors so that vertical sprites aren't always facing the same way.
 	// First generate a HORIZONTAL forward vector (important).
 	CrossProduct(ssViewRight, up, ssfwdvector);

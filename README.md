@@ -32,6 +32,13 @@ yet tested by the author. macOS code paths still compile but nothing is packaged
 - **Widescreen done properly**: horizontal-plus field of view, menus and HUD that keep their proportions in the
   middle of a wide screen instead of being stretched, and videos shown with black bars instead of stretched.
 
+### Shadows and draw distance
+- **Stencil shadows (`cg_shadows 2`) work properly**: characters are no longer darkened by their own shadow, the
+  shadows have soft edges, follow the light, fade with how much directional light there is, and no longer leak through
+  walls or reach down to height 0. See [docs/shadows.md](docs/shadows.md).
+- **Grass and bushes are drawn about three times further** (`r_surfaceSpriteRange`), widescreen no longer shortens
+  that, and characters keep their detailed models twice as far away (`r_lodscale`).
+
 ### Sound
 - The game **mixes at your sound device's own rate** (usually 48 kHz) instead of 22 or 44.1 kHz, so the system
   doesn't convert the sound again. The old "sound quality" setting is gone from the menu because it no longer means

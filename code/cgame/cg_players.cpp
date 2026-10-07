@@ -3438,14 +3438,16 @@ static void CG_PlayerPowerups( centity_t *cent )
 }
 
 #define	SHADOW_DISTANCE		128
+#define	SHADOW_STENCIL_DISTANCE	512
 static qboolean _PlayerShadow( const vec3_t origin, const float orientation, float *const shadowPlane, const float radius, qhandle_t markShader ) {
 	vec3_t		end, mins = {-7, -7, 0}, maxs = {7, 7, 2};
 	trace_t		trace;
 	float		alpha;
 
 	// send a trace down from the player to the ground
+	// (stencil shadows are not faded with height, so let them reach further)
 	VectorCopy( origin, end );
-	end[2] -= SHADOW_DISTANCE;
+	end[2] -= ( cg_shadows.integer == 2 ) ? SHADOW_STENCIL_DISTANCE : SHADOW_DISTANCE;
 
 	cgi_CM_BoxTrace( &trace, origin, end, mins, maxs, 0, MASK_PLAYERSOLID );
 
@@ -6929,7 +6931,7 @@ Ghoul2 Insert Start
 			ent.renderfx |= RF_SHADOW_ONLY;
 		}
 
-		if ( (cg_shadows.integer == 2 && !in_camera) || (cg_shadows.integer == 3 && shadow) )
+		if ( ((cg_shadows.integer == 2 && !in_camera) || cg_shadows.integer == 3) && shadow )
 		{
 			ent.renderfx |= RF_SHADOW_PLANE;
 		}
@@ -8016,7 +8018,7 @@ Ghoul2 Insert End
 		}
 	}
 
-	if ( (cg_shadows.integer == 2) || (cg_shadows.integer == 3 && shadow) )
+	if ( (cg_shadows.integer == 2 || cg_shadows.integer == 3) && shadow )
 	{
 		renderfx |= RF_SHADOW_PLANE;
 	}
