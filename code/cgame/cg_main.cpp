@@ -356,7 +356,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_stereoSeparation, "cg_stereoSeparation", "0.4", CVAR_ARCHIVE  },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_renderToTextureFX, "cg_renderToTextureFX", "1", CVAR_ARCHIVE  },
-	{ &cg_shadowCullDistance, "r_shadowRange", "1000", CVAR_ARCHIVE },
+	{ &cg_shadowCullDistance, "r_shadowRange", "2000", CVAR_ARCHIVE },
 	{ &cg_footsteps, "cg_footsteps", "3", CVAR_ARCHIVE  },//1 = sounds, 2 = sounds & effects, 3 = sounds, effects & marks, 4 = always
 	{ &cg_saberEntMarks, "cg_saberEntMarks", "1", CVAR_ARCHIVE  },
 

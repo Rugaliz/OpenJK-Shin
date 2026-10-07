@@ -1133,6 +1133,7 @@ extern	cvar_t	*r_showcluster;
 
 extern cvar_t	*r_dlightStyle;
 extern cvar_t	*r_surfaceSprites;
+extern cvar_t	*r_surfaceSpriteRange;
 extern cvar_t	*r_surfaceWeather;
 
 extern cvar_t	*r_windSpeed;
@@ -1197,6 +1198,11 @@ extern	cvar_t	*r_shownormals;					// draws wireframe normals
 extern	cvar_t	*r_clear;						// force screen clear every frame
 
 extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection
+extern	cvar_t	*r_shadowSoftness;				// stencil shadows: penumbra width, 0 = hard edges
+extern	cvar_t	*r_shadowSamples;				// stencil shadows: how many volumes make up a soft shadow
+extern	cvar_t	*r_shadowStrength;				// stencil shadows: scales how dark they are
+extern	cvar_t	*r_shadowTilt;					// stencil shadows: how much they lean away from the light
+extern	cvar_t	*r_shadowSelf;					// stencil shadows: 1 = characters are darkened by shadows too
 extern	cvar_t	*r_flares;						// light flares
 
 extern	cvar_t	*r_intensity;

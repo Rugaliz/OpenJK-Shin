@@ -36,442 +36,496 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 */
 
-#define _STENCIL_REVERSE
+/*
+Stencil shadow volumes (cg_shadows 2)
+
+Every shadow casting surface only records its geometry here (RB_ShadowTessEnd).
+RB_ShadowFinish then renders all the volumes in one go, so that they can be
+replayed several times with a slightly different light direction to get soft
+edges, and so that the characters themselves can be left out of the darkening.
+
+The volume of a surface is the sweep of its light facing triangles from where
+they are down to the shadow plane of the entity.  It is built from a closed
+chain of triangles: the light facing triangles (front cap), the same triangles
+moved to the end of the sweep (back cap) and one wall for every edge the facing
+triangles do not share with each other.  Vertices are welded by position first,
+which makes models whose vertices are split along texture seams behave like the
+closed meshes they really are, and the walls come from a signed edge count, so
+it also copes with edges shared by more than two triangles and open meshes.
+The volumes are drawn "Carmack reverse" style (z fail), so they need no
+clipping against the near plane.
+
+The low seven stencil bits count the volumes, bit 7 marks pixels that show a
+shadow casting character.
+*/
+
+#include <vector>
 
 typedef struct {
-	int		i2;
-	int		facing;
-} edgeDef_t;
+	float	xyz[3];			// point on the caster, world space
+	float	ext[3];			// from xyz to the end of the sweep
+	float	h;				// length of the sweep, per unit of height
+} shadowPt_t;
 
-#define	MAX_EDGE_DEFS	32
+static std::vector<shadowPt_t>	shPts;
+static std::vector<int>			shTris;		// all triangles of all casters, 3 point indices each
+static std::vector<int>			shCaps;		// the triangles facing the light
+static std::vector<int>			shWalls;	// directed edges, 2 point indices each
+static float					shStrengthSum;
+static int						shCasters;
 
-static	edgeDef_t	edgeDefs[SHADER_MAX_VERTEXES][MAX_EDGE_DEFS];
-static	int			numEdgeDefs[SHADER_MAX_VERTEXES];
-static	int			facing[SHADER_MAX_INDEXES/3];
-static	vec3_t		shadowXyz[SHADER_MAX_VERTEXES];
+#define	SHADOW_STENCIL_COUNT	0x7F
+#define	SHADOW_STENCIL_SKIP		0x80
+#define	SHADOW_MAX_POINTS		1000000
 
+#define	SHADOW_WELD_SIZE		4096
+#define	SHADOW_EDGE_SIZE		16384
 
-void R_AddEdgeDef( int i1, int i2, int facing ) {
-	int		c;
+typedef struct {
+	int		stamp;
+	int		vert;
+} weldSlot_t;
 
-	c = numEdgeDefs[ i1 ];
-	if ( c == MAX_EDGE_DEFS ) {
-		return;		// overflow
-	}
-	edgeDefs[ i1 ][ c ].i2 = i2;
-	edgeDefs[ i1 ][ c ].facing = facing;
+typedef struct {
+	int		stamp;
+	int		key;
+	int		net;
+} edgeSlot_t;
 
-	numEdgeDefs[ i1 ]++;
+static weldSlot_t	weldTable[SHADOW_WELD_SIZE];
+static edgeSlot_t	edgeTable[SHADOW_EDGE_SIZE];
+static int			shStamp;
+static vec3_t		shWorld[SHADER_MAX_VERTEXES];
+static int			shRep[SHADER_MAX_VERTEXES];		// first vertex at the same position
+static int			shPtOfRep[SHADER_MAX_VERTEXES];	// point index of a first vertex
+static int			shEdgeUsed[SHADER_MAX_INDEXES + 1];
+
+static void RB_ShadowClear( void )
+{
+	shPts.clear();
+	shTris.clear();
+	shCaps.clear();
+	shWalls.clear();
+	shStrengthSum = 0.0f;
+	shCasters = 0;
 }
 
-void R_RenderShadowEdges( void ) {
-	int		i;
-	int		c;
-	int		j;
-	int		i2;
-	//int		c_edges, c_rejected;
-#if 0
-	int		c2, k;
-	int		hit[2];
-#endif
-#ifdef _STENCIL_REVERSE
-	int		numTris;
-	int		o1, o2, o3;
-#endif
+static inline int RB_ShadowCell( float v )
+{
+	return (int)floorf( v * 2.0f );
+}
 
-	// an edge is NOT a silhouette edge if its face doesn't face the light,
-	// or if it has a reverse paired edge that also faces the light.
-	// A well behaved polyhedron would have exactly two faces for each edge,
-	// but lots of models have dangling edges or overfanned edges
-#if 0
-	c_edges = 0;
-	c_rejected = 0;
-#endif
+static inline unsigned RB_ShadowCellHash( int cx, int cy, int cz )
+{
+	return ( (unsigned)cx * 73856093u ^ (unsigned)cy * 19349663u ^ (unsigned)cz * 83492791u ) & ( SHADOW_WELD_SIZE - 1 );
+}
 
-	for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-		c = numEdgeDefs[ i ];
-		for ( j = 0 ; j < c ; j++ ) {
-			if ( !edgeDefs[ i ][ j ].facing ) {
-				continue;
-			}
+// finds the first vertex that sits at the same position as the given one, or -1
+static int RB_ShadowFindWeld( const vec3_t p )
+{
+	const int cx = RB_ShadowCell( p[0] ), cy = RB_ShadowCell( p[1] ), cz = RB_ShadowCell( p[2] );
 
-			//with this system we can still get edges shared by more than 2 tris which
-			//produces artifacts including seeing the shadow through walls. So for now
-			//we are going to render all edges even though it is a tiny bit slower. -rww
-#if 1
-			i2 = edgeDefs[ i ][ j ].i2;
-			qglBegin( GL_TRIANGLE_STRIP );
-				qglVertex3fv( tess.xyz[ i ] );
-				qglVertex3fv( shadowXyz[ i ] );
-				qglVertex3fv( tess.xyz[ i2 ] );
-				qglVertex3fv( shadowXyz[ i2 ] );
-			qglEnd();
-#else
-			hit[0] = 0;
-			hit[1] = 0;
-
-			i2 = edgeDefs[ i ][ j ].i2;
-			c2 = numEdgeDefs[ i2 ];
-			for ( k = 0 ; k < c2 ; k++ ) {
-				if ( edgeDefs[ i2 ][ k ].i2 == i ) {
-					hit[ edgeDefs[ i2 ][ k ].facing ]++;
+	for ( int dx = -1 ; dx <= 1 ; dx++ ) {
+		for ( int dy = -1 ; dy <= 1 ; dy++ ) {
+			for ( int dz = -1 ; dz <= 1 ; dz++ ) {
+				unsigned slot = RB_ShadowCellHash( cx + dx, cy + dy, cz + dz );
+				while ( weldTable[slot].stamp == shStamp ) {
+					if ( DistanceSquared( shWorld[weldTable[slot].vert], p ) < 0.0025f ) {
+						return weldTable[slot].vert;
+					}
+					slot = ( slot + 1 ) & ( SHADOW_WELD_SIZE - 1 );
 				}
 			}
-
-			// if it doesn't share the edge with another front facing
-			// triangle, it is a sil edge
-			if ( hit[ 1 ] == 0 ) {
-				qglBegin( GL_TRIANGLE_STRIP );
-				qglVertex3fv( tess.xyz[ i ] );
-				qglVertex3fv( shadowXyz[ i ] );
-				qglVertex3fv( tess.xyz[ i2 ] );
-				qglVertex3fv( shadowXyz[ i2 ] );
-				qglEnd();
-				c_edges++;
-			} else {
-				c_rejected++;
-			}
-#endif
 		}
 	}
-
-#ifdef _STENCIL_REVERSE
-	//Carmack Reverse<tm> method requires that volumes
-	//be capped properly -rww
-	numTris = tess.numIndexes / 3;
-
-	for ( i = 0 ; i < numTris ; i++ )
-	{
-		if ( !facing[i] )
-		{
-			continue;
-		}
-
-		o1 = tess.indexes[ i*3 + 0 ];
-		o2 = tess.indexes[ i*3 + 1 ];
-		o3 = tess.indexes[ i*3 + 2 ];
-
-		qglBegin(GL_TRIANGLES);
-			qglVertex3fv(tess.xyz[o1]);
-			qglVertex3fv(tess.xyz[o2]);
-			qglVertex3fv(tess.xyz[o3]);
-		qglEnd();
-		qglBegin(GL_TRIANGLES);
-			qglVertex3fv(shadowXyz[o3]);
-			qglVertex3fv(shadowXyz[o2]);
-			qglVertex3fv(shadowXyz[o1]);
-		qglEnd();
-	}
-#endif
+	return -1;
 }
 
-//#define _DEBUG_STENCIL_SHADOWS
+static void RB_ShadowAddWeld( int vert )
+{
+	unsigned slot = RB_ShadowCellHash( RB_ShadowCell( shWorld[vert][0] ), RB_ShadowCell( shWorld[vert][1] ), RB_ShadowCell( shWorld[vert][2] ) );
+
+	while ( weldTable[slot].stamp == shStamp ) {
+		slot = ( slot + 1 ) & ( SHADOW_WELD_SIZE - 1 );
+	}
+	weldTable[slot].stamp = shStamp;
+	weldTable[slot].vert = vert;
+}
+
+// counts how often an edge is used, in one direction minus the other
+static void RB_ShadowCountEdge( int a, int b, int *numUsed )
+{
+	const int lo = ( a < b ) ? a : b;
+	const int hi = ( a < b ) ? b : a;
+	const int key = lo * 1024 + hi;
+	unsigned slot = ( (unsigned)key * 2654435761u ) & ( SHADOW_EDGE_SIZE - 1 );
+
+	while ( edgeTable[slot].stamp == shStamp && edgeTable[slot].key != key ) {
+		slot = ( slot + 1 ) & ( SHADOW_EDGE_SIZE - 1 );
+	}
+	if ( edgeTable[slot].stamp != shStamp ) {
+		edgeTable[slot].stamp = shStamp;
+		edgeTable[slot].key = key;
+		edgeTable[slot].net = 0;
+		shEdgeUsed[(*numUsed)++] = slot;
+	}
+	edgeTable[slot].net += ( a < b ) ? 1 : -1;
+}
+
+/*
+=================
+RB_ShadowTilt
+
+How far the shadow leans for each unit of height, from the light direction at the entity
+=================
+*/
+static void RB_ShadowTilt( const trRefEntity_t *ent, float *tx, float *ty )
+{
+	float lz = ent->lightDir[2];
+	if ( lz < 0.35f ) {
+		lz = 0.35f;
+	}
+
+	float x = ent->lightDir[0] / lz * r_shadowTilt->value;
+	float y = ent->lightDir[1] / lz * r_shadowTilt->value;
+	const float len = sqrtf( x * x + y * y );
+	const float maxTilt = 1.2f;
+
+	if ( len > maxTilt ) {
+		x *= maxTilt / len;
+		y *= maxTilt / len;
+	}
+	*tx = x;
+	*ty = y;
+}
 
 /*
 =================
 RB_ShadowTessEnd
 
-triangleFromEdge[ v1 ][ v2 ]
-
-
-  set triangle from edge( v1, v2, tri )
-  if ( facing[ triangleFromEdge[ v1 ][ v2 ] ] && !facing[ triangleFromEdge[ v2 ][ v1 ] ) {
-  }
+Records the surface in tess as a shadow caster.
 =================
 */
-void RB_DoShadowTessEnd( vec3_t lightPos );
 void RB_ShadowTessEnd( void )
 {
-#if 0
-	if (backEnd.currentEntity &&
-		(backEnd.currentEntity->directedLight[0] ||
-			backEnd.currentEntity->directedLight[1] ||
-			backEnd.currentEntity->directedLight[2]))
-	{ //an ent that has its light set for it
-		RB_DoShadowTessEnd(NULL);
+	const trRefEntity_t	*ent = backEnd.currentEntity;
+	const orientationr_t *ori = &backEnd.ori;
+	int			numVerts = tess.numVertexes;
+	int			numTris = tess.numIndexes / 3;
+	int			i, numUsed = 0;
+	float		tx, ty;
+
+	if ( glConfig.stencilBits < 4 || r_shadows->integer != 2 || !ent || numVerts < 3 || numTris < 1 ) {
+		return;
+	}
+	if ( shPts.size() > SHADOW_MAX_POINTS ) {
 		return;
 	}
 
-//	if (!tess.dlightBits)
-//	{
-//		return;
-//	}
+	RB_ShadowTilt( ent, &tx, &ty );
+	const vec3_t lightAxis = { tx, ty, 1.0f };
 
-	int i = 0;
-	dlight_t *dl;
+	shStamp++;
 
-	R_TransformDlights( backEnd.refdef.num_dlights, backEnd.refdef.dlights, &backEnd.ori );
-/*	while (i < tr.refdef.num_dlights)
-	{
-		if (tess.dlightBits & (1 << i))
-		{
-			dl = &tr.refdef.dlights[i];
+	// weld the vertices at the same position, working in world space
+	for ( i = 0 ; i < numVerts ; i++ ) {
+		const float *v = tess.xyz[i];
 
-			RB_DoShadowTessEnd(dl->transformed);
+		VectorCopy( ori->origin, shWorld[i] );
+		VectorMA( shWorld[i], v[0], ori->axis[0], shWorld[i] );
+		VectorMA( shWorld[i], v[1], ori->axis[1], shWorld[i] );
+		VectorMA( shWorld[i], v[2], ori->axis[2], shWorld[i] );
+
+		const int rep = RB_ShadowFindWeld( shWorld[i] );
+		if ( rep >= 0 ) {
+			shRep[i] = rep;
+			continue;
 		}
 
-		i++;
-	}
-	*/
-			dl = &tr.refdef.dlights[0];
+		shRep[i] = i;
+		RB_ShadowAddWeld( i );
 
-			RB_DoShadowTessEnd(dl->transformed);
-
-#else //old ents-only way
-	RB_DoShadowTessEnd(NULL);
-#endif
-}
-
-void RB_DoShadowTessEnd( vec3_t lightPos )
-{
-	int		i;
-	int		numTris;
-	vec3_t	lightDir;
-
-	if ( glConfig.stencilBits < 4 ) {
-		return;
-	}
-
-#if 1 //controlled method - try to keep shadows in range so they don't show through so much -rww
-	vec3_t	worldxyz;
-	vec3_t	entLight;
-	float	groundDist;
-
-	VectorCopy( backEnd.currentEntity->lightDir, entLight );
-	entLight[2] = 0.0f;
-	VectorNormalize(entLight);
-
-	//Oh well, just cast them straight down no matter what onto the ground plane.
-	//This presets no chance of screwups and still looks better than a stupid
-	//shader blob.
-	VectorSet(lightDir, entLight[0]*0.3f, entLight[1]*0.3f, 1.0f);
-	// project vertexes away from light direction
-	for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-		//add or.origin to vert xyz to end up with world oriented coord, then figure
-		//out the ground pos for the vert to project the shadow volume to
-		VectorAdd(tess.xyz[i], backEnd.ori.origin, worldxyz);
-		groundDist = worldxyz[2] - backEnd.currentEntity->e.shadowPlane;
-		groundDist += 16.0f; //fudge factor
-		VectorMA( tess.xyz[i], -groundDist, lightDir, shadowXyz[i] );
-	}
-#else
-	if (lightPos)
-	{
-		for ( i = 0 ; i < tess.numVertexes ; i++ )
-		{
-			shadowXyz[i][0] = tess.xyz[i][0]+(( tess.xyz[i][0]-lightPos[0] )*128.0f);
-			shadowXyz[i][1] = tess.xyz[i][1]+(( tess.xyz[i][1]-lightPos[1] )*128.0f);
-			shadowXyz[i][2] = tess.xyz[i][2]+(( tess.xyz[i][2]-lightPos[2] )*128.0f);
+		float h = shWorld[i][2] - ent->e.shadowPlane + 16.0f;	// the fudge keeps it below the floor
+		if ( h < 0.0f ) {
+			h = 0.0f;
 		}
-	}
-	else
-	{
-		VectorCopy( backEnd.currentEntity->lightDir, lightDir );
 
-		// project vertexes away from light direction
-		for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-			VectorMA( tess.xyz[i], -512, lightDir, shadowXyz[i] );
-		}
+		shadowPt_t pt;
+		VectorCopy( shWorld[i], pt.xyz );
+		pt.ext[0] = -h * lightAxis[0];
+		pt.ext[1] = -h * lightAxis[1];
+		pt.ext[2] = -h;
+		pt.h = h;
+		shPtOfRep[i] = (int)shPts.size();
+		shPts.push_back( pt );
 	}
-#endif
-	// decide which triangles face the light
-	memset( numEdgeDefs, 0, 4 * tess.numVertexes );
 
-	numTris = tess.numIndexes / 3;
+	// find the triangles facing the light, and the edges between them and the rest
 	for ( i = 0 ; i < numTris ; i++ ) {
-		int		i1, i2, i3;
-		vec3_t	d1, d2, normal;
-		float	*v1, *v2, *v3;
-		float	d;
+		const int r1 = shRep[tess.indexes[i*3 + 0]];
+		const int r2 = shRep[tess.indexes[i*3 + 1]];
+		const int r3 = shRep[tess.indexes[i*3 + 2]];
 
-		i1 = tess.indexes[ i*3 + 0 ];
-		i2 = tess.indexes[ i*3 + 1 ];
-		i3 = tess.indexes[ i*3 + 2 ];
-
-		v1 = tess.xyz[ i1 ];
-		v2 = tess.xyz[ i2 ];
-		v3 = tess.xyz[ i3 ];
-
-		if (!lightPos)
-		{
-			VectorSubtract( v2, v1, d1 );
-			VectorSubtract( v3, v1, d2 );
-			CrossProduct( d1, d2, normal );
-
-			d = DotProduct( normal, lightDir );
-		}
-		else
-		{
-			float planeEq[4];
-			planeEq[0] = v1[1]*(v2[2]-v3[2]) + v2[1]*(v3[2]-v1[2]) + v3[1]*(v1[2]-v2[2]);
-			planeEq[1] = v1[2]*(v2[0]-v3[0]) + v2[2]*(v3[0]-v1[0]) + v3[2]*(v1[0]-v2[0]);
-			planeEq[2] = v1[0]*(v2[1]-v3[1]) + v2[0]*(v3[1]-v1[1]) + v3[0]*(v1[1]-v2[1]);
-			planeEq[3] = -( v1[0]*( v2[1]*v3[2] - v3[1]*v2[2] ) +
-						v2[0]*(v3[1]*v1[2] - v1[1]*v3[2]) +
-						v3[0]*(v1[1]*v2[2] - v2[1]*v1[2]) );
-
-			d = planeEq[0]*lightPos[0]+
-				planeEq[1]*lightPos[1]+
-				planeEq[2]*lightPos[2]+
-				planeEq[3];
+		if ( r1 == r2 || r2 == r3 || r3 == r1 ) {
+			continue;
 		}
 
-		if ( d > 0 ) {
-			facing[ i ] = 1;
-		} else {
-			facing[ i ] = 0;
+		const int p1 = shPtOfRep[r1], p2 = shPtOfRep[r2], p3 = shPtOfRep[r3];
+		shTris.push_back( p1 );
+		shTris.push_back( p2 );
+		shTris.push_back( p3 );
+
+		vec3_t d1, d2, normal;
+		VectorSubtract( shWorld[r2], shWorld[r1], d1 );
+		VectorSubtract( shWorld[r3], shWorld[r1], d2 );
+		CrossProduct( d1, d2, normal );
+
+		if ( DotProduct( normal, lightAxis ) <= 0.0f ) {
+			continue;
 		}
 
-		// create the edges
-		R_AddEdgeDef( i1, i2, facing[ i ] );
-		R_AddEdgeDef( i2, i3, facing[ i ] );
-		R_AddEdgeDef( i3, i1, facing[ i ] );
+		shCaps.push_back( p1 );
+		shCaps.push_back( p2 );
+		shCaps.push_back( p3 );
+
+		RB_ShadowCountEdge( r1, r2, &numUsed );
+		RB_ShadowCountEdge( r2, r3, &numUsed );
+		RB_ShadowCountEdge( r3, r1, &numUsed );
 	}
 
-	GL_Bind( tr.whiteImage );
-	//qglEnable( GL_CULL_FACE );
-	GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+	// every edge that is not cancelled by a facing neighbour is the border of the volume
+	for ( i = 0 ; i < numUsed ; i++ ) {
+		const edgeSlot_t *e = &edgeTable[shEdgeUsed[i]];
+		const int lo = e->key >> 10;
+		const int hi = e->key & 1023;
+		const int n = abs( e->net );
 
-#ifndef _DEBUG_STENCIL_SHADOWS
-	qglColor3f( 0.2f, 0.2f, 0.2f );
-
-	// don't write to the color buffer
-	qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
-
-	qglEnable( GL_STENCIL_TEST );
-	qglStencilFunc( GL_ALWAYS, 1, 255 );
-#else
-	qglColor3f( 1.0f, 0.0f, 0.0f );
-	qglPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	//qglDisable(GL_DEPTH_TEST);
-#endif
-
-#ifdef _STENCIL_REVERSE
-	qglDepthFunc(GL_LESS);
-
-	//now using the Carmack Reverse<tm> -rww
-	if (glConfig.doStencilShadowsInOneDrawcall)
-	{
-		GL_Cull(CT_TWO_SIDED);
-		qglStencilOpSeparate(GL_FRONT, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
-		qglStencilOpSeparate(GL_BACK, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
-
-		R_RenderShadowEdges();
-		qglDisable(GL_STENCIL_TEST);
-	}
-	else
-	{
-		GL_Cull(CT_FRONT_SIDED);
-		qglStencilOp(GL_KEEP, GL_INCR, GL_KEEP);
-
-		R_RenderShadowEdges();
-
-		GL_Cull(CT_BACK_SIDED);
-		qglStencilOp(GL_KEEP, GL_DECR, GL_KEEP);
-
-		R_RenderShadowEdges();
+		for ( int j = 0 ; j < n ; j++ ) {
+			shWalls.push_back( shPtOfRep[( e->net > 0 ) ? lo : hi] );
+			shWalls.push_back( shPtOfRep[( e->net > 0 ) ? hi : lo] );
+		}
 	}
 
-	qglDepthFunc(GL_LEQUAL);
-#else
-	// mirrors have the culling order reversed
-	if ( backEnd.viewParms.isMirror ) {
-		qglCullFace( GL_FRONT );
-		qglStencilOp( GL_KEEP, GL_KEEP, GL_INCR );
-
-		R_RenderShadowEdges();
-
-		qglCullFace( GL_BACK );
-		qglStencilOp( GL_KEEP, GL_KEEP, GL_DECR );
-
-		R_RenderShadowEdges();
-	} else {
-		qglCullFace( GL_BACK );
-		qglStencilOp( GL_KEEP, GL_KEEP, GL_INCR );
-
-		R_RenderShadowEdges();
-
-		qglCullFace( GL_FRONT );
-		qglStencilOp( GL_KEEP, GL_KEEP, GL_DECR );
-
-		R_RenderShadowEdges();
-	}
-#endif
-
-	// reenable writing to the color buffer
-	qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
-
-#ifdef _DEBUG_STENCIL_SHADOWS
-	qglPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-#endif
+	// how much of the light comes from a direction, which is what a shadow takes away
+	const float directed = Q_max( ent->directedLight[0], Q_max( ent->directedLight[1], ent->directedLight[2] ) );
+	const float ambient = Q_max( ent->ambientLight[0], Q_max( ent->ambientLight[1], ent->ambientLight[2] ) );
+	shStrengthSum += ( directed + ambient > 1.0f ) ? directed / ( directed + ambient ) : 0.5f;
+	shCasters++;
 }
 
+static void RB_ShadowEmitVolumes( const float *bottom )
+{
+	const shadowPt_t *pts = &shPts[0];
 
-/*
-=================
-RB_ShadowFinish
+	qglBegin( GL_TRIANGLES );
 
-Darken everything that is is a shadow volume.
-We have to delay this until everything has been shadowed,
-because otherwise shadows from different body parts would
-overlap and double darken.
-=================
-*/
-void RB_ShadowFinish( void ) {
-	if ( r_shadows->integer != 2 ) {
-		return;
+	for ( size_t i = 0 ; i < shCaps.size() ; i += 3 ) {
+		const int a = shCaps[i], b = shCaps[i+1], c = shCaps[i+2];
+
+		qglVertex3fv( pts[a].xyz );
+		qglVertex3fv( pts[b].xyz );
+		qglVertex3fv( pts[c].xyz );
+
+		qglVertex3fv( bottom + c*3 );
+		qglVertex3fv( bottom + b*3 );
+		qglVertex3fv( bottom + a*3 );
 	}
-	if ( glConfig.stencilBits < 4 ) {
-		return;
+
+	for ( size_t i = 0 ; i < shWalls.size() ; i += 2 ) {
+		const int a = shWalls[i], b = shWalls[i+1];
+
+		qglVertex3fv( pts[a].xyz );
+		qglVertex3fv( bottom + a*3 );
+		qglVertex3fv( pts[b].xyz );
+
+		qglVertex3fv( pts[b].xyz );
+		qglVertex3fv( bottom + a*3 );
+		qglVertex3fv( bottom + b*3 );
 	}
 
-#ifdef _DEBUG_STENCIL_SHADOWS
-	return;
-#endif
+	qglEnd();
+}
 
-	qglEnable( GL_STENCIL_TEST );
-	qglStencilFunc( GL_NOTEQUAL, 0, 255 );
+static void RB_ShadowDrawVolumes( const float *bottom )
+{
+	qglDepthFunc( GL_LESS );
 
-	qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+	if ( glConfig.doStencilShadowsInOneDrawcall ) {
+		GL_Cull( CT_TWO_SIDED );
+		qglStencilOpSeparate( GL_FRONT, GL_KEEP, GL_INCR_WRAP, GL_KEEP );
+		qglStencilOpSeparate( GL_BACK, GL_KEEP, GL_DECR_WRAP, GL_KEEP );
+		RB_ShadowEmitVolumes( bottom );
+	} else {
+		GL_Cull( CT_FRONT_SIDED );
+		qglStencilOp( GL_KEEP, GL_INCR, GL_KEEP );
+		RB_ShadowEmitVolumes( bottom );
 
-	bool planeZeroBack = false;
-	if (qglIsEnabled(GL_CLIP_PLANE0))
-	{
-		planeZeroBack = true;
-		qglDisable (GL_CLIP_PLANE0);
+		GL_Cull( CT_BACK_SIDED );
+		qglStencilOp( GL_KEEP, GL_DECR, GL_KEEP );
+		RB_ShadowEmitVolumes( bottom );
 	}
-	GL_Cull(CT_TWO_SIDED);
-	//qglDisable (GL_CULL_FACE);
 
-	GL_Bind( tr.whiteImage );
+	qglDepthFunc( GL_LEQUAL );
+}
 
-	qglPushMatrix();
-    qglLoadIdentity ();
+// Marks the pixels that show a shadow casting character.  The triangles are drawn a little
+// behind the depth that is already there, so the stencil op for a failed depth test runs
+// exactly where the character itself is visible (the floor behind a cut out hair texture
+// is further away than that, and passes).
+static void RB_ShadowMarkCasters( void )
+{
+	const shadowPt_t *pts = &shPts[0];
 
-//	qglColor3f( 0.6f, 0.6f, 0.6f );
-//	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO );
+	GL_Cull( CT_TWO_SIDED );
+	qglStencilMask( SHADOW_STENCIL_SKIP );
+	qglStencilFunc( GL_ALWAYS, SHADOW_STENCIL_SKIP, SHADOW_STENCIL_SKIP );
+	qglStencilOp( GL_KEEP, GL_REPLACE, GL_KEEP );
 
-//	qglColor3f( 1, 0, 0 );
-//	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+	qglEnable( GL_POLYGON_OFFSET_FILL );
+	qglPolygonOffset( 2.0f, 16.0f );
 
-	qglColor4f( 0.0f, 0.0f, 0.0f, 0.5f );
-	//GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
-	GL_State( GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
+	qglBegin( GL_TRIANGLES );
+	for ( size_t i = 0 ; i < shTris.size() ; i++ ) {
+		qglVertex3fv( pts[shTris[i]].xyz );
+	}
+	qglEnd();
 
+	qglDisable( GL_POLYGON_OFFSET_FILL );
+}
+
+// a screen filling quad, to be drawn with the identity as modelview matrix
+static void RB_ShadowScreenQuad( void )
+{
 	qglBegin( GL_QUADS );
 	qglVertex3f( -100, 100, -10 );
 	qglVertex3f( 100, 100, -10 );
 	qglVertex3f( 100, -100, -10 );
 	qglVertex3f( -100, -100, -10 );
-	qglEnd ();
+	qglEnd();
+}
 
-	qglColor4f(1,1,1,1);
-	qglDisable( GL_STENCIL_TEST );
-	if (planeZeroBack)
-	{
-		qglEnable (GL_CLIP_PLANE0);
+/*
+=================
+RB_ShadowFinish
+
+Renders the recorded volumes and darkens everything that is in a shadow.
+We have to delay this until everything has been shadowed,
+because otherwise shadows from different body parts would
+overlap and double darken.
+=================
+*/
+void RB_ShadowFinish( void )
+{
+	if ( r_shadows->integer != 2 || glConfig.stencilBits < 4 || shCaps.empty() ) {
+		RB_ShadowClear();
+		return;
 	}
+
+	int samples = r_shadowSamples->integer;
+	if ( samples < 1 || r_shadowSoftness->value <= 0.0f ) {
+		samples = 1;
+	} else if ( samples > 16 ) {
+		samples = 16;
+	}
+	const float spread = r_shadowSoftness->value * 0.12f;
+	const bool skipCasters = !r_shadowSelf->integer;
+
+	float darkness = shStrengthSum / (float)shCasters;
+	darkness = Com_Clamp( 0.2f, 0.75f, darkness ) * r_shadowStrength->value;
+	darkness = Com_Clamp( 0.0f, 0.9f, darkness );
+	// the darkening is applied once for each sample, they add up to the whole
+	const float sampleAlpha = 1.0f - powf( 1.0f - darkness, 1.0f / (float)samples );
+
+	float oldDepthRange[2];
+	qglGetFloatv( GL_DEPTH_RANGE, oldDepthRange );
+	qglDepthRange( 0, 1 );
+
+	bool planeZeroBack = false;
+	if ( qglIsEnabled( GL_CLIP_PLANE0 ) ) {
+		planeZeroBack = true;
+	}
+
+	qglPushMatrix();
+
+	GL_Bind( tr.whiteImage );
+	qglEnable( GL_STENCIL_TEST );
+
+	std::vector<float> bottom( shPts.size() * 3 );
+
+	for ( int k = 0 ; k < samples ; k++ ) {
+		// the light direction wobbles around in a circle, wider the higher the caster is
+		float jx = 0.0f, jy = 0.0f;
+		if ( samples > 1 ) {
+			const float r = spread * sqrtf( ( k + 0.5f ) / (float)samples );
+			const float a = k * 2.39996323f;
+			jx = r * cosf( a );
+			jy = r * sinf( a );
+		}
+		for ( size_t i = 0 ; i < shPts.size() ; i++ ) {
+			const shadowPt_t *p = &shPts[i];
+			bottom[i*3 + 0] = p->xyz[0] + p->ext[0] - p->h * jx;
+			bottom[i*3 + 1] = p->xyz[1] + p->ext[1] - p->h * jy;
+			bottom[i*3 + 2] = p->xyz[2] + p->ext[2];
+		}
+
+		// count the volumes, drawing only into the stencil buffer
+		qglLoadMatrixf( backEnd.viewParms.world.modelMatrix );
+		GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+		qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+		qglStencilMask( SHADOW_STENCIL_COUNT );
+		qglStencilFunc( GL_ALWAYS, 0, 0xFF );
+		RB_ShadowDrawVolumes( &bottom[0] );
+		if ( k == 0 && skipCasters ) {
+			RB_ShadowMarkCasters();
+		}
+
+		// the screen filling passes ignore depth and the portal clip plane
+		qglLoadIdentity();
+		GL_Cull( CT_TWO_SIDED );
+		GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+		if ( planeZeroBack ) {
+			qglDisable( GL_CLIP_PLANE0 );
+		}
+
+		if ( skipCasters ) {
+			// whatever is in the volumes behind a character is not for it to be darkened
+			qglStencilMask( SHADOW_STENCIL_COUNT );
+			qglStencilFunc( GL_EQUAL, SHADOW_STENCIL_SKIP, SHADOW_STENCIL_SKIP );
+			qglStencilOp( GL_KEEP, GL_KEEP, GL_ZERO );
+			RB_ShadowScreenQuad();
+		}
+
+		qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+		qglStencilMask( 0 );
+		qglStencilFunc( GL_NOTEQUAL, 0, SHADOW_STENCIL_COUNT );
+		qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+		qglColor4f( 0.0f, 0.0f, 0.0f, sampleAlpha );
+		GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
+		RB_ShadowScreenQuad();
+
+		// and clear the counts for the next sample
+		qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+		qglStencilMask( ( k == samples - 1 ) ? 0xFF : SHADOW_STENCIL_COUNT );
+		qglStencilFunc( GL_ALWAYS, 0, 0xFF );
+		qglStencilOp( GL_ZERO, GL_ZERO, GL_ZERO );
+		GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+		RB_ShadowScreenQuad();
+
+		if ( planeZeroBack ) {
+			qglEnable( GL_CLIP_PLANE0 );
+		}
+	}
+
+	qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	qglStencilMask( 0xFF );
+	qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+	qglStencilFunc( GL_ALWAYS, 0, 0xFF );
+	qglDisable( GL_STENCIL_TEST );
+	qglColor4f( 1, 1, 1, 1 );
 	qglPopMatrix();
+	qglDepthRange( oldDepthRange[0], oldDepthRange[1] );
+
+	RB_ShadowClear();
 }
 
 

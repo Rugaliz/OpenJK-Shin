@@ -71,6 +71,7 @@ cvar_t	*r_nocurves;
 
 cvar_t	*r_dlightStyle;
 cvar_t	*r_surfaceSprites;
+cvar_t	*r_surfaceSpriteRange;
 cvar_t	*r_surfaceWeather;
 
 cvar_t	*r_windSpeed;
@@ -113,6 +114,11 @@ cvar_t	*r_lightmap;
 cvar_t	*r_vertexLight;
 cvar_t	*r_shadows;
 cvar_t	*r_shadowRange;
+cvar_t	*r_shadowSoftness;
+cvar_t	*r_shadowSamples;
+cvar_t	*r_shadowStrength;
+cvar_t	*r_shadowTilt;
+cvar_t	*r_shadowSelf;
 cvar_t	*r_flares;
 cvar_t	*r_nobind;
 cvar_t	*r_singleShader;
@@ -1610,7 +1616,7 @@ void R_Register( void )
 	r_lodCurveError = ri.Cvar_Get( "r_lodCurveError", "250", CVAR_ARCHIVE_ND );
 	r_lodbias = ri.Cvar_Get( "r_lodbias", "0", CVAR_ARCHIVE_ND );
 	r_flares = ri.Cvar_Get ("r_flares", "1", CVAR_ARCHIVE_ND );
-	r_lodscale = ri.Cvar_Get( "r_lodscale", "10", CVAR_ARCHIVE_ND );
+	r_lodscale = ri.Cvar_Get( "r_lodscale", "20", CVAR_ARCHIVE_ND );
 
 	r_znear = ri.Cvar_Get( "r_znear", "4", CVAR_ARCHIVE_ND );	//if set any lower, you lose a lot of precision in the distance
 	ri.Cvar_CheckRange( r_znear, 0.001f, 10, qfalse ); // was qtrue in JA, is qfalse properly in ioq3
@@ -1627,6 +1633,7 @@ void R_Register( void )
 
 	r_dlightStyle = ri.Cvar_Get ("r_dlightStyle", "1", CVAR_ARCHIVE_ND);
 	r_surfaceSprites = ri.Cvar_Get ("r_surfaceSprites", "1", CVAR_ARCHIVE_ND);
+	r_surfaceSpriteRange = ri.Cvar_Get ("r_surfaceSpriteRange", "3", CVAR_ARCHIVE_ND);	// multiplies the fade distances of grass, bushes and the like
 	r_surfaceWeather = ri.Cvar_Get ("r_surfaceWeather", "0", CVAR_TEMP);
 
 	r_windSpeed = ri.Cvar_Get ("r_windSpeed", "0", 0);
@@ -1686,7 +1693,12 @@ void R_Register( void )
 	r_lockpvs = ri.Cvar_Get ("r_lockpvs", "0", CVAR_CHEAT);
 	r_noportals = ri.Cvar_Get ("r_noportals", "0", CVAR_CHEAT);
 	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
-	r_shadowRange = ri.Cvar_Get( "r_shadowRange", "1000", CVAR_ARCHIVE_ND );
+	r_shadowRange = ri.Cvar_Get( "r_shadowRange", "2000", CVAR_ARCHIVE_ND );
+	r_shadowSoftness = ri.Cvar_Get( "r_shadowSoftness", "1", CVAR_ARCHIVE_ND );
+	r_shadowSamples = ri.Cvar_Get( "r_shadowSamples", "8", CVAR_ARCHIVE_ND );
+	r_shadowStrength = ri.Cvar_Get( "r_shadowStrength", "1", CVAR_ARCHIVE_ND );
+	r_shadowTilt = ri.Cvar_Get( "r_shadowTilt", "1", CVAR_ARCHIVE_ND );
+	r_shadowSelf = ri.Cvar_Get( "r_shadowSelf", "0", CVAR_ARCHIVE_ND );
 
 /*
 Ghoul2 Insert Start
