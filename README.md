@@ -31,6 +31,8 @@ yet tested by the author. macOS code paths still compile but nothing is packaged
   modes, with a "Desktop resolution" entry.
 - **Widescreen done properly**: horizontal-plus field of view, menus and HUD that keep their proportions in the
   middle of a wide screen instead of being stretched, and videos shown with black bars instead of stretched.
+  The **mouse cursor in the menus goes over the whole screen**, and the **HUD sticks to the corners of the screen**
+  (health and armor to the left, force and ammo to the right) instead of staying in the 4:3 area.
 
 ### Shadows and draw distance
 - **Stencil shadows (`cg_shadows 2`) work properly**: characters are no longer darkened by their own shadow, the

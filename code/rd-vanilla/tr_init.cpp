@@ -2090,6 +2090,7 @@ extern "C" Q_EXPORT refexport_t* QDECL GetRefAPI ( int apiVersion, refimport_t *
 	REX(GetLighting);
 
 	REX(SetColor);
+	REX(Set2DAnchor);
 	re.DrawStretchPic = RE_StretchPic;
 	re.DrawRotatePic = RE_RotatePic;
 	re.DrawRotatePic2 = RE_RotatePic2;

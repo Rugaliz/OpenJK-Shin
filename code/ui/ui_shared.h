@@ -231,6 +231,7 @@ typedef struct {
 	float		yscale;
 	float		xscale;
 	float		bias;
+	float		margin;		// on a wide screen: how far the 2D screen reaches out of the centred 640x480 area, on each side (0 if not wide)
 	int			realTime;
 	int			frameTime;
 	qboolean	cursorShow;

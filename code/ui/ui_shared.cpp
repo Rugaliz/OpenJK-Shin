@@ -6247,6 +6247,16 @@ void Menu_Paint(menuDef_t *menu, qboolean forcePaint)
 		color[2] = menu->window.backColor[2];
 		color[3] = menu->window.backColor[3];
 
+		// on a wide screen the sides, which the menu's own pictures may not cover, are not left as they were last frame
+		// (the cursor can go there)
+		if (DC->margin > 0)
+		{
+			const vec4_t	black = { 0, 0, 0, 1 };
+
+			DC->fillRect( -DC->margin, 0, DC->margin, SCREEN_HEIGHT, black );
+			DC->fillRect( SCREEN_WIDTH, 0, DC->margin, SCREEN_HEIGHT, black );
+		}
+
 		ui.R_SetColor( color);
 
 		if (menu->window.background==0)	// No background shader given? Make it blank
@@ -10232,6 +10242,26 @@ static void Scroll_TextScroll_ThumbFunc(void *p)
 
 /*
 =================
+Menu_WindowContainsPoint
+
+A menu that covers the whole 640 wide area covers the whole screen when that is wider (its background is stretched
+to it), so the sides count as inside it
+=================
+*/
+static qboolean Menu_WindowContainsPoint(const menuDef_t *menu, float x, float y)
+{
+	rectDef_t rect = menu->window.rect;
+
+	if (rect.x <= 0 && rect.x + rect.w >= SCREEN_WIDTH)
+	{
+		rect.x -= DC->margin;
+		rect.w += 2 * DC->margin;
+	}
+	return Rect_ContainsPoint(&rect, x, y);
+}
+
+/*
+=================
 Menu_OverActiveItem
 =================
 */
@@ -10239,7 +10269,7 @@ static qboolean Menu_OverActiveItem(menuDef_t *menu, float x, float y)
 {
 	if (menu && menu->window.flags & (WINDOW_VISIBLE | WINDOW_FORCED))
 	{
-		if (Rect_ContainsPoint(&menu->window.rect, x, y))
+		if (Menu_WindowContainsPoint(menu, x, y))
 		{
 			int i;
 			for (i = 0; i < menu->itemCount; i++)
@@ -11435,7 +11465,7 @@ void Menu_HandleKey(menuDef_t *menu, int key, qboolean down)
 
 	//JLFMOUSE  MPMOVED
 		// see if the mouse is within the window bounds and if so is this a mouse click
-	if (down && !(menu->window.flags & WINDOW_POPUP) && !Rect_ContainsPoint(&menu->window.rect, DC->cursorx, DC->cursory))
+	if (down && !(menu->window.flags & WINDOW_POPUP) && !Menu_WindowContainsPoint(menu, DC->cursorx, DC->cursory))
 	{
 		static qboolean inHandleKey = qfalse;
 		if (!inHandleKey && (key == A_MOUSE1 || key == A_MOUSE2 || key == A_MOUSE3))

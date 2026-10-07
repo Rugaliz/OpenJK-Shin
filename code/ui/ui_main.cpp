@@ -2663,11 +2663,13 @@ void _UI_Init( qboolean inGameLoad )
 		// so pixel positions derived from it (e.g. 3D models) must use the same uniform scale and offset
 		uiInfo.uiDC.xscale = uiInfo.uiDC.yscale;
 		uiInfo.uiDC.bias = 0.5 * ( uiInfo.uiDC.glconfig.vidWidth - ( uiInfo.uiDC.glconfig.vidHeight * (640.0/480.0) ) );
+		uiInfo.uiDC.margin = uiInfo.uiDC.bias / uiInfo.uiDC.yscale;
 	}
 	else
 	{
 		// no wide screen
 		uiInfo.uiDC.bias = 0;
+		uiInfo.uiDC.margin = 0;
 	}
 
 	Init_Display(&uiInfo.uiDC);
@@ -4010,14 +4012,17 @@ UI_MouseEvent
 void _UI_MouseEvent( int dx, int dy )
 {
 	// update mouse screen position
+	// (on a wide screen the cursor goes over the whole screen, not just the centred 640x480 area)
+	const int margin = (int)uiInfo.uiDC.margin;
+
 	uiInfo.uiDC.cursorx += dx;
-	if (uiInfo.uiDC.cursorx < 0)
+	if (uiInfo.uiDC.cursorx < -margin)
 	{
-		uiInfo.uiDC.cursorx = 0;
+		uiInfo.uiDC.cursorx = -margin;
 	}
-	else if (uiInfo.uiDC.cursorx > SCREEN_WIDTH)
+	else if (uiInfo.uiDC.cursorx > SCREEN_WIDTH + margin)
 	{
-		uiInfo.uiDC.cursorx = SCREEN_WIDTH;
+		uiInfo.uiDC.cursorx = SCREEN_WIDTH + margin;
 	}
 
 	uiInfo.uiDC.cursory += dy;

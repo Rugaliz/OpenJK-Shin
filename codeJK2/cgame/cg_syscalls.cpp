@@ -545,3 +545,8 @@ void cgi_UI_Menu_Paint( void *menu, qboolean force )
 {
 	Q_syscall( CG_OPENJK_MENU_PAINT, menu, force );
 }
+
+void cgi_R_Set2DAnchor( int anchor )
+{
+	Q_syscall( CG_OPENJK_R_SET2DANCHOR, anchor );
+}

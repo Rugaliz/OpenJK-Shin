@@ -222,6 +222,30 @@ void	RE_SetColor( const float *rgba ) {
 
 /*
 =============
+RE_Set2DAnchor
+
+On a display wider than 4:3 the 640x480 area of the 2D drawing is centred. What follows is instead pinned to the left
+edge (-1) or the right edge (1) of the screen, as the corner parts of a HUD are, until it is set back to 0. The
+backend centres everything, so this only moves what is queued from now on by the width of the margin.
+=============
+*/
+static float r2DAnchorShift;	// added to x of what is drawn, in virtual screen units
+
+void RE_Set2DAnchor( int anchor ) {
+	r2DAnchorShift = ( anchor < 0 ) ? -R_Get2DBias() : ( anchor > 0 ) ? R_Get2DBias() : 0.0f;
+}
+
+// Quads that span the whole 640 wide area (backgrounds, fades, bars) are stretched over the whole screen by the backend
+// whatever the anchor is, so they must be left alone.
+static float R_Anchor2D( float x, float w ) {
+	if ( x <= 0.0f && x + w >= SCREEN_WIDTH ) {
+		return x;
+	}
+	return x + r2DAnchorShift;
+}
+
+/*
+=============
 RE_StretchPic
 =============
 */
@@ -238,7 +262,7 @@ void RE_StretchPic ( float x, float y, float w, float h,
 	}
 	cmd->commandId = RC_STRETCH_PIC;
 	cmd->shader = R_GetShaderByHandle( hShader );
-	cmd->x = x;
+	cmd->x = R_Anchor2D( x, w );
 	cmd->y = y;
 	cmd->w = w;
 	cmd->h = h;
@@ -266,7 +290,7 @@ void RE_RotatePic ( float x, float y, float w, float h,
 	}
 	cmd->commandId = RC_ROTATE_PIC;
 	cmd->shader = R_GetShaderByHandle( hShader );
-	cmd->x = x;
+	cmd->x = x + r2DAnchorShift;
 	cmd->y = y;
 	cmd->w = w;
 	cmd->h = h;
@@ -296,7 +320,7 @@ void RE_RotatePic2 ( float x, float y, float w, float h,
 	}
 	cmd->commandId = RC_ROTATE_PIC2;
 	cmd->shader = R_GetShaderByHandle( hShader );
-	cmd->x = x;
+	cmd->x = x + r2DAnchorShift;
 	cmd->y = y;
 	cmd->w = w;
 	cmd->h = h;
@@ -376,6 +400,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 		return;
 	}
 	glState.finishCalled = qfalse;
+	r2DAnchorShift = 0.0f;
 
 	tr.frameCount++;
 	tr.frameSceneNum = 0;

@@ -793,6 +793,9 @@ Ghoul2 Insert End
 		case CG_OPENJK_GETMENU_BYNAME_JK2:
 			return CG_OPENJK_GETMENU_BYNAME;
 			break;
+		case CG_OPENJK_R_SET2DANCHOR_JK2:
+			return CG_OPENJK_R_SET2DANCHOR;
+			break;
 	}
 	return (cgameImport_t)-1;
 }
@@ -1199,6 +1202,10 @@ Ghoul2 Insert End
 
 	case CG_OPENJK_GETMENU_BYNAME:
 		return (intptr_t)Menus_FindByName( (const char *)VMA(1) );
+
+	case CG_OPENJK_R_SET2DANCHOR:
+		re.Set2DAnchor( args[1] );
+		return 0;
 
 	case CG_UI_STRING_INIT:
 		String_Init();
