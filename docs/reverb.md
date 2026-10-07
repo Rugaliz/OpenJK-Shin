@@ -46,6 +46,17 @@ no reverb until it is time for it, which is only heard if the game stalls.) The 
 remember the signal: the muffling of a sound behind a wall and the headphone positioning take what came before from the
 sound itself, and the filter for under water continues from what it made for the moment before.
 
+Voices are MP3s that are decoded as they are played, so what comes before the part that is mixed is read from the
+decoder's window of recent samples (it keeps a good deal). Before that was done a muffled voice (a wall in the way)
+started its filter from the wrong value every frame, which was heard as crackling: about 15 times as many clicks in a
+test.
+
+## Cutscenes
+
+While a scripted cutscene plays (the `inCutscene` cvar) the listener is the camera, not someone standing in a room, so
+dialogue is heard as in a film: voices get no reverb (that includes the player's own voice, which otherwise always had
+some) and nothing is muffled by walls between the camera and the speaker, which a camera placed behind a bar does a lot.
+
 ## Limits
 
 * Doors and other moving parts of a level aren't in the collision data used, so they don't muffle sound.

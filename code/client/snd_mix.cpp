@@ -267,8 +267,21 @@ void S_Mix_ResetReverb( void )
 // read from the sound itself (a sound loops: from its end, and before it starts there is nothing).
 #define OBSTRUCT_WARMUP		96		// samples a muffling filter needs to be in step with the signal (it has no long memory)
 
-static qboolean S_SourceHistory( const channel_t *ch, const sfx_t *sc, int sampleOffset, int n, short *out )
+static qboolean S_SourceHistory( channel_t *ch, const sfx_t *sc, int sampleOffset, int n, short *out )
 {
+	if ( sc->eSoundCompressionMethod == ct_MP3 )
+	{
+		// the decoder keeps what it decoded last in a window, which reaches back well past the few samples asked for
+		// here (voices, which are all MP3s, are what get muffled when there is a wall in the way)
+		const int first = sampleOffset - n;
+		const int silent = ( first < 0 ) ? -first : 0;		// nothing comes before the start of the sound
+
+		memset( out, 0, silent * sizeof( short ) );
+		if ( n > silent )
+			S_FetchMP3Samples( ch, n - silent, first + silent, out + silent );
+		return qtrue;
+	}
+
 	if ( sc->eSoundCompressionMethod != ct_16 )
 		return qfalse;
 
