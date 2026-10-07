@@ -1643,7 +1643,9 @@ static void CG_DrawBatteryCharge( void )
 		cgi_R_SetColor( color );
 
 		// batteries were just charged
+		cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 		CG_DrawPic( 605, 295, 24, 32, cgs.media.batteryChargeShader );
+		cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 	}
 }
 
@@ -1832,9 +1834,13 @@ static void CG_DrawHUD( centity_t *cent )
 		int x = 0;
 		int y = SCREEN_HEIGHT - 80;
 
+		cgi_R_Set2DAnchor( ANCHOR_LEFT );
+
 		SimpleHud_DrawString( x + 16, y + 40, va( "%i", cg.snap->ps.stats[STAT_HEALTH] ), colorTable[CT_HUD_RED] );
 
 		SimpleHud_DrawString( x + 18 + 14, y + 40 + 14, va( "%i", cg.snap->ps.stats[STAT_ARMOR] ), colorTable[CT_HUD_GREEN] );
+
+		cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 
 		CG_DrawSimpleForcePower( cent );
 
@@ -1843,12 +1849,16 @@ static void CG_DrawHUD( centity_t *cent )
 		else
 			CG_DrawSimpleAmmo( cent );
 
+		cgi_R_Set2DAnchor( ANCHOR_CENTRE );
+
 		return;
 	}
 
-	// Draw the lower left section of the HUD
+	// Draw the lower left section of the HUD (stuck to the left edge of the screen)
 	if (cgi_UI_GetMenuInfo("lefthud",&sectionXPos,&sectionYPos,&sectionWidth,&sectionHeight))
 	{
+		cgi_R_Set2DAnchor( ANCHOR_LEFT );
+
 		// Draw all the HUD elements --eez
 		cgi_UI_Menu_Paint( cgi_UI_GetMenuByName( "lefthud" ), qtrue );
 
@@ -1883,12 +1893,16 @@ static void CG_DrawHUD( centity_t *cent )
 		CG_DrawArmor(sectionXPos,sectionYPos,sectionWidth,sectionHeight);
 
 		CG_DrawHealth(sectionXPos,sectionYPos,sectionWidth,sectionHeight);
+
+		cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 	}
 
 
-	// Draw the lower right section of the HUD
+	// Draw the lower right section of the HUD (stuck to the right edge of the screen)
 	if (cgi_UI_GetMenuInfo("righthud",&sectionXPos,&sectionYPos,&sectionWidth,&sectionHeight))
 	{
+		cgi_R_Set2DAnchor( ANCHOR_RIGHT );
+
 		// Draw all the HUD elements --eez
 		cgi_UI_Menu_Paint( cgi_UI_GetMenuByName( "righthud" ), qtrue );
 
@@ -1937,6 +1951,8 @@ static void CG_DrawHUD( centity_t *cent )
 			CG_DrawAmmo(cent,sectionXPos,sectionYPos);
 		}
 //		CG_DrawMessageLit(cent,x,y);
+
+		cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 	}
 }
 
@@ -2395,7 +2411,9 @@ static void CG_DrawPickupItem( void ) {
 		{
 			CG_RegisterItemVisuals( value );
 			cgi_R_SetColor( fadeColor );
+			cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 			CG_DrawPic( 573, 320, ICON_SIZE, ICON_SIZE, cg_items[ value ].icon );
+			cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 			//CG_DrawBigString( ICON_SIZE + 16, 398, bg_itemlist[ value ].classname, fadeColor[0] );
 			//CG_DrawProportionalString( ICON_SIZE + 16, 398,
 			//	bg_itemlist[ value ].classname, CG_SMALLFONT,fadeColor );
@@ -3241,7 +3259,9 @@ static void CG_DrawActivePowers(void)
 	//additionally, draw an icon force force rage recovery
 	if (cg.snap->ps.forceRageRecoveryTime > cg.time)
 	{
+		cgi_R_Set2DAnchor( ANCHOR_LEFT );
 		CG_DrawPic( startx, starty, endx, endy, cgs.media.rageRecShader);
+		cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 	}
 }
 
@@ -3400,7 +3420,9 @@ static float CG_DrawSnapshot( float y ) {
 		cg.latestSnapshotNum, cgs.serverCommandSequence );
 
 	w = cgi_R_Font_StrLenPixels(s, cgs.media.qhFontMedium, 1.0f);
+	cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 	cgi_R_Font_DrawString(635 - w, y+2, s, colorTable[CT_LTGOLD1], cgs.media.qhFontMedium, -1, 1.0f);
+	cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 
 	return y + BIGCHAR_HEIGHT + 10;
 }
@@ -3444,7 +3466,9 @@ static float CG_DrawFPS( float y ) {
 
 	s = va( "%ifps", fps );
 	const int w = cgi_R_Font_StrLenPixels(s, cgs.media.qhFontMedium, 1.0f);
+	cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 	cgi_R_Font_DrawString(635-xOffset - w, y+2, s, colorTable[CT_LTGOLD1], cgs.media.qhFontMedium, -1, 1.0f);
+	cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 
 	return y + BIGCHAR_HEIGHT + 10;
 }
@@ -3468,7 +3492,9 @@ static float CG_DrawTimer( float y ) {
 	s = va( "%i:%i%i", mins, tens, seconds );
 
 	w = cgi_R_Font_StrLenPixels(s, cgs.media.qhFontMedium, 1.0f);
+	cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 	cgi_R_Font_DrawString(635 - w, y+2, s, colorTable[CT_LTGOLD1], cgs.media.qhFontMedium, -1, 1.0f);
+	cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 
 	return y + BIGCHAR_HEIGHT + 10;
 }

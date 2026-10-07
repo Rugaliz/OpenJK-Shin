@@ -1364,8 +1364,12 @@ void CG_DrawIconBackground(void)
 		}
 
 		cgi_R_SetColor( colorTable[CT_WHITE] );
+		// (the prongs stand next to the left and right parts of the HUD, so they go with them to the edges of the screen)
+		cgi_R_Set2DAnchor( ANCHOR_LEFT );
 		CG_DrawPic( prongLeftX+xAdd, y2-10, 40, 80, cgs.media.weaponProngsOff);
+		cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 		CG_DrawPic( prongRightX-xAdd, y2-10, -40, 80, cgs.media.weaponProngsOff);
+		cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 
 		return;
 	}
@@ -1421,8 +1425,11 @@ void CG_DrawIconBackground(void)
 	// Side Prongs
 	cgi_R_SetColor( colorTable[CT_WHITE]);
 	xAdd = (int) 8*cg.iconHUDPercent;
+	cgi_R_Set2DAnchor( ANCHOR_LEFT );
 	CG_DrawPic( prongLeftX+xAdd, y2-10, 40, 80, background);
+	cgi_R_Set2DAnchor( ANCHOR_RIGHT );
 	CG_DrawPic( prongRightX-xAdd, y2-10, -40, 80, background);
+	cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 }
 
 int cgi_UI_GetItemText(char *menuFile,char *itemName, char *text);
