@@ -42,11 +42,15 @@ typedef struct
 	float	right[HRTF_MAX_TAPS];
 } hrtfFilter_t;
 
-// What one sound needs to remember between calls: the end of its signal, and the filter it was last heard through
+// What one sound needs to remember between calls: the end of its signal, and the change of filter it is going
+// through (from one filter to another, starting at a sample time, see S_HRTF_Process)
 typedef struct
 {
 	float			history[HRTF_MAX_TAPS];
-	hrtfFilter_t	filter;
+	hrtfFilter_t	from;
+	hrtfFilter_t	to;
+	int				fadeStart;	// sample time the change from "from" to "to" started at...
+	int				fadeLength;	// ...and how many samples it takes
 	int				valid;		// 0 until the first Process call
 } hrtfState_t;
 
@@ -67,9 +71,11 @@ void	S_HRTF_ResetState( hrtfState_t *pState );
 void	S_HRTF_SetHistory( hrtfState_t *pState, const short *pHistory, int n );
 
 // Runs n mono samples through the filter, giving n samples for each ear (the sample scale is the input's, a 16 bit
-// range signal stays in a 16 bit range). If the filter is different from the one used last time, the change is made
-// gradually over the n samples. Any n is fine, but keep the pieces of one sound in order.
-void	S_HRTF_Process( hrtfState_t *pState, const hrtfFilter_t *pTarget, const short *pIn, int n, float *pOutLeft, float *pOutRight );
+// range signal stays in a 16 bit range). time is the sample time of the first sample. When the target filter is
+// different from the last one, the filter changes to it gradually, over a fixed number of samples from that time on:
+// how the filter changes depends only on the time, so a stretch of the sound that is processed again (the mixer paints
+// ahead and paints it again in the next update) comes out the same as long as the target stays the same.
+void	S_HRTF_Process( hrtfState_t *pState, const hrtfFilter_t *pTarget, const short *pIn, int n, int time, float *pOutLeft, float *pOutRight );
 
 // The data (snd_hrtf_data.cpp)
 extern const int	g_hrtfNumRings;

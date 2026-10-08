@@ -26,6 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 
 #include "snd_local.h"
+#include "sdl/sdl_sound.h"
 #include <math.h>
 
 portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
@@ -72,9 +73,40 @@ static inline short S_LimitSample( int val )
 	return (short)( (val < 0) ? -limited : limited );
 }
 
-void S_WriteLinearBlastStereo16 (void)
+// Where an update's mix meets what is in the ring already (its start, and its end), the two are crossfaded over a
+// moment instead of one simply following the other. Normally they are the same there (it is the same sound mixed
+// again) and nothing changes, but after a long frame the ring holds the reserve (see S_Update_), mixed a while ago,
+// and going from that to the fresh mix (and back) would click.
+#define MIX_CROSSFADE	64
+static int	s_crossfadeStart = 0, s_crossfadeEnd = 0;
+static qboolean	s_crossfade = qfalse;
+
+static void S_WriteLinearBlastStereo16 ( int time )
 {
 	int		i;
+
+	if ( s_crossfade && ( time < s_crossfadeStart + MIX_CROSSFADE || time + ( snd_linear_count >> 1 ) > s_crossfadeEnd - MIX_CROSSFADE ) )
+	{
+		for (i=0 ; i<snd_linear_count ; i+=2, time++)
+		{
+			int w = MIX_CROSSFADE;	// how much of the new mix, of MIX_CROSSFADE
+			if ( time - s_crossfadeStart < w )	w = time - s_crossfadeStart + 1;
+			if ( s_crossfadeEnd - time < w )	w = s_crossfadeEnd - time;
+			const int l = S_LimitSample( snd_p[i]>>8 );
+			const int r = S_LimitSample( snd_p[i+1]>>8 );
+			if ( w >= MIX_CROSSFADE )
+			{
+				snd_out[i] = l;
+				snd_out[i+1] = r;
+			}
+			else
+			{
+				snd_out[i]   = (short)( snd_out[i]   + ( ( l - snd_out[i]   ) * w ) / MIX_CROSSFADE );
+				snd_out[i+1] = (short)( snd_out[i+1] + ( ( r - snd_out[i+1] ) * w ) / MIX_CROSSFADE );
+			}
+		}
+		return;
+	}
 
 	for (i=0 ; i<snd_linear_count ; i+=2)
 	{
@@ -105,7 +137,7 @@ void S_TransferStereo16 (unsigned long *pbuf, int endtime)
 		snd_linear_count <<= 1;
 
 	// write a linear blast of samples
-		S_WriteLinearBlastStereo16 ();
+		S_WriteLinearBlastStereo16 ( ls_paintedtime );
 
 		snd_p += snd_linear_count;
 		ls_paintedtime += (snd_linear_count>>1);
@@ -130,6 +162,9 @@ void S_TransferPaintBuffer(int endtime)
 
 	pbuf = (unsigned long *)dma.buffer;
 
+	// the device takes what is in the ring from another thread: hold it off while writing (only this, the copy, so
+	// it is never kept waiting for the mixing)
+	SNDDMA_BeginPainting ();
 
 	if ( s_testsound->integer ) {
 		int		i;
@@ -177,6 +212,8 @@ void S_TransferPaintBuffer(int endtime)
 			}
 		}
 	}
+
+	SNDDMA_Submit ();
 }
 
 
@@ -240,14 +277,20 @@ static void S_FetchMP3Samples( channel_t *ch, int count, int sampleOffset, short
 static int	reverbBuffer[PAINTBUFFER_SIZE];
 
 // The mixer is not run once over each moment of sound: every update (every frame) mixes everything from just ahead of
-// what is being played to a fifth of a second ahead again, so what is ahead can change when the game does. That is
-// fine for adding sounds up but not for the reverb (and the other things that remember what went before them): they
-// have to go over each moment once, in order. So the reverb is only run for the next few milliseconds, which are not
-// going to be mixed again before they are played, and what it makes is kept for the (many) updates that mix those
-// moments again. (What is further ahead has no reverb yet; it only gets played if the game stalls.)
+// what is being played to a fifth of a second ahead again, so what is ahead can change when the game does (a sound
+// starts). That is fine for adding sounds up but not for the reverb, which remembers what went into it. So:
+//  - what is sent to the reverb is kept by time (s_reverbSend), and the reverb is only run a little way ahead, up to
+//    where the next update will start painting (what is further ahead has no reverb yet; it is only played if the game
+//    stalls, and then gets painted again with it)
+//  - the reverb as it was where an update started painting is remembered (S_Reverb_Mark). The next update goes back to
+//    it and runs the reverb again from there over what was sent (now final, it has been played) up to where it starts
+//    painting itself. So what the sounds started since then send to it is all heard, from their very start.
 #define REVERB_RING		65536
-static float	s_reverbWetLeft[REVERB_RING], s_reverbWetRight[REVERB_RING];
-static int		s_reverbTime = 0;		// the sample time the reverb has been run up to
+static int		s_reverbSend[REVERB_RING];
+static int		s_reverbSendEnd = 0;		// what was sent is in the ring up to this time
+static int		s_reverbMarkTime = 0;		// the time the reverb was remembered at
+static qboolean	s_reverbMarkValid = qfalse;
+static int		s_reverbTime = 0;			// the time the reverb has been run up to
 static int		s_lastUpdateStart = 0;
 
 // the underwater filter (below) keeps what it made for the same reason
@@ -257,7 +300,33 @@ static qboolean	s_uwValid = qfalse;
 
 void S_Mix_ResetReverb( void )
 {
-	s_reverbTime = 0;
+	s_reverbMarkValid = qfalse;
+	s_reverbSendEnd = 0;
+}
+
+// At the start of an update: brings the reverb to where this update starts painting (see above)
+static void S_Mix_ReverbStartUpdate( int updateStart )
+{
+	if ( s_reverbMarkValid && updateStart >= s_reverbMarkTime && updateStart - s_reverbMarkTime <= dma.speed / 2
+		&& S_Reverb_Rewind() )
+	{
+		float in[PAINTBUFFER_SIZE], wetLeft[PAINTBUFFER_SIZE], wetRight[PAINTBUFFER_SIZE];
+
+		for ( int time = s_reverbMarkTime; time < updateStart; )
+		{
+			const int n = ( updateStart - time < PAINTBUFFER_SIZE ) ? updateStart - time : PAINTBUFFER_SIZE;
+			for ( int i = 0; i < n; i++ )
+				in[i] = ( time + i < s_reverbSendEnd ) ? (float)s_reverbSend[( time + i ) & ( REVERB_RING - 1 )] : 0.0f;
+			S_Reverb_Process( in, n, wetLeft, wetRight );	// (what comes out was played already)
+			time += n;
+		}
+	}
+	// (otherwise the time was not continuous: after a pause, or a new level, and it just carries on from here)
+
+	S_Reverb_Mark();
+	s_reverbMarkTime = updateStart;
+	s_reverbMarkValid = qtrue;
+	s_reverbTime = updateStart;
 }
 
 // The mixer does not paint each moment of a sound once, in order: every update paints everything from just ahead of
@@ -329,9 +398,11 @@ static void S_ObstructSamples( channel_t *ch, const short *history, int numHisto
 }
 
 // Adds count mono samples to what the channel sends to the reverb
+static qboolean	s_reverbSending = qfalse;	// the reverb is fed in this part of the mix (see S_PaintChannels)
+
 static inline void S_SendToReverb( const channel_t *ch, const short *src, int count, int bufferOffset )
 {
-	if ( !s_reverbActive || ch->reverbvol <= 0 )
+	if ( !s_reverbSending || ch->reverbvol <= 0 )
 		return;
 
 	const int rvol = ch->reverbvol * snd_vol;
@@ -367,7 +438,7 @@ static void S_PaintChannelHRTF( channel_t *ch, const short *src, int count, int 
 	hrtfFilter_t	filter;
 
 	S_HRTF_GetFilter( ch->hrtfAzimuth, ch->hrtfElevation, &filter );
-	S_HRTF_Process( ch->pHrtfState, &filter, src, count, left, right );
+	S_HRTF_Process( ch->pHrtfState, &filter, src, count, s_paintedtime + bufferOffset, left, right );
 
 	const int iLeftVol	= ch->leftvol  * snd_vol;
 	const int iRightVol	= ch->rightvol * snd_vol;
@@ -443,7 +514,7 @@ void ChannelPaint(channel_t *ch, sfx_t *sc, int count, int sampleOffset, int buf
 
 
 
-void S_PaintChannels( int endtime ) {
+void S_PaintChannels( int endtime, qboolean bReserve ) {
 	int 	i;
 	int 	end;
 	channel_t *ch;
@@ -452,16 +523,34 @@ void S_PaintChannels( int endtime ) {
 	int		sampleOffset;
 	int	normal_vol,voice_vol;
 
-	snd_vol = normal_vol = s_volume->value*256.0f;
-	voice_vol  = (s_volumeVoice->value*256.0f);
+	// (a sample times a volume of 255 times more than 256 doesn't fit in 32 bits)
+	snd_vol = normal_vol = Com_Clampi( 0, 256, (int)( s_volume->value*256.0f ) );
+	voice_vol = Com_Clampi( 0, 256, (int)( s_volumeVoice->value*256.0f ) );
 
-	// how far the reverb may run in this update: past what is played before the next one (twice the time since the last)
+	// how far the reverb is run in this update: past where the next one starts painting (twice the time since the
+	// last, and at least as far as how far ahead of the play position painting starts, which allows for long frames).
+	// (The reserve only matters if the game stalls: it has none, and leaves the reverb and its timing alone.)
+	const qboolean bReverb = (qboolean)( s_reverbActive && !bReserve );
+	s_reverbSending = bReverb;
 	const int updateStart = s_paintedtime;
 	int commitLength = 2 * ( updateStart - s_lastUpdateStart );
-	if ( commitLength < dma.speed / 40 || updateStart < s_lastUpdateStart )		commitLength = dma.speed / 40;
-	if ( commitLength > dma.speed / 10 )										commitLength = dma.speed / 10;
-	s_lastUpdateStart = updateStart;
+	if ( commitLength < updateStart - s_soundtime )		commitLength = updateStart - s_soundtime;
+	if ( commitLength < dma.speed / 40 )				commitLength = dma.speed / 40;
+	if ( commitLength > dma.speed / 5 )					commitLength = dma.speed / 5;
 	const int commitEnd = updateStart + commitLength;
+
+	// the update's mix is crossfaded with the ring where it starts and ends; the reserve carries on from it as it is
+	s_crossfade = (qboolean)!bReserve;
+	if ( !bReserve )
+	{
+		s_crossfadeStart = updateStart;
+		s_crossfadeEnd = endtime;
+		s_lastUpdateStart = updateStart;
+		if ( s_reverbActive )
+			S_Mix_ReverbStartUpdate( updateStart );
+		else
+			s_reverbMarkValid = qfalse;
+	}
 
 //Com_Printf ("%i to %i\n", s_paintedtime, endtime);
 	while ( s_paintedtime < endtime ) {
@@ -499,7 +588,7 @@ void S_PaintChannels( int endtime ) {
 			}
 		}
 
-		if ( s_reverbActive )
+		if ( bReverb )
 			memset( reverbBuffer, 0, ( end - s_paintedtime ) * sizeof( int ) );
 
 		// paint in the channels.
@@ -527,6 +616,14 @@ void S_PaintChannels( int endtime ) {
 					sampleOffset = ltime % sc->iSoundLengthInSamples;
 				} else {
 					sampleOffset = ltime - ch->startSample;
+					if ( sampleOffset < 0 ) {
+						// the sound starts later in this piece
+						ltime -= sampleOffset;
+						sampleOffset = 0;
+						if ( ltime >= end ) {
+							break;
+						}
+					}
 				}
 
 				count = end - ltime;
@@ -577,42 +674,28 @@ void S_PaintChannels( int endtime ) {
 			}
 		}
 */
-		if ( s_reverbActive && s_paintedtime < commitEnd )
+		if ( bReverb )
 		{
-			// what the room does to the sounds that were sent to it, added to the mix (see s_reverbTime)
+			// keep what was sent to the reverb, and run the reverb over it as far as this update does (see above)
 			const int chunkStart = s_paintedtime;
 
-			if ( s_reverbTime < chunkStart || s_reverbTime - chunkStart > dma.speed / 5 )
-			{
-				s_reverbTime = chunkStart;		// (the time was not continuous: after a pause, or a new level)
-			}
+			for ( i = chunkStart; i < end; i++ )
+				s_reverbSend[i & ( REVERB_RING - 1 )] = reverbBuffer[i - chunkStart];
+			s_reverbSendEnd = end;
 
-			// ...what was made already
-			const int made = ( s_reverbTime < end ) ? s_reverbTime : end;
-			for ( i = chunkStart; i < made; i++ )
-			{
-				paintbuffer[i - chunkStart].left += (int)s_reverbWetLeft[i & ( REVERB_RING - 1 )];
-				paintbuffer[i - chunkStart].right += (int)s_reverbWetRight[i & ( REVERB_RING - 1 )];
-			}
-
-			// ...and what is to be made now
 			const int upTo = ( end < commitEnd ) ? end : commitEnd;
-			if ( upTo > s_reverbTime )
+			if ( s_reverbTime == chunkStart && upTo > chunkStart )
 			{
-				const int first = s_reverbTime - chunkStart;
-				const int n = upTo - s_reverbTime;
+				const int n = upTo - chunkStart;
 				float in[PAINTBUFFER_SIZE], wetLeft[PAINTBUFFER_SIZE], wetRight[PAINTBUFFER_SIZE];
 
 				for ( i = 0; i < n; i++ )
-					in[i] = (float)reverbBuffer[first + i];
+					in[i] = (float)reverbBuffer[i];
 				S_Reverb_Process( in, n, wetLeft, wetRight );
 				for ( i = 0; i < n; i++ )
 				{
-					const int time = s_reverbTime + i;
-					s_reverbWetLeft[time & ( REVERB_RING - 1 )] = wetLeft[i];
-					s_reverbWetRight[time & ( REVERB_RING - 1 )] = wetRight[i];
-					paintbuffer[first + i].left += (int)wetLeft[i];
-					paintbuffer[first + i].right += (int)wetRight[i];
+					paintbuffer[i].left += (int)wetLeft[i];
+					paintbuffer[i].right += (int)wetRight[i];
 				}
 				s_reverbTime = upTo;
 			}

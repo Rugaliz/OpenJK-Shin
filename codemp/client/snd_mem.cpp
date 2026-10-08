@@ -26,6 +26,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_local.h"
 #include "snd_mp3.h"
 #include "snd_ambient.h"
+#include "../../code/client/snd_resample.h"	// (shared with the single player engine)
+#include <math.h>
 
 #include <string>
 
@@ -76,8 +78,8 @@ void FindNextChunk(char *name)
 	{
 		data_p=last_chunk;
 
-		if (data_p >= iff_end)
-		{	// didn't find the chunk
+		if (data_p + 8 > iff_end)
+		{	// didn't find the chunk (or there is no room left for a chunk header)
 			data_p = NULL;
 			return;
 		}
@@ -131,7 +133,7 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 
 	memset (&info, 0, sizeof(info));
 
-	if (!wav)
+	if (!wav || wavlength < 12)
 		return info;
 
 	iff_data = wav;
@@ -150,7 +152,7 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 // DumpChunks ();
 
 	FindChunk("fmt ");
-	if (!data_p)
+	if (!data_p || iff_chunk_len < 16 || data_p + 8 + 16 > iff_end)
 	{
 		Com_Printf("Missing fmt chunk\n");
 		return info;
@@ -162,9 +164,17 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 	data_p += 4+2;
 	info.width = GetLittleShort() / 8;
 
+	// (anything not understood comes back with no channels, which the caller takes as not loaded)
 	if (info.format != 1)
 	{
 		Com_Printf("Microsoft PCM format only\n");
+		memset (&info, 0, sizeof(info));
+		return info;
+	}
+	if ( (info.width != 1 && info.width != 2) || info.channels < 1 || info.channels > 2 || info.rate <= 0 )
+	{
+		Com_Printf("%s: only 8 or 16 bit mono or stereo PCM is supported (%d bit, %d channels, %d Hz)\n", name, info.width * 8, info.channels, info.rate);
+		memset (&info, 0, sizeof(info));
 		return info;
 	}
 
@@ -174,11 +184,25 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 	if (!data_p)
 	{
 		Com_Printf("Missing data chunk\n");
+		memset (&info, 0, sizeof(info));
 		return info;
 	}
 
 	data_p += 4;
-	samples = GetLittleLong () / info.width;
+	{
+		// a length that runs past the end of the file is cut down to what is there
+		int len = GetLittleLong ();
+		const int avail = (int)(iff_end - data_p);
+		if (len < 0 || len > avail)
+			len = avail;
+		samples = len / info.width;
+	}
+	if (samples <= 0)
+	{
+		Com_Printf("%s: no sound data\n", name);
+		memset (&info, 0, sizeof(info));
+		return info;
+	}
 
 	if (info.samples)
 	{
@@ -195,43 +219,78 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 }
 
 
+// one source sample as 16 bit, with the ends of the sound repeated outwards
+static inline int S_ResampleFetch( const byte *pData, int iInWidth, int iInCount, int idx )
+{
+	if ( idx < 0 )
+		idx = 0;
+	else if ( idx >= iInCount )
+		idx = iInCount - 1;
+
+	if ( iInWidth == 2 )
+		return (int)LittleShort( ((const short *)pData)[idx] );
+
+	return ( (int)(unsigned char)pData[idx] - 128 ) << 8;
+}
+
 /*
 ================
 ResampleSfx
 
 resample / decimate to the current source rate
+
+With a windowed-sinc filter (the one the single player engine uses, code/client/snd_resample.cpp). Plain sample
+repeating (what this used to do) mirrors the sound's high frequencies back into the audible range, which is what makes
+old 11/22kHz sounds harsh and gritty on a 44.1kHz output, and its 8 bit fixed point step drifted out of tune at rates
+that aren't simple multiples of each other.
 ================
 */
 void ResampleSfx (sfx_t *sfx, int iInRate, int iInWidth, byte *pData)
 {
+	const int	iInCount = sfx->iSoundLengthInSamples;
+	const double dStepScale = (double)iInRate / dma.speed;	// this is usually 0.5, 1, or 2
 	int		iOutCount;
-	int		iSrcSample;
-	float	fStepScale;
 	int		i;
-	int		iSample;
-	unsigned int uiSampleFrac, uiFracStep;	// uiSampleFrac MUST be unsigned, or large samples (eg music tracks) crash
 
-	fStepScale = (float)iInRate / dma.speed;	// this is usually 0.5, 1, or 2
-
-	// When stepscale is > 1 (we're downsampling), we really ought to run a low pass filter on the samples
-
-	iOutCount = (int)(sfx->iSoundLengthInSamples / fStepScale);
+	iOutCount = (int)(iInCount / dStepScale);
 	sfx->iSoundLengthInSamples = iOutCount;
 
 	sfx->pSoundData = (short *) SND_malloc( sfx->iSoundLengthInSamples*2 ,sfx );
 
 	sfx->fVolRange	= 0;
-	uiSampleFrac	= 0;
-	uiFracStep		= (int)(fStepScale*256);
 
-	for (i=0 ; i<sfx->iSoundLengthInSamples ; i++)
+	resampleFilter_t	filter;
+	S_Resample_SetupFilter( &filter, dStepScale );
+
+	// for the filter: the sound as 16 bit, with its ends repeated outwards as far as the filter reaches
+	const int	iPad = (int)ceil( filter.support ) + 2;
+	short		*pPadded = NULL;
+	if ( dStepScale != 1.0 )
 	{
-		iSrcSample = uiSampleFrac >> 8;
-		uiSampleFrac += uiFracStep;
-		if (iInWidth == 2) {
-			iSample = LittleShort ( ((short *)pData)[iSrcSample] );
-		} else {
-			iSample = (unsigned int)( (unsigned char)(pData[iSrcSample]) - 128) << 8;
+		pPadded = (short *)malloc( ( iInCount + 2 * iPad ) * sizeof( short ) );
+		if ( pPadded )
+		{
+			for ( int k = 0; k < iInCount + 2 * iPad; k++ )
+				pPadded[k] = (short)S_ResampleFetch( pData, iInWidth, iInCount, k - iPad );
+		}
+	}
+
+	for (i=0 ; i<iOutCount ; i++)
+	{
+		int iSample;
+		const double dSrcPos = i * dStepScale;
+
+		if ( pPadded )
+		{
+			float f;
+			S_Resample_Interp( pPadded, 1, iInCount + 2 * iPad, dSrcPos + iPad, &filter, &f );
+			if ( f > 32767.0f )			f = 32767.0f;
+			else if ( f < -32768.0f )	f = -32768.0f;
+			iSample = (int)floorf( f + 0.5f );
+		}
+		else
+		{
+			iSample = S_ResampleFetch( pData, iInWidth, iInCount, (int)dSrcPos );
 		}
 
 		sfx->pSoundData[i] = (short)iSample;
@@ -245,6 +304,8 @@ void ResampleSfx (sfx_t *sfx, int iInRate, int iInWidth, byte *pData)
 			sfx->fVolRange =  iSample >> 8;
 		}
 	}
+
+	free( pPadded );
 }
 
 
@@ -727,7 +788,6 @@ qboolean gbInsideLoadSound = qfalse;
 static qboolean S_LoadSound_Actual( sfx_t *sfx )
 {
 	byte	*data;
-	short	*samples;
 	wavinfo_t	info;
 	int		size;
 	char	*psExt;
@@ -853,6 +913,10 @@ static qboolean S_LoadSound_Actual( sfx_t *sfx )
 //=========
 
 		info = GetWavinfo( sLoadName, data, size );
+		if ( !info.channels ) {
+			FS_FreeFile (data);
+			return qfalse;	// (GetWavinfo said why)
+		}
 		if ( info.channels != 1 ) {
 			Com_Printf ("%s is a stereo wav file\n", sLoadName);
 			FS_FreeFile (data);
@@ -867,14 +931,10 @@ static qboolean S_LoadSound_Actual( sfx_t *sfx )
 			Com_Printf(S_COLOR_YELLOW "WARNING: %s is not a 22kHz wav file\n", sLoadName);
 		}
 */
-		samples = (short *)Z_Malloc(info.samples * sizeof(short) * 2, TAG_TEMP_WORKSPACE, qfalse);
-
 		sfx->eSoundCompressionMethod = ct_16;
 		sfx->iSoundLengthInSamples	 = info.samples;
 		sfx->pSoundData = NULL;
 		ResampleSfx( sfx, info.rate, info.width, data + info.dataofs );
-
-		Z_Free(samples);
 	}
 
 	FS_FreeFile( data );

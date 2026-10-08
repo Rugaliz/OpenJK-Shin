@@ -1183,7 +1183,7 @@ redump:
 			if (!cinTable[currentHandle].silent) {
 				if (cinTable[currentHandle].numQuads == -1) {
 					S_Update();
-					s_rawend = s_soundtime;
+					s_rawend = S_RawSamplesStartTime();
 				}
 				ssize = RllDecodeStereoToStereo( framedata, sbuf, cinTable[currentHandle].RoQFrameSize, 0, (unsigned short)cinTable[currentHandle].roq_flags);
                 S_RawSamples( ssize, 22050, 2, 2, (byte *)sbuf, s_volume->value, 1 );
@@ -1514,7 +1514,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		Con_Close();
 
 		if ( !cinTable[currentHandle].silent )
-			s_rawend = s_soundtime;
+			s_rawend = S_RawSamplesStartTime();
 
 		return currentHandle;
 	}
@@ -1536,6 +1536,17 @@ void CIN_SetExtents (int handle, int x, int y, int w, int h) {
 void CIN_SetLooping(int handle, qboolean loop) {
 	if (handle < 0 || handle>= MAX_VIDEO_HANDLES || cinTable[handle].status == FMV_EOF) return;
 	cinTable[handle].looping = loop;
+}
+
+// Whether a cinematic with sound is playing (its soundtrack and streamed music can't share the raw sample ring)
+qboolean CIN_IsPlayingAudio( void )
+{
+	for ( int i = 0; i < MAX_VIDEO_HANDLES; i++ )
+	{
+		if ( cinTable[i].status == FMV_PLAY && !cinTable[i].silent && cinTable[i].fileName[0] )
+			return qtrue;
+	}
+	return qfalse;
 }
 
 /*

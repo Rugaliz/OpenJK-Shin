@@ -1189,7 +1189,7 @@ redump:
 			if (!cinTable[currentHandle].silent) {
 				if (cinTable[currentHandle].numQuads == -1) {
 					S_Update();
-					s_rawend = s_soundtime;
+					s_rawend = S_RawSamplesStartTime();
 				}
 				ssize = RllDecodeStereoToStereo( framedata, sbuf, cinTable[currentHandle].RoQFrameSize, 0, (unsigned short)cinTable[currentHandle].roq_flags);
                 S_RawSamples( ssize, 22050, 2, 2, (byte *)sbuf, s_volume->value, qtrue );
@@ -1568,7 +1568,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		Con_Close();
 
 		if ( !cinTable[currentHandle].silent )
-			s_rawend = s_soundtime;
+			s_rawend = S_RawSamplesStartTime();
 
 		return currentHandle;
 	}
@@ -1689,9 +1689,13 @@ True while a cinematic with a soundtrack is being played back (its audio goes th
 */
 qboolean CIN_IsPlayingAudio( void )
 {
-	return (qboolean)( currentHandle >= 0 && currentHandle < MAX_VIDEO_HANDLES
-		&& cinTable[currentHandle].status == FMV_PLAY
-		&& !cinTable[currentHandle].silent );
+	// (any of them: the one touched last can be a silent video on a wall while a cinematic with sound plays)
+	for ( int i = 0; i < MAX_VIDEO_HANDLES; i++ )
+	{
+		if ( cinTable[i].status == FMV_PLAY && !cinTable[i].silent && cinTable[i].fileName[0] )
+			return qtrue;
+	}
+	return qfalse;
 }
 
 /*

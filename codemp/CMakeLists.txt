@@ -443,6 +443,8 @@ if(BuildMPEngine OR BuildJK2MPEngine)
 		"${MPDir}/client/snd_dma.cpp"
 		"${MPDir}/client/snd_local.h"
 		"${MPDir}/client/snd_mem.cpp"
+		"${SPDir}/client/snd_resample.cpp"
+		"${SPDir}/client/snd_resample.h"
 		"${MPDir}/client/snd_mix.cpp"
 		"${MPDir}/client/snd_mp3.cpp"
 		"${MPDir}/client/snd_mp3.h"

@@ -34,10 +34,24 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #define RESAMPLE_HALF_TAPS	16		// source samples used either side of a position (when not downsampling)
 
+// The weights of the filter worked out in advance for every position between two source samples a conversion can
+// land on. That is possible when the step is a ratio of small whole numbers, which it is between the usual rates
+// (44100 to 48000 is 147/160): the positions then only fall on numPhases places between two source samples.
+typedef struct resampleTable_s
+{
+	double	dStep;
+	float	cutoff;
+	int		numPhases;	// positions are i / numPhases of the way from one source sample to the next
+	int		kMin;		// the weights are for the source samples floor( position ) + kMin onwards...
+	int		numTaps;	// ...this many of them
+	float	*pWeights;	// [numPhases][numTaps], each set already divided by its sum
+} resampleTable_t;
+
 typedef struct
 {
 	float	cutoff;		// low pass cutoff as a fraction of the source's Nyquist frequency (1 = keep everything)
 	float	support;	// how many source samples either side of a position take part
+	const resampleTable_t	*pTable;	// the weights worked out in advance (NULL if the step doesn't allow it)
 } resampleFilter_t;
 
 // Builds the filter table. Called on demand by everything below, but can be called early.

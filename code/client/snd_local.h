@@ -119,6 +119,7 @@ typedef struct
 	// indexed by channel, for a looping sound (whose channel is made afresh every frame) in a table by sfx.
 	qboolean	hrtf;
 	qboolean	hrtfInit;		// the pool entry of a one shot sound has been cleared for this sound
+	qboolean	hrtfKept;		// was among the sounds positioned binaurally after the last S_HrtfLimit
 	float		hrtfAzimuth;	// degrees, 0 = ahead, positive to the right
 	float		hrtfElevation;	// degrees, positive upwards
 	hrtfState_t	*pHrtfState;
@@ -151,10 +152,13 @@ typedef struct {
 
 //====================================================================
 
-#define	MAX_CHANNELS			32
+// Sounds that can play at once. (The stock 32 could run out in big fights; idle channels cost nothing, and with the
+// headphone positioning on only the loudest HRTF_MAX_SOUNDS of them are filtered binaurally, see S_HrtfLimit.)
+#define	MAX_CHANNELS			128
 extern	channel_t   s_channels[MAX_CHANNELS];
 
 extern	int		s_paintedtime;
+extern	int		s_soundtime;		// the play position (sample pairs)
 extern	int		s_rawend;
 extern	vec3_t	listener_origin;
 extern	dma_t	dma;
@@ -192,7 +196,9 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength);
 qboolean S_LoadSound( sfx_t *sfx );
 
 
-void S_PaintChannels(int endtime);
+// Mixes from s_paintedtime to endtime. An update mixes the part ahead of the play position that it mixes again every
+// time (bReserve qfalse, which also runs the reverb), then the reserve further ahead that is only mixed once (qtrue)
+void S_PaintChannels(int endtime, qboolean bReserve = qfalse);
 
 // picks a channel based on priorities, empty slots, number of channels
 channel_t *S_PickChannel(int entnum, int entchannel);

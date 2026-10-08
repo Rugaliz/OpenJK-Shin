@@ -187,9 +187,9 @@ qboolean MP3_ReadSpecialTagInfo(byte *pbLoadedFile, int iLoadedFileLen,
 {
 	qboolean qbError = qfalse;
 
-	id3v1_1* pTAG = (id3v1_1*) ((pbLoadedFile+iLoadedFileLen)-sizeof(id3v1_1));	// sizeof = 128
+	id3v1_1* pTAG = (iLoadedFileLen >= (int)sizeof(id3v1_1)) ? (id3v1_1*) ((pbLoadedFile+iLoadedFileLen)-sizeof(id3v1_1)) : NULL;	// sizeof = 128
 
-	if (!Q_strncmp(pTAG->id, "TAG", 3))
+	if (pTAG && !Q_strncmp(pTAG->id, "TAG", 3))
 	{
 		// TAG found...
 		//
@@ -304,13 +304,9 @@ qboolean MP3Stream_InitFromFile( sfx_t* sfx, byte *pbSrcData, int iSrcDatalen, c
 			//
 			Com_Printf(va(S_COLOR_YELLOW"File \"%s\": %s\n",psSrcDataFilename,psError));
 
-			// This will leave iSrcDatalen bytes on the hunk stack (since you can't dealloc that), but MP3 files are
-			//	usually small, and like I say, it should never happen.
-			//
-			// Strictly speaking, I should do a Z_Malloc above, then I could do a Z_Free if failed, else do a Hunk_Alloc
-			//	to copy the Z_Malloc data into, then Z_Free, but for something that shouldn't happen it seemed bad to
-			//	penalise the rest of the game with extra alloc demands.
-			//
+			// (the copy of the MP3 made above is freed again: whoever loads the sound next puts its own data there)
+			Z_Free( sfx->pSoundData );
+			sfx->pSoundData = NULL;
 			return qfalse;
 		}
 

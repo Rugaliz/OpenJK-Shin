@@ -27,6 +27,9 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz);
 // gets the current DMA position
 int		SNDDMA_GetDMAPos(void);
 
+// samples (not frames) handed to the device since SNDDMA_Init: the sound clock, which never misses a turn of the ring
+uint64_t	SNDDMA_GetSamplesPlayed(void);
+
 // shutdown the DMA xfer.
 void	SNDDMA_Shutdown(void);
 

@@ -648,8 +648,6 @@ qboolean FS_MoveUserGenFile( const char *filename_src, const char *filename_dst 
 
 	FS_AssertInitialised();
 
-	// don't let sound stutter
-	S_ClearSoundBuffer();
 
 	from_ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename_src );
 	to_ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename_dst );
@@ -826,8 +824,6 @@ int FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp ) {
 
 	Q_strncpyz( fsh[f].name, filename, sizeof( fsh[f].name ) );
 
-	// don't let sound stutter
-	S_ClearSoundBuffer();
 
 	// search homepath
 	ospath = FS_BuildOSPath( fs_homepath->string, filename, "" );
@@ -902,8 +898,6 @@ void FS_SV_Rename( const char *from, const char *to, qboolean safe ) {
 
 	FS_AssertInitialised();
 
-	// don't let sound stutter
-	S_ClearSoundBuffer();
 
 	from_ospath = FS_BuildOSPath( fs_homepath->string, from, "" );
 	to_ospath = FS_BuildOSPath( fs_homepath->string, to, "" );
@@ -936,8 +930,6 @@ void FS_Rename( const char *from, const char *to ) {
 
 	FS_AssertInitialised();
 
-	// don't let sound stutter
-	S_ClearSoundBuffer();
 
 	from_ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, from );
 	to_ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, to );
@@ -1053,8 +1045,6 @@ fileHandle_t FS_FOpenFileAppend( const char *filename ) {
 
 	Q_strncpyz( fsh[f].name, filename, sizeof( fsh[f].name ) );
 
-	// don't let sound stutter
-	S_ClearSoundBuffer();
 
 	ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename );
 
@@ -1758,8 +1748,6 @@ long FS_ReadFile( const char *qpath, void **buffer ) {
 		Com_Error( ERR_FATAL, "FS_ReadFile with empty name\n" );
 	}
 
-	// stop sounds from repeating
-	S_ClearSoundBuffer();
 
 	buf = NULL;	// quiet compiler warning
 
