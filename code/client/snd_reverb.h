@@ -52,6 +52,14 @@ void	S_Reverb_SetTarget( const reverbParams_t *pParams );
 // The room to be in at once (for the start of a level)
 void	S_Reverb_SetNow( const reverbParams_t *pParams );
 
+// Remembers everything that is in the reverb now...
+void	S_Reverb_Mark( void );
+
+// ...and goes back to that (returns 0 if there is nothing to go back to). The mixer paints ahead of what is played and
+// paints the same moments again in its next update, with the sounds that started meanwhile: going back lets the reverb
+// be run again over them.
+int		S_Reverb_Rewind( void );
+
 // Runs n samples of the mono signal pIn through the reverb. The stereo reverb is written to pOutLeft and pOutRight
 // (not added), it does not include the signal itself.
 void	S_Reverb_Process( const float *pIn, int n, float *pOutLeft, float *pOutRight );

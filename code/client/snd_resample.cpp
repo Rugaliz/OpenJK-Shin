@@ -26,6 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_resample.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef M_PI
@@ -72,6 +73,76 @@ float S_Resample_Kernel( float u )
 	return sKernelTable[i] + ( sKernelTable[i + 1] - sKernelTable[i] ) * t;
 }
 
+// Tables are kept for the life of the program (filters point at them); there are only ever a few steps in use
+#define RESAMPLE_MAX_TABLES		12
+#define RESAMPLE_MAX_PHASES		1024
+#define RESAMPLE_MAX_TABLE_SIZE	( 1 << 18 )	// floats
+
+static resampleTable_t	sTables[RESAMPLE_MAX_TABLES];
+static int				sNumTables = 0;
+
+static const resampleTable_t *S_Resample_FindTable( double dStep, float cutoff, float support )
+{
+	for ( int i = 0; i < sNumTables; i++ )
+	{
+		if ( sTables[i].dStep == dStep && sTables[i].cutoff == cutoff )
+			return &sTables[i];
+	}
+	if ( sNumTables >= RESAMPLE_MAX_TABLES || dStep <= 0.0 )
+		return NULL;
+
+	// the smallest number of phases that the positions i * dStep all fall on
+	int numPhases = 0;
+	for ( int q = 1; q <= RESAMPLE_MAX_PHASES; q++ )
+	{
+		const double d = dStep * q;
+		if ( fabs( d - floor( d + 0.5 ) ) < 1e-9 * q )
+		{
+			numPhases = q;
+			break;
+		}
+	}
+	if ( !numPhases )
+		return NULL;
+
+	// every source sample within the support of any position between floor( position ) and the next one
+	const int kMin = -(int)ceil( support );
+	const int kMax = (int)ceil( support ) + 1;
+	const int numTaps = kMax - kMin + 1;
+	if ( numPhases * numTaps > RESAMPLE_MAX_TABLE_SIZE )
+		return NULL;
+
+	float *pWeights = (float *)malloc( (size_t)numPhases * numTaps * sizeof( float ) );
+	if ( !pWeights )
+		return NULL;
+
+	for ( int p = 0; p < numPhases; p++ )
+	{
+		const double frac = (double)p / numPhases;
+		float *w = pWeights + p * numTaps;
+		float fSum = 0.0f;
+
+		// the same weights S_Resample_Interp works out for a position this far past a source sample
+		for ( int k = 0; k < numTaps; k++ )
+		{
+			w[k] = S_Resample_Kernel( (float)( frac - ( kMin + k ) ) * cutoff );
+			fSum += w[k];
+		}
+		const float fScale = ( fSum > 0.0f ) ? 1.0f / fSum : 0.0f;
+		for ( int k = 0; k < numTaps; k++ )
+			w[k] *= fScale;
+	}
+
+	resampleTable_t *pTable = &sTables[sNumTables++];
+	pTable->dStep = dStep;
+	pTable->cutoff = cutoff;
+	pTable->numPhases = numPhases;
+	pTable->kMin = kMin;
+	pTable->numTaps = numTaps;
+	pTable->pWeights = pWeights;
+	return pTable;
+}
+
 void S_Resample_SetupFilter( resampleFilter_t *pFilter, double dStep )
 {
 	S_Resample_Init();
@@ -82,10 +153,59 @@ void S_Resample_SetupFilter( resampleFilter_t *pFilter, double dStep )
 	if ( pFilter->cutoff < 0.25f )
 		pFilter->cutoff = 0.25f;
 	pFilter->support = RESAMPLE_HALF_TAPS / pFilter->cutoff;
+	pFilter->pTable = S_Resample_FindTable( dStep, pFilter->cutoff, pFilter->support );
+}
+
+// S_Resample_Interp with the weights from a table: the position is rounded to the nearest phase (positions i * dStep
+// are on one already, give or take the rounding of a double)
+static void S_Resample_InterpTable( const short *pSrc, int nChan, int nFrames, double dPos, const resampleTable_t *pTable, float *fOut )
+{
+	double dWhole = floor( dPos );
+	int iPhase = (int)( ( dPos - dWhole ) * pTable->numPhases + 0.5 );
+	if ( iPhase >= pTable->numPhases )
+	{
+		iPhase -= pTable->numPhases;
+		dWhole += 1.0;
+	}
+
+	const float *w = pTable->pWeights + iPhase * pTable->numTaps;
+	const int iBase = (int)dWhole + pTable->kMin;
+	int kFirst = 0, kEnd = pTable->numTaps;
+
+	// samples outside the data are silence (their weight still counted when the weights were divided by their sum)
+	if ( iBase < 0 )
+		kFirst = -iBase;
+	if ( iBase + kEnd > nFrames )
+		kEnd = nFrames - iBase;
+
+	if ( nChan == 2 )
+	{
+		float fL = 0.0f, fR = 0.0f;
+		for ( int k = kFirst; k < kEnd; k++ )
+		{
+			fL += w[k] * pSrc[( iBase + k ) * 2];
+			fR += w[k] * pSrc[( iBase + k ) * 2 + 1];
+		}
+		fOut[0] = fL;
+		fOut[1] = fR;
+	}
+	else
+	{
+		float f = 0.0f;
+		for ( int k = kFirst; k < kEnd; k++ )
+			f += w[k] * pSrc[iBase + k];
+		fOut[0] = f;
+	}
 }
 
 void S_Resample_Interp( const short *pSrc, int nChan, int nFrames, double dPos, const resampleFilter_t *pFilter, float *fOut )
 {
+	if ( pFilter->pTable )
+	{
+		S_Resample_InterpTable( pSrc, nChan, nFrames, dPos, pFilter->pTable, fOut );
+		return;
+	}
+
 	const int iFirst = (int)ceil( dPos - pFilter->support );
 	const int iLast = (int)floor( dPos + pFilter->support );
 	float fSum[2] = { 0.0f, 0.0f };

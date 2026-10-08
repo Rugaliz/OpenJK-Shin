@@ -40,11 +40,24 @@ including ones that were never given zones.
 The mixer of the engine (from Quake 3) does not mix each moment of sound once: every update, once per frame, it mixes
 everything from just ahead of what is being played to a fifth of a second ahead again, so that what is ahead can
 change with the game. That is fine for adding sounds up, but the reverb remembers what went into it and has to go over
-each moment once, in order. It is only run over the next few milliseconds (those that will not be mixed again before
-they are played), and what it makes is kept, to be added whenever those moments are mixed again. (Further ahead there is
-no reverb until it is time for it, which is only heard if the game stalls.) The same goes for the other things that
-remember the signal: the muffling of a sound behind a wall and the headphone positioning take what came before from the
-sound itself, and the filter for under water continues from what it made for the moment before.
+each moment once, in order. So:
+
+* what the sounds send to the reverb is kept by time, and the reverb is only run a little way ahead, past where the
+  next update will start mixing (further ahead there is no reverb until it is time for it, which is only heard if the
+  game stalls for longer than that);
+* the reverb as it was where an update started mixing is remembered, and the next update goes back to it and runs the
+  reverb again from there, over what was sent to it (which has been played by then), up to where it starts mixing
+  itself. A sound that starts in between is therefore all heard in the reverb, from its very start: when the reverb
+  just carried on from where it had got to, the first frame or two of every sound (the attack of a gunshot, and all of
+  a short click) never reached it.
+
+Beyond what is mixed again every update the mixer keeps a reserve, mixed once (see `S_Update_`), which is only played if
+a frame takes too long. It has no reverb (that is run for what is mixed again, and picks up after the long frame).
+
+The other things that remember the signal: the muffling of a sound behind a wall and the headphone positioning take
+what came before from the sound itself (and the headphone filter changes direction by the sample time, so mixing the
+same moment again gives the same result), and the filter for under water continues from what it made for the moment
+before.
 
 Voices are MP3s that are decoded as they are played, so what comes before the part that is mixed is read from the
 decoder's window of recent samples (it keeps a good deal). Before that was done a muffled voice (a wall in the way)

@@ -228,7 +228,7 @@ static qboolean Music_ParseMusic( gsl::czstring filename, const CGenericParser2&
 			{
 				//if( Q::substr( prop.GetName(), 0, sKEY_MARKER.size() ) == sKEY_MARKER )	// for now, assume anything is a marker
 				{
-					MusicFile.MusicEntryTimes[ prop.GetName() ] = Q::svtoi( prop.GetTopValue() );
+					MusicFile.MusicEntryTimes[ prop.GetName() ] = Q::svtof( prop.GetTopValue() );	// (seconds, with fractions)
 					bEntryFound = true;
 				}
 			}

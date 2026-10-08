@@ -30,6 +30,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define HRTF_SOURCE_RATE	44100
 #define HRTF_SOURCE_TAPS	128
 #define HRTF_BLOCK			32		// the filter is moved towards its new value in steps of this many samples
+#define HRTF_FADE_MIN		64		// the fewest samples a change of filter is spread over...
+#define HRTF_FADE_MAX		2048	// ...and the most
 
 // The loudness of a sound heard through these responses, averaged over all directions and over 200Hz-8kHz, is
 // (|left|^2 + |right|^2) = 1.71 of the sound unfiltered. The engine's left/right panning averages 0.75 over the same
@@ -182,19 +184,56 @@ void S_HRTF_SetHistory( hrtfState_t *pState, const short *pHistory, int n )
 		pState->history[HRTF_MAX_TAPS - n + i] = (float)pHistory[i];
 }
 
-// out[i] += h[j] * x[i - j] for a block, written so the compiler can vectorise the loop over i
-static void HRTF_ConvolveBlock( const float *pTaps, const float *pX, int n, float *pOut )
+// out[i] = sum of h[j] * x[i - j] for a block, for both ears at once (each input sample is loaded once for the two).
+// A whole block has a fixed length, which lets the compiler vectorise the inner loop fully.
+static void HRTF_ConvolveBlock( const float *pTapsL, const float *pTapsR, const float *pX, int n, float *pOutL, float *pOutR )
 {
-	for ( int j = 0; j < sTaps; j++ )
+	float accL[HRTF_BLOCK], accR[HRTF_BLOCK];
+
+	memset( accL, 0, sizeof( accL ) );
+	memset( accR, 0, sizeof( accR ) );
+
+	if ( n == HRTF_BLOCK )
 	{
-		const float h = pTaps[j];
-		const float *pXj = pX - j;
-		for ( int i = 0; i < n; i++ )
-			pOut[i] += h * pXj[i];
+		for ( int j = 0; j < sTaps; j++ )
+		{
+			const float hL = pTapsL[j], hR = pTapsR[j];
+			const float *pXj = pX - j;
+			for ( int i = 0; i < HRTF_BLOCK; i++ )
+			{
+				accL[i] += hL * pXj[i];
+				accR[i] += hR * pXj[i];
+			}
+		}
 	}
+	else
+	{
+		for ( int j = 0; j < sTaps; j++ )
+		{
+			const float hL = pTapsL[j], hR = pTapsR[j];
+			const float *pXj = pX - j;
+			for ( int i = 0; i < n; i++ )
+			{
+				accL[i] += hL * pXj[i];
+				accR[i] += hR * pXj[i];
+			}
+		}
+	}
+
+	memcpy( pOutL, accL, n * sizeof( float ) );
+	memcpy( pOutR, accR, n * sizeof( float ) );
 }
 
-void S_HRTF_Process( hrtfState_t *pState, const hrtfFilter_t *pTarget, const short *pIn, int n, float *pOutLeft, float *pOutRight )
+// how far (0 to 1) the change of filter has got at a sample time
+static inline float HRTF_FadeAt( const hrtfState_t *pState, int time )
+{
+	const int d = time - pState->fadeStart;
+	if ( d < 0 || d >= pState->fadeLength )
+		return 1.0f;	// (done, or the time started over)
+	return (float)d / pState->fadeLength;
+}
+
+void S_HRTF_Process( hrtfState_t *pState, const hrtfFilter_t *pTarget, const short *pIn, int n, int time, float *pOutLeft, float *pOutRight )
 {
 	const int history = sTaps - 1;
 	float x[HRTF_MAX_TAPS + 1024];
@@ -208,8 +247,27 @@ void S_HRTF_Process( hrtfState_t *pState, const hrtfFilter_t *pTarget, const sho
 
 	if ( !pState->valid )
 	{
-		pState->filter = *pTarget;
+		pState->from = pState->to = *pTarget;
+		pState->fadeStart = time;
+		pState->fadeLength = HRTF_FADE_MIN;
 		pState->valid = 1;
+	}
+	else if ( memcmp( pTarget, &pState->to, sizeof( *pTarget ) ) )
+	{
+		// a new direction: change to it from wherever the filter is at this time, over as long as the last change
+		// took to come (a sound that keeps moving moves smoothly, rather than in a quick step at each update)
+		const float f = HRTF_FadeAt( pState, time );
+		int length = time - pState->fadeStart;
+		if ( length < HRTF_FADE_MIN || length > HRTF_FADE_MAX )
+			length = ( length < HRTF_FADE_MIN ) ? HRTF_FADE_MIN : HRTF_FADE_MAX;
+		for ( int j = 0; j < sTaps; j++ )
+		{
+			pState->from.left[j] += ( pState->to.left[j] - pState->from.left[j] ) * f;
+			pState->from.right[j] += ( pState->to.right[j] - pState->from.right[j] ) * f;
+		}
+		pState->to = *pTarget;
+		pState->fadeStart = time;
+		pState->fadeLength = length;
 	}
 
 	for ( int done = 0; done < n; )
@@ -223,31 +281,33 @@ void S_HRTF_Process( hrtfState_t *pState, const hrtfFilter_t *pTarget, const sho
 		for ( int i = 0; i < chunk; i++ )
 			x[history + i] = (float)pIn[done + i];
 
-		const int numBlocks = ( chunk + HRTF_BLOCK - 1 ) / HRTF_BLOCK;
-		for ( int b = 0; b < numBlocks; b++ )
+		for ( int first = 0; first < chunk; first += HRTF_BLOCK )
 		{
-			const int first = b * HRTF_BLOCK;
 			const int len = ( chunk - first < HRTF_BLOCK ) ? chunk - first : HRTF_BLOCK;
-
-			// where the filter has got to at the end of this step of the change
-			const float t = (float)( b + 1 ) / numBlocks;
-			float coeffL[HRTF_MAX_TAPS], coeffR[HRTF_MAX_TAPS];
-			for ( int j = 0; j < sTaps; j++ )
-			{
-				coeffL[j] = pState->filter.left[j] + ( pTarget->left[j] - pState->filter.left[j] ) * t;
-				coeffR[j] = pState->filter.right[j] + ( pTarget->right[j] - pState->filter.right[j] ) * t;
-			}
 
 			float *pL = pOutLeft + done + first;
 			float *pR = pOutRight + done + first;
-			memset( pL, 0, len * sizeof( float ) );
-			memset( pR, 0, len * sizeof( float ) );
-			HRTF_ConvolveBlock( coeffL, x + history + first, len, pL );
-			HRTF_ConvolveBlock( coeffR, x + history + first, len, pR );
+			const int blockTime = time + done + first;
+
+			if ( HRTF_FadeAt( pState, blockTime ) >= 1.0f )
+			{
+				HRTF_ConvolveBlock( pState->to.left, pState->to.right, x + history + first, len, pL, pR );
+				continue;
+			}
+
+			// While the filter changes, the sound is put through the old and the new one and faded from one to the
+			// other sample by sample: since filtering is linear, that is exactly a filter changing sample by sample
+			float fromL[HRTF_BLOCK], fromR[HRTF_BLOCK];
+			HRTF_ConvolveBlock( pState->from.left, pState->from.right, x + history + first, len, fromL, fromR );
+			HRTF_ConvolveBlock( pState->to.left, pState->to.right, x + history + first, len, pL, pR );
+			for ( int i = 0; i < len; i++ )
+			{
+				const float f = HRTF_FadeAt( pState, blockTime + i );
+				pL[i] = fromL[i] + ( pL[i] - fromL[i] ) * f;
+				pR[i] = fromR[i] + ( pR[i] - fromR[i] ) * f;
+			}
 		}
 
-		// the filter is now the target, and the next call starts from the end of this chunk
-		pState->filter = *pTarget;
 		{
 			// keep the last HRTF_MAX_TAPS samples of the signal, newest last
 			float tail[HRTF_MAX_TAPS];

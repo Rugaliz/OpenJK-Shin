@@ -138,7 +138,8 @@ typedef struct wavinfo_s {
 
 //====================================================================
 
-#define	MAX_CHANNELS			32
+// Sounds that can play at once (the stock 32 could run out in big fights; idle channels cost nothing)
+#define	MAX_CHANNELS			128
 extern	channel_t   s_channels[MAX_CHANNELS];
 
 extern	int		s_paintedtime;
@@ -146,7 +147,12 @@ extern	int		s_rawend;
 extern	vec3_t	listener_origin;
 extern	dma_t	dma;
 
-#define	MAX_RAW_SAMPLES	16384
+// Raw sample ring (cinematic audio, streamed music). Must be a power of two. It has to hold more than the first audio
+// packet of a cinematic: those are ~0.5 seconds long, which is 22050 samples at 44.1kHz and overflowed the old 16384 ring.
+#define	MAX_RAW_SAMPLES	65536
+// How far ahead of the current sound time streamed music is buffered. Kept at the original ring size so music
+// still reacts quickly to volume and dynamic-music state changes.
+#define	MUSIC_RAW_LOOKAHEAD	16384
 extern	portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 portable_samplepair_t *S_GetRawSamplePointer();	// TA added this, but it just returns the s_rawsamples[] array above. Oh well...
 
@@ -167,7 +173,9 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength);
 qboolean S_LoadSound( sfx_t *sfx );
 
 
-void S_PaintChannels(int endtime);
+// Mixes from s_paintedtime to endtime. An update mixes the part ahead of the play position that it mixes again every
+// time (bReserve qfalse), then the reserve further ahead that is only mixed once (qtrue)
+void S_PaintChannels(int endtime, qboolean bReserve = qfalse);
 
 // picks a channel based on priorities, empty slots, number of channels
 channel_t *S_PickChannel(int entnum, int entchannel);

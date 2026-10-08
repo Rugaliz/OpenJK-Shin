@@ -186,6 +186,7 @@ cvar_t *s_lip_threshold_3;
 cvar_t *s_lip_threshold_4;
 cvar_t *s_mixahead;
 cvar_t *s_mixPreStep;
+cvar_t *s_mixaheadAuto;
 cvar_t *s_musicVolume;
 cvar_t *s_separation;
 cvar_t *s_show;
@@ -207,7 +208,7 @@ typedef struct
 
 } loopSound_t;
 
-#define	MAX_LOOP_SOUNDS		32
+#define	MAX_LOOP_SOUNDS		64	// (was 32: with 128 channels there is room for more looping sounds, as in single player)
 
 int			numLoopSounds;
 loopSound_t	loopSounds[MAX_LOOP_SOUNDS];
@@ -325,6 +326,7 @@ void S_Init( void ) {
 	s_lip_threshold_4   = Cvar_Get( "s_threshold4",        "8.0",     0 );
 	s_mixahead          = Cvar_Get( "s_mixahead",          "0.2",     CVAR_ARCHIVE );
 	s_mixPreStep        = Cvar_Get( "s_mixPreStep",        "0.05",    CVAR_ARCHIVE );
+	s_mixaheadAuto      = Cvar_Get( "s_mixaheadAuto",      "1",       CVAR_ARCHIVE );	// 1 = mix only as far ahead as the frame rate needs (s_mixahead at most)
 	s_musicVolume       = Cvar_Get( "s_musicvolume",       "0.25",    CVAR_ARCHIVE, "Music Volume" );
 	s_separation        = Cvar_Get( "s_separation",        "0.5",     CVAR_ARCHIVE );
 	s_show              = Cvar_Get( "s_show",              "0",       CVAR_CHEAT );
@@ -683,7 +685,7 @@ S_PickChannel
 channel_t *S_PickChannel(int entnum, int entchannel)
 {
     int			ch_idx;
-	channel_t	*ch, *firstToDie;
+	channel_t	*ch, *firstToDie, *firstVoiceToDie;
 	qboolean	foundChan = qfalse;
 
 
@@ -691,9 +693,12 @@ channel_t *S_PickChannel(int entnum, int entchannel)
 		Com_Error (ERR_DROP, "S_PickChannel: entchannel<0");
 	}
 
-	// Check for replacement sound, or find the best one to replace
+	// Check for replacement sound, or find the best one to replace. (Only channels that may be taken are considered:
+	// if none may, there is no channel. Lines of dialogue are only cut short for another sound if nothing else is
+	// playing that could make way.)
 
-    firstToDie = &s_channels[0];
+    firstToDie = NULL;
+	firstVoiceToDie = NULL;
 
 	for ( int pass = 0; (pass < ((entchannel == CHAN_AUTO || entchannel == CHAN_LESS_ATTEN)?1:2)) && !foundChan; pass++ )
 	{
@@ -704,6 +709,7 @@ channel_t *S_PickChannel(int entnum, int entchannel)
 				if ( !ch->thesfx )
 				{//grab the first open channel
 					firstToDie = ch;
+					foundChan = qtrue;
 					break;
 				}
 
@@ -730,10 +736,24 @@ channel_t *S_PickChannel(int entnum, int entchannel)
 				continue;
 			}
 
-			if ( ch->startSample < firstToDie->startSample ) {
+			if ( ch->thesfx && ( ch->entchannel == CHAN_VOICE || ch->entchannel == CHAN_VOICE_ATTEN || ch->entchannel == CHAN_VOICE_GLOBAL ) ) {
+				if ( !firstVoiceToDie || ch->startSample < firstVoiceToDie->startSample ) {
+					firstVoiceToDie = ch;
+				}
+				continue;
+			}
+
+			if ( !firstToDie || ch->startSample < firstToDie->startSample ) {
 				firstToDie = ch;
 			}
 		}
+	}
+
+	if ( !firstToDie ) {
+		firstToDie = firstVoiceToDie;
+	}
+	if ( !firstToDie ) {
+		return NULL;	// everything playing is to be kept
 	}
 
 	if ( s_show->integer == 1 && firstToDie->thesfx ) {
@@ -863,6 +883,9 @@ void S_StartAmbientSound( const vec3_t origin, int entityNum, unsigned char volu
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
+	if ( !sfx->pSoundData ) {
+		return;		// (it was freed, and could not be loaded again)
+	}
 
 
 	if ( s_show->integer == 1 ) {
@@ -954,6 +977,9 @@ void S_StartSound(const vec3_t origin, int entityNum, int entchannel, sfxHandle_
 	if ( !origin && ( entityNum < 0 || entityNum >= MAX_GENTITIES ) ) {
 		Com_Error( ERR_DROP, "S_StartSound: bad entitynum %i", entityNum );
 	}
+	if ( entityNum < 0 || entityNum >= MAX_GENTITIES ) {
+		entityNum = ENTITYNUM_WORLD;	// (a sound at a place: the entity number still indexes tables)
+	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
 		Com_Error( ERR_DROP, "S_StartSound: handle %i out of range", sfxHandle );
@@ -964,6 +990,9 @@ void S_StartSound(const vec3_t origin, int entityNum, int entchannel, sfxHandle_
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
+	if ( !sfx->pSoundData ) {
+		return;		// (it was freed, and could not be loaded again)
+	}
 
 	if ( s_show->integer == 1 ) {
 		Com_Printf( "%i : %s on (%d)\n", s_paintedtime, sfx->sSoundName, entityNum );
@@ -1081,6 +1110,8 @@ If we are about to perform file access, clear the buffer
 so sound doesn't stutter.
 ==================
 */
+static int	s_reserveMixedTo = 0;	// how far the reserve has been mixed (see S_Update_)
+
 void S_ClearSoundBuffer( void ) {
 	int		clear;
 
@@ -1095,6 +1126,7 @@ void S_ClearSoundBuffer( void ) {
 	memset(s_entityWavVol, 0,sizeof(s_entityWavVol));
 #endif
 	s_rawend = 0;
+	s_reserveMixedTo = 0;	// (it was cleared with the rest)
 
 	{
 		if (dma.samplebits == 8)
@@ -1219,6 +1251,7 @@ void S_StopLoopingSound( int entityNum )
 				x++;
 			}
 			numLoopSounds--;
+			continue;	// (the next one has moved into this place)
 		}
 		i++;
 	}
@@ -1253,6 +1286,9 @@ void S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocit
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
+	if ( !sfx->pSoundData ) {
+		return;		// (it was freed, and could not be loaded again)
+	}
 
 	if ( !sfx->iSoundLengthInSamples ) {
 		Com_Error( ERR_DROP, "%s has length 0", sfx->sSoundName );
@@ -1313,6 +1349,9 @@ void S_AddAmbientLoopingSound( const vec3_t origin, unsigned char volume, sfxHan
 		S_memoryLoad(sfx);
 	}
 	SND_TouchSFX(sfx);
+	if ( !sfx->pSoundData ) {
+		return;		// (it was freed, and could not be loaded again)
+	}
 
 	if ( !sfx->iSoundLengthInSamples ) {
 		Com_Error( ERR_DROP, "%s has length 0", sfx->sSoundName );
@@ -1325,6 +1364,8 @@ void S_AddAmbientLoopingSound( const vec3_t origin, unsigned char volume, sfxHan
 
 	//TODO: Calculate the distance falloff
 	loopSounds[numLoopSounds].volume = volume;
+	loopSounds[numLoopSounds].entnum = -1;	// (not left over from an entity's loop that was in this slot)
+	VectorClear( loopSounds[numLoopSounds].velocity );
 	numLoopSounds++;
 }
 
@@ -1437,6 +1478,13 @@ portable_samplepair_t *S_GetRawSamplePointer() {
 }
 
 
+// the earliest time streamed samples added now can still be played at (anything earlier has gone to the device already)
+int S_RawSamplesStartTime( void )
+{
+	const float preStep = Com_Clamp( 0.0f, s_mixahead->value - 0.01f, s_mixPreStep->value );
+	return s_soundtime + (int)( preStep * dma.speed );
+}
+
 /*
 ============
 S_RawSamples
@@ -1459,8 +1507,10 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 
 	if ( s_rawend < s_soundtime ) {
 		Com_DPrintf( "S_RawSamples: resetting minimum: %i < %i\n", s_rawend, s_soundtime );
-		s_rawend = s_soundtime;
+		s_rawend = S_RawSamplesStartTime();
 	}
+
+	const int rawEndStart = s_rawend;
 
 	scale = (float)rate / dma.speed;
 
@@ -1473,6 +1523,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 			{
 				for (i=0 ; i<samples ; i++)
 				{
+					//Don't overflow the ring (what was put in it and not played yet would be written over)
+					if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
+						break;
 					dst = s_rawend&(MAX_RAW_SAMPLES-1);
 					s_rawend++;
 					s_rawsamples[dst].left = ((short *)data)[i*2] * intVolume;
@@ -1483,6 +1536,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 			{
 				for (i=0 ; i<samples ; i++)
 				{
+					//Don't overflow the ring (what was put in it and not played yet would be written over)
+					if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
+						break;
 					dst = s_rawend&(MAX_RAW_SAMPLES-1);
 					s_rawend++;
 					s_rawsamples[dst].left  += ((short *)data)[i*2] * intVolume;
@@ -1499,6 +1555,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 					src = i*scale;
 					if (src >= samples)
 						break;
+					//Don't overflow the ring (what was put in it and not played yet would be written over)
+					if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
+						break;
 					dst = s_rawend&(MAX_RAW_SAMPLES-1);
 					s_rawend++;
 					s_rawsamples[dst].left = ((short *)data)[src*2] * intVolume;
@@ -1511,6 +1570,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 				{
 					src = i*scale;
 					if (src >= samples)
+						break;
+					//Don't overflow the ring (what was put in it and not played yet would be written over)
+					if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
 						break;
 					dst = s_rawend&(MAX_RAW_SAMPLES-1);
 					s_rawend++;
@@ -1529,6 +1591,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 				src = i*scale;
 				if (src >= samples)
 					break;
+				//Don't overflow the ring (what was put in it and not played yet would be written over)
+				if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
+					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
 				s_rawsamples[dst].left = ((short *)data)[src] * intVolume;
@@ -1541,6 +1606,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 			{
 				src = i*scale;
 				if (src >= samples)
+					break;
+				//Don't overflow the ring (what was put in it and not played yet would be written over)
+				if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
 					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
@@ -1560,6 +1628,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 				src = i*scale;
 				if (src >= samples)
 					break;
+				//Don't overflow the ring (what was put in it and not played yet would be written over)
+				if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
+					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
 				s_rawsamples[dst].left = ((char *)data)[src*2] * intVolume;
@@ -1572,6 +1643,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 			{
 				src = i*scale;
 				if (src >= samples)
+					break;
+				//Don't overflow the ring (what was put in it and not played yet would be written over)
+				if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
 					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
@@ -1591,6 +1665,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 				src = i*scale;
 				if (src >= samples)
 					break;
+				//Don't overflow the ring (what was put in it and not played yet would be written over)
+				if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
+					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
 				s_rawsamples[dst].left = (((byte *)data)[src]-128) * intVolume;
@@ -1603,6 +1680,9 @@ void S_RawSamples( int samples, int rate, int width, int channels, const byte *d
 			{
 				src = i*scale;
 				if (src >= samples)
+					break;
+				//Don't overflow the ring (what was put in it and not played yet would be written over)
+				if (s_rawend - rawEndStart >= MAX_RAW_SAMPLES)
 					break;
 				dst = s_rawend&(MAX_RAW_SAMPLES-1);
 				s_rawend++;
@@ -1652,67 +1732,56 @@ static int S_CheckAmplitude(channel_t	*ch, const unsigned int s_oldpaintedtime )
 		int	sample;
 		int	sample_total = 0;
 		int	count = 0;
-		short *current_pos_s;
-//		char *current_pos_c;
-		int	offset = 0;
-
-		// if we haven't started the sample yet, we must be at the beginning
-		current_pos_s = ((short*)ch->thesfx->pSoundData);
-//		current_pos_c = ((char*)ch->thesfx->data);
-
-		//if (ch->startSample != START_SAMPLE_IMMEDIATE)
-		//{
-			// figure out where we are in the sample right now.
-			offset = s_oldpaintedtime - ch->startSample;//s_paintedtime
-			current_pos_s += offset;
-//			current_pos_c += offset;
-		//}
+		// figure out where we are in the sample right now
+		const int offset = s_oldpaintedtime - ch->startSample;
 
 		// scan through 10 samples 100( at 11hz or 200 at 22hz) samples apart.
 		//
 		for (int i=0; i<10; i++)
 		{
-			//
+			const int pos = offset + i*100;
+
 			// have we run off the end?
-			if ((offset + (i*100)) > ch->thesfx->iSoundLengthInSamples)
+			if ( pos < 0 || pos >= ch->thesfx->iSoundLengthInSamples )
 			{
 				break;
 			}
-//			if (ch->thesfx->width == 1)
-//			{
-//				sample = current_pos_c[i*100];
-//			}
-//			else
+
+			switch (ch->thesfx->eSoundCompressionMethod)
 			{
-				switch (ch->thesfx->eSoundCompressionMethod)
+				case ct_16:
 				{
-					case ct_16:
-					{
-						sample = current_pos_s[i*100];
-					}
-					break;
+					sample = ch->thesfx->pSoundData[pos];
+				}
+				break;
 
-					case ct_MP3:
-					{
-						const int iIndex = (i*100) + ((offset * /*ch->thesfx->width*/2) - ch->iMP3SlidingDecodeWindowPos);
-						const short* pwSamples = (short*) (ch->MP3SlidingDecodeBuffer + iIndex);
+				case ct_MP3:
+				{
+					// (only what the channel's decode window holds now)
+					const int iIndex = pos*2 - ch->iMP3SlidingDecodeWindowPos;
 
-						sample = *pwSamples;
-					}
-					break;
-
-					default:
+					if ( iIndex < 0 || iIndex + 2 > ch->iMP3SlidingDecodeWritePos )
 					{
-						assert(0);
 						sample = 0;
 					}
-					break;
+					else
+					{
+						short wSample;
+						memcpy( &wSample, ch->MP3SlidingDecodeBuffer + iIndex, sizeof( wSample ) );
+						sample = wSample;
+					}
 				}
+				break;
 
-//				if (sample < 0)
-//					sample = -sample;
-				sample = sample>>8;
+				default:
+				{
+					assert(0);
+					sample = 0;
+				}
+				break;
 			}
+
+			sample = sample>>8;
 			// square it for better accuracy
 			sample_total += (sample * sample);
 			count++;
@@ -1952,9 +2021,8 @@ void S_Update( void ) {
 
 void S_GetSoundtime(void)
 {
-	int		samplepos;
-	static	int		buffers;
-	static	int		oldsamplepos;
+	static int64_t	soundtimeBase = 0;
+	static int		lastPaintStart = 0;
 	int		fullsamples;
 
 	fullsamples = dma.samples / dma.channels;
@@ -1969,44 +2037,48 @@ void S_GetSoundtime(void)
 		return;
 	}
 
-	// it is possible to miscount buffers if it has wrapped twice between
-	// calls to S_Update.  Oh well.
-	samplepos = SNDDMA_GetDMAPos();
-	if (samplepos < oldsamplepos)
-	{
-		buffers++;					// buffer wrapped
+	// The time is what the device has been given (which can't be miscounted when the game doesn't look for a while,
+	// unlike the turns of the ring), less a base that keeps it in 32 bits. The base is a whole number of turns of the
+	// ring, since the place in the ring the mixer paints a moment at is that moment's time.
+	const int64_t played = (int64_t)( SNDDMA_GetSamplesPlayed() / dma.channels );
 
-		if (s_paintedtime > 0x40000000)
-		{	// time to chop things off to avoid 32 bit limits
-			buffers = 0;
-			s_paintedtime = fullsamples;
-			S_StopAllSounds ();
-		}
+	if ( played < soundtimeBase )
+	{	// the sound was started again
+		soundtimeBase = 0;
+		lastPaintStart = 0;
 	}
-	oldsamplepos = samplepos;
-
-	s_soundtime = buffers*fullsamples + samplepos/dma.channels;
-
-#if 0
-// check to make sure that we haven't overshot
-	if (s_paintedtime < s_soundtime)
-	{
-		Com_DPrintf ("S_Update_ : overflow\n");
-		s_paintedtime = s_soundtime;
+	if ( played - soundtimeBase > 0x40000000 )
+	{	// time to chop things off to avoid 32 bit limits
+		soundtimeBase = ( played / fullsamples - 1 ) * fullsamples;
+		lastPaintStart = 0;
+		next_amplitude = 0;
+		S_StopSounds();		// (the music carries on from where it was)
 	}
-#endif
+
+	s_soundtime = (int)( played - soundtimeBase );
 
 	if ( dma.submission_chunk < 256 ) {
-		s_paintedtime = (int)(s_soundtime + s_mixPreStep->value * dma.speed);
+		// (sounds can't start beyond what is painted, s_mixahead ahead of the play position)
+		const float preStep = Com_Clamp( 0.0f, s_mixahead->value - 0.01f, s_mixPreStep->value );
+		s_paintedtime = (int)(s_soundtime + preStep * dma.speed);
 	} else {
 		s_paintedtime = s_soundtime + dma.submission_chunk;
 	}
+
+	// Never paint from earlier than the last update did: the sounds that started then start at that time
+	if ( s_paintedtime < lastPaintStart && lastPaintStart - s_paintedtime < fullsamples / 2 )
+	{
+		s_paintedtime = lastPaintStart;
+	}
+	lastPaintStart = s_paintedtime;
 }
 
 
 void S_Update_(void) {
 	unsigned        endtime;
 	int				samps;
+	static int		iLastMs = 0, iBucketStartMs = 0, iMaxGapCur = 50, iMaxGapPrev = 50;
+	static float	fAheadSeconds = 0.2f;
 
 	if ( !s_soundStarted || s_soundMuted ) {
 		return;
@@ -2021,8 +2093,43 @@ void S_Update_(void) {
 		// and start any new sounds
 		S_ScanChannelStarts();
 
+		// How far ahead to mix (s_mixaheadAuto). Every update mixes everything from the pre-step to here again (the
+		// sounds may have changed), so this is most of what the sound costs: it only has to reach past where the next
+		// update starts mixing, which is about a frame away, with room for a frame twice as long as the longest lately.
+		// Beyond that, up to s_mixahead, is the reserve, mixed only once (below).
+		const int iNow = Sys_Milliseconds();
+		if ( iLastMs && iNow - iLastMs > iMaxGapCur )
+			iMaxGapCur = iNow - iLastMs;
+		iLastMs = iNow;
+		if ( iNow - iBucketStartMs >= 1000 )
+		{
+			iMaxGapPrev = iMaxGapCur;
+			iMaxGapCur = 0;
+			iBucketStartMs = iNow;
+		}
+
+		const qboolean bAuto = (qboolean)( s_mixaheadAuto->integer && !CL_VideoRecording() );	// (a recording takes what is mixed as it is)
+		if ( bAuto )
+		{
+			const int iMaxGap = ( iMaxGapCur > iMaxGapPrev ) ? iMaxGapCur : iMaxGapPrev;
+			const float fPreStep = Com_Clamp( 0.0f, s_mixahead->value - 0.01f, s_mixPreStep->value );
+			float fWanted = fPreStep + 2.0f * iMaxGap * 0.001f + 0.02f;
+			if ( fWanted < 0.06f )					fWanted = 0.06f;
+			if ( fWanted > s_mixahead->value )		fWanted = s_mixahead->value;
+			if ( fWanted >= fAheadSeconds )
+				fAheadSeconds = fWanted;
+			else
+				fAheadSeconds = Q_max( fWanted, fAheadSeconds - 0.001f );	// come down slowly
+		}
+		else
+		{
+			fAheadSeconds = s_mixahead->value;
+		}
+
 		// mix ahead of current position
-		endtime = (int)(s_soundtime + s_mixahead->value * dma.speed);
+		endtime = (int)(s_soundtime + fAheadSeconds * dma.speed);
+		if ( (int)endtime < s_paintedtime )
+			endtime = s_paintedtime;
 
 		// mix to an even submission block size
 		endtime = (endtime + dma.submission_chunk-1)
@@ -2034,11 +2141,25 @@ void S_Update_(void) {
 			endtime = s_soundtime + samps;
 
 
-		SNDDMA_BeginPainting ();
+		S_PaintChannels (endtime);	// (locks the device only while it copies into the ring)
 
-		S_PaintChannels (endtime);
-
-		SNDDMA_Submit ();
+		// The reserve: from there on to s_mixahead ahead, what wasn't mixed yet is mixed (once, unlike the part above,
+		// which is mixed again every update). It is mixed again properly before it is played, unless the game stalls:
+		// then it is played as it is, which is far better than silence.
+		if ( bAuto )
+		{
+			int reserveEnd = (int)( s_soundtime + s_mixahead->value * dma.speed );
+			if ( reserveEnd - s_soundtime > samps )
+				reserveEnd = s_soundtime + samps;
+			if ( s_reserveMixedTo < (int)endtime || s_reserveMixedTo > reserveEnd )
+				s_reserveMixedTo = endtime;	// (anything mixed before that is mixed again above anyway)
+			if ( reserveEnd > s_reserveMixedTo )
+			{
+				s_paintedtime = s_reserveMixedTo;
+				S_PaintChannels( reserveEnd, qtrue );
+				s_reserveMixedTo = reserveEnd;
+			}
+		}
 
 		S_DoLipSynchs( s_oldpaintedtime );
 }
@@ -2060,7 +2181,7 @@ static void S_Play_f( void ) {
 	i = 1;
 	while ( i<Cmd_Argc() ) {
 		if ( !strrchr(Cmd_Argv(i), '.') ) {
-			Com_sprintf( name, sizeof(name), "%s.wav", Cmd_Argv(1) );
+			Com_sprintf( name, sizeof(name), "%s.wav", Cmd_Argv(i) );
 		} else {
 			Q_strncpyz( name, Cmd_Argv(i), sizeof(name) );
 		}
@@ -2625,6 +2746,16 @@ static qboolean S_StartBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolean
 			return qfalse;
 		}
 
+		if ( ( pMusicInfo->s_backgroundInfo.width != 1 && pMusicInfo->s_backgroundInfo.width != 2 )
+			|| pMusicInfo->s_backgroundInfo.channels < 1 || pMusicInfo->s_backgroundInfo.channels > 2
+			|| pMusicInfo->s_backgroundInfo.rate <= 0 ) {
+			// (nothing else can be streamed: it would never get anywhere, and the music would hang the game)
+			FS_FCloseFile( pMusicInfo->s_backgroundFile );
+			pMusicInfo->s_backgroundFile = 0;
+			Com_Printf(S_COLOR_YELLOW "WARNING: music file %s is not 8 or 16 bit mono or stereo\n", name);
+			return qfalse;
+		}
+
 		if ( pMusicInfo->s_backgroundInfo.channels != 2 || pMusicInfo->s_backgroundInfo.rate != 22050 ) {
 			Com_Printf(S_COLOR_YELLOW "WARNING: music file %s is not 22k stereo\n", name );
 		}
@@ -2646,13 +2777,17 @@ static qboolean S_StartBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolean
 
 static void S_SwitchDynamicTracks( MusicState_e eOldState, MusicState_e eNewState, qboolean bNewTrackStartsFullVolume )
 {
-	// copy old track into fader...
+	// copy old track into fader... (unless it is the silence: there is nothing to fade, and the fader may still be
+	// fading out the track before it, which would be cut off)
 	//
-	tMusic_Info[ eBGRNDTRACK_FADE ] = tMusic_Info[ eOldState ];
-//	tMusic_Info[ eBGRNDTRACK_FADE ].bActive = qtrue;	// inherent
-//	tMusic_Info[ eBGRNDTRACK_FADE ].bExists = qtrue;	// inherent
-	tMusic_Info[ eBGRNDTRACK_FADE ].iXFadeVolumeSeekTime= Sys_Milliseconds();
-	tMusic_Info[ eBGRNDTRACK_FADE ].iXFadeVolumeSeekTo	= 0;
+	if ( eOldState != eBGRNDTRACK_SILENCE )
+	{
+		tMusic_Info[ eBGRNDTRACK_FADE ] = tMusic_Info[ eOldState ];
+//		tMusic_Info[ eBGRNDTRACK_FADE ].bActive = qtrue;	// inherent
+//		tMusic_Info[ eBGRNDTRACK_FADE ].bExists = qtrue;	// inherent
+		tMusic_Info[ eBGRNDTRACK_FADE ].iXFadeVolumeSeekTime= Sys_Milliseconds();
+		tMusic_Info[ eBGRNDTRACK_FADE ].iXFadeVolumeSeekTo	= 0;
+	}
 	//
 	// ... and deactivate...
 	//
@@ -3069,9 +3204,9 @@ static qboolean S_UpdateBackgroundTrack_Actual( MusicInfo_t *pMusicInfo, qboolea
 		s_rawend = s_soundtime;
 	}
 
-	while ( s_rawend < s_soundtime + MAX_RAW_SAMPLES )
+	while ( s_rawend < s_soundtime + MUSIC_RAW_LOOKAHEAD )
 	{
-		bufferSamples = MAX_RAW_SAMPLES - (s_rawend - s_soundtime);
+		bufferSamples = MUSIC_RAW_LOOKAHEAD - (s_rawend - s_soundtime);
 
 		// decide how much data needs to be read from the file
 		fileSamples = bufferSamples * pMusicInfo->s_backgroundInfo.rate / dma.speed;
@@ -3270,8 +3405,17 @@ static void S_CheckDynamicMusicState(void)
 	S_HandleDynamicMusicStateChange();
 }
 
+extern qboolean CIN_IsPlayingAudio( void );
+
 static void S_UpdateBackgroundTrack( void )
 {
+	// A cinematic's soundtrack and streamed music share the raw sample ring, each appending at s_rawend. Streaming
+	// both at once interleaves their samples (heard as crackling), so music waits until the cinematic is over.
+	if ( CIN_IsPlayingAudio() )
+	{
+		return;
+	}
+
 	if (bMusic_IsDynamic)
 	{
 		if (s_debugdynamic->integer == 2)
@@ -3290,6 +3434,8 @@ static void S_UpdateBackgroundTrack( void )
 			{
 				int iRawEnd = s_rawend;
 				S_UpdateBackgroundTrack_Actual( pMusicInfoCurrent, qtrue, s_musicVolume->value );
+				// (a track faded right down writes nothing: then the fader must not be added to what is in the ring)
+				const qboolean bCurrentWrote = (qboolean)( s_rawend != iRawEnd );
 
 	/*			static int iPrevFrontVol = 0;
 				if (iPrevFrontVol != pMusicInfoCurrent->iXFadeVolume)
@@ -3301,7 +3447,7 @@ static void S_UpdateBackgroundTrack( void )
 				if (pMusicInfoFadeOut->bActive)
 				{
 					s_rawend = iRawEnd;
-					S_UpdateBackgroundTrack_Actual( pMusicInfoFadeOut, qfalse, s_musicVolume->value );	// inactive-checked internally
+					S_UpdateBackgroundTrack_Actual( pMusicInfoFadeOut, (qboolean)!bCurrentWrote, s_musicVolume->value );	// inactive-checked internally
 	/*
 					static int iPrevFadeVol = 0;
 					if (iPrevFadeVol != pMusicInfoFadeOut->iXFadeVolume)

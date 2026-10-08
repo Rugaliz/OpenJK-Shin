@@ -42,71 +42,56 @@ cvar_t *s_muteWhenUnfocused;
 
 /* The audio callback. All the magic happens here. */
 static int deviceChunkSamples = 1024;
-static int dmapos = 0;
-static int dmasize = 0;
-
-/*
-===============
-SNDDMA_ReadRing
-
-Copies len bytes of the mixed sound, from the position the device has got to, and moves that position on
-===============
-*/
-static void SNDDMA_ReadRing(Uint8 *dest, int len)
-{
-	int pos = (dmapos * (dma.samplebits/8));
-	if (pos >= dmasize)
-		dmapos = pos = 0;
-
-	if (!snd_inited)  /* shouldn't happen, but just in case... */
-	{
-		memset(dest, '\0', len);
-		return;
-	}
-	else
-	{
-		int tobufend = dmasize - pos;  /* bytes to buffer's end. */
-		int len1 = len;
-		int len2 = 0;
-
-		if (len1 > tobufend)
-		{
-			len1 = tobufend;
-			len2 = len - len1;
-		}
-		memcpy(dest, dma.buffer + pos, len1);
-		if (len2 <= 0)
-			dmapos += (len1 / (dma.samplebits/8));
-		else  /* wraparound? */
-		{
-			memcpy(dest+len1, dma.buffer, len2);
-			dmapos = (len2 / (dma.samplebits/8));
-		}
-	}
-
-	if (dmapos >= dmasize)
-		dmapos = 0;
-}
+static int dmapos = 0;					// where the device has got to in the ring (in samples, not frames)
+static int dmasize = 0;					// size of the ring in bytes
+static Uint64 dmaSamplesPlayed = 0;		// samples handed to the device since the ring was set up
+static bool dmaMuted = false;			// the window isn't in front (s_muteWhenUnfocused): play silence
 
 /*
 ===============
 SNDDMA_AudioCallback
 
 The device wants more sound (additional_amount is how many bytes of it), give it what is next in the mixed sound.
+
+What has been handed over is cleared in the ring behind it. The mixer only ever writes ahead of the play position,
+so if the game stops mixing for a while (a long frame, a file being read), the device runs into silence instead of
+playing what was in the ring one turn earlier again.
+
+The device keeps running while the window is in the background and sound is muted, so the sound clock keeps time
+with the game and sounds started meanwhile run out as usual instead of all starting together when it comes back.
+
+SDL calls this with the stream locked, so it never runs at the same time as SNDDMA_BeginPainting/Submit.
 ===============
 */
 static void SDLCALL SNDDMA_AudioCallback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
-	Uint8 buffer[4096];
+	if (!snd_inited || !dma.buffer || dmasize <= 0)
+		return;		// (SDL plays silence)
+
+	const int bytesPerSample = dma.samplebits / 8;
+	const int bytesPerFrame = bytesPerSample * dma.channels;
+	const int silence = (dma.samplebits == 8) ? 0x80 : 0;
+
+	additional_amount -= additional_amount % bytesPerFrame;
 
 	while (additional_amount > 0)
 	{
-		const int len = (additional_amount < (int)sizeof(buffer)) ? additional_amount : (int)sizeof(buffer);
+		int pos = dmapos * bytesPerSample;
+		if (pos >= dmasize)
+			pos = 0;
 
-		SNDDMA_ReadRing(buffer, len);
-		if (!SDL_PutAudioStreamData(stream, buffer, len))
-			break;
+		int len = dmasize - pos;	// up to the end of the ring, the rest from its start next time round
+		if (len > additional_amount)
+			len = additional_amount;
 
+		if (dmaMuted)
+			memset(dma.buffer + pos, silence, len);
+		SDL_PutAudioStreamData(stream, dma.buffer + pos, len);
+		memset(dma.buffer + pos, silence, len);
+
+		pos += len;
+		dmapos = (pos >= dmasize) ? 0 : pos / bytesPerSample;
+		dmaSamplesPlayed += len / bytesPerSample;
 		additional_amount -= len;
 	}
 }
@@ -244,6 +229,8 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 	desired.freq = SNDDMA_ExpandSampleFrequencyKHzToHz(sampleFrequencyInKHz);
 	desired.format = ((tmp == 16) ? SDL_AUDIO_S16 : SDL_AUDIO_U8);
 	desired.channels = (int) s_sdlChannels->value;
+	if (desired.channels < 1 || desired.channels > 2)
+		desired.channels = 2;	// the mixer only paints mono or stereo
 
 	int deviceSamples;
 	if (s_sdlDevSamps->value)
@@ -276,9 +263,9 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 		return qfalse;
 	}
 
+	int deviceFrames = 0;		// what the device really asks for at a time (the hint above is only a hint)
 	{
 		SDL_AudioSpec deviceSpec;
-		int deviceFrames = 0;
 		const SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice( audioStream );
 		const char *devName = SDL_GetAudioDeviceName( dev );
 
@@ -287,6 +274,12 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 		if ( SDL_GetAudioDeviceFormat( dev, &deviceSpec, &deviceFrames ) )
 		{
 			SNDDMA_PrintAudiospec("Device format", &deviceSpec, deviceFrames);
+			if ( deviceSpec.freq > 0 && deviceSpec.freq != desired.freq )
+				deviceFrames = (int)( ( (Sint64)deviceFrames * desired.freq + deviceSpec.freq - 1 ) / deviceSpec.freq );	// in our samples
+		}
+		else
+		{
+			deviceFrames = 0;
 		}
 	}
 
@@ -298,7 +291,9 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 	//  know if it's a good value overall, but at least we know it's
 	//  reasonable...this is why I let the user override.
 	tmp = s_sdlMixSamps->value;
-	if (!tmp)
+	if (tmp > 0 && tmp < (deviceSamples * desired.channels) * 4)
+		tmp = (deviceSamples * desired.channels) * 4;	// (too small to hold what the device takes and what is mixed ahead)
+	if (tmp <= 0)
 	{
 		tmp = (deviceSamples * desired.channels) * 10;
 		// keep the ring buffer as big as it was with the old, larger callback size: it limits how far ahead
@@ -317,7 +312,9 @@ qboolean SNDDMA_Init(int sampleFrequencyInKHz)
 	}
 
 	dmapos = 0;
-	deviceChunkSamples = deviceSamples;
+	dmaSamplesPlayed = 0;
+	dmaMuted = false;
+	deviceChunkSamples = (deviceFrames > deviceSamples) ? deviceFrames : deviceSamples;
 	dma.samplebits = SDL_AUDIO_BITSIZE(desired.format);
 	dma.channels = desired.channels;
 	dma.samples = tmp;
@@ -351,7 +348,26 @@ SNDDMA_GetDMAPos
 */
 int SNDDMA_GetDMAPos(void)
 {
-	return dmapos;
+	SDL_LockAudioStream(audioStream);
+	const int pos = dmapos;
+	SDL_UnlockAudioStream(audioStream);
+	return pos;
+}
+
+/*
+===============
+SNDDMA_GetSamplesPlayed
+
+How many samples (not frames) the device has been given since the sound was started. Unlike the position in the
+ring this can't be miscounted when the game doesn't look for a while (the ring goes round in a third of a second).
+===============
+*/
+uint64_t SNDDMA_GetSamplesPlayed(void)
+{
+	SDL_LockAudioStream(audioStream);
+	const uint64_t played = dmaSamplesPlayed;
+	SDL_UnlockAudioStream(audioStream);
+	return played;
 }
 
 /*
@@ -398,24 +414,16 @@ void SNDDMA_BeginPainting (void)
 	SDL_LockAudioStream(audioStream);
 }
 
-// (De)activates sound playback
+// (De)activates sound playback: with s_muteWhenUnfocused, the window going to the background mutes the sound
+// (the device keeps running, see SNDDMA_AudioCallback)
 void SNDDMA_Activate( qboolean activate )
 {
 	if ( !audioStream )
 		return;
 
-	if ( !activate && s_muteWhenUnfocused && !s_muteWhenUnfocused->integer )
-	{
-		return;	// keep playing in the background
-	}
+	const bool mute = !activate && !( s_muteWhenUnfocused && !s_muteWhenUnfocused->integer );
 
-	if ( activate )
-	{
-		S_ClearSoundBuffer();
-	}
-
-	if ( activate )
-		SDL_ResumeAudioStreamDevice( audioStream );
-	else
-		SDL_PauseAudioStreamDevice( audioStream );
+	SDL_LockAudioStream( audioStream );
+	dmaMuted = mute;
+	SDL_UnlockAudioStream( audioStream );
 }

@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "client.h"
 #include "snd_local.h"
+#include "sdl/sdl_sound.h"
 
 portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
 int 	*snd_p, snd_linear_count, snd_vol;
@@ -32,121 +33,74 @@ short	*snd_out;
 
 
 
-// FIXME: proper fix for that ?
-#if !defined(_MSC_VER) || !id386
-void S_WriteLinearBlastStereo16 (void)
+/*
+===================
+S_LimitSample
+
+Brings a mixed sample (16 bit scale, but can be far outside it when many loud sounds overlap) into 16 bit range.
+
+Hard clipping chops the tops off the waveform, which sounds like harsh distortion. Instead, anything within the top
+quarter of the range is passed through untouched, and louder peaks are smoothly compressed towards full scale.
+Quiet and normal-volume sound is completely unaffected.
+===================
+*/
+#define LIMITER_THRESHOLD	24576		// 0.75 of full scale
+static inline short S_LimitSample( int val )
+{
+	const int abs_val = (val < 0) ? -val : val;
+
+	if ( abs_val <= LIMITER_THRESHOLD )
+	{
+		return (short)val;
+	}
+
+	const float range = (float)( 0x7fff - LIMITER_THRESHOLD );
+	const int limited = LIMITER_THRESHOLD + (int)( range * tanhf( (abs_val - LIMITER_THRESHOLD) / range ) );
+
+	return (short)( (val < 0) ? -limited : limited );
+}
+
+// Where an update's mix meets what is in the ring already (its start, and its end), the two are crossfaded over a
+// moment instead of one simply following the other. Normally they are the same there (it is the same sound mixed
+// again) and nothing changes, but after a long frame the ring holds the reserve (see S_Update_), mixed a while ago,
+// and going from that to the fresh mix (and back) would click.
+#define MIX_CROSSFADE	64
+static int	s_crossfadeStart = 0, s_crossfadeEnd = 0;
+static qboolean	s_crossfade = qfalse;
+
+static void S_WriteLinearBlastStereo16 ( int time )
 {
 	int		i;
-	int		val;
+
+	if ( s_crossfade && ( time < s_crossfadeStart + MIX_CROSSFADE || time + ( snd_linear_count >> 1 ) > s_crossfadeEnd - MIX_CROSSFADE ) )
+	{
+		for (i=0 ; i<snd_linear_count ; i+=2, time++)
+		{
+			int w = MIX_CROSSFADE;	// how much of the new mix, of MIX_CROSSFADE
+			if ( time - s_crossfadeStart < w )	w = time - s_crossfadeStart + 1;
+			if ( s_crossfadeEnd - time < w )	w = s_crossfadeEnd - time;
+			const int l = S_LimitSample( snd_p[i]>>8 );
+			const int r = S_LimitSample( snd_p[i+1]>>8 );
+			if ( w >= MIX_CROSSFADE )
+			{
+				snd_out[i] = l;
+				snd_out[i+1] = r;
+			}
+			else
+			{
+				snd_out[i]   = (short)( snd_out[i]   + ( ( l - snd_out[i]   ) * w ) / MIX_CROSSFADE );
+				snd_out[i+1] = (short)( snd_out[i+1] + ( ( r - snd_out[i+1] ) * w ) / MIX_CROSSFADE );
+			}
+		}
+		return;
+	}
 
 	for (i=0 ; i<snd_linear_count ; i+=2)
 	{
-		val = snd_p[i]>>8;
-		if (val > 0x7fff)
-			snd_out[i] = 0x7fff;
-		else if (val < (short)0x8000)
-			snd_out[i] = (short)0x8000;
-		else
-			snd_out[i] = val;
-
-		val = snd_p[i+1]>>8;
-		if (val > 0x7fff)
-			snd_out[i+1] = 0x7fff;
-		else if (val < (short)0x8000)
-			snd_out[i+1] = (short)0x8000;
-		else
-			snd_out[i+1] = val;
+		snd_out[i]   = S_LimitSample( snd_p[i]>>8 );
+		snd_out[i+1] = S_LimitSample( snd_p[i+1]>>8 );
 	}
 }
-#else
-unsigned int uiMMXAvailable = 0;	// leave as 32 bit
-__declspec( naked ) void S_WriteLinearBlastStereo16 (void)
-{
-	__asm {
-
- push edi
- push ebx
-
- mov ecx,ds:dword ptr[snd_linear_count]		// snd_linear_count is always even at this point, but not nec. mult of 4
- mov ebx,ds:dword ptr[snd_p]
- mov edi,ds:dword ptr[snd_out]
-
- cmp		[uiMMXAvailable], dword ptr 0
- je			NoMMX
-
-// writes 8 items (128 bits) per loop pass...
-//
- cmp		ecx,8
- jb			NoMMX
-
-LWLBLoopTop_MMX:
-
- movq		mm1,[-8+ebx+ecx*4]
- movq		mm0,[-16+ebx+ecx*4]
- movq		mm3,[-24+ebx+ecx*4]
- movq		mm2,[-32+ebx+ecx*4]
- psrad		mm0,8
- psrad		mm1,8
- psrad		mm2,8
- psrad		mm3,8
- packssdw	mm0,mm1
- packssdw	mm2,mm3
- movq		[-8+edi+ecx*2],mm0
- movq		[-16+edi+ecx*2],mm2
-
- sub		ecx,8
- cmp		ecx,8
- jae		LWLBLoopTop_MMX
-
- emms
-
- // now deal with any remaining count...
- //
- jecxz		LExit
-
-NoMMX:
-
-// writes 2 items (32 bits) per loop pass...
-//
-LWLBLoopTop:
- mov eax,ds:dword ptr[-8+ebx+ecx*4]
- sar eax,8
- cmp eax,07FFFh
- jg LClampHigh
- cmp eax,0FFFF8000h
- jnl LClampDone
- mov eax,0FFFF8000h
- jmp LClampDone
-LClampHigh:
- mov eax,07FFFh
-LClampDone:
- mov edx,ds:dword ptr[-4+ebx+ecx*4]
- sar edx,8
- cmp edx,07FFFh
- jg LClampHigh2
- cmp edx,0FFFF8000h
- jnl LClampDone2
- mov edx,0FFFF8000h
- jmp LClampDone2
-LClampHigh2:
- mov edx,07FFFh
-LClampDone2:
- shl edx,16
- and eax,0FFFFh
- or edx,eax
- mov ds:dword ptr[-4+edi+ecx*2],edx
-
- sub ecx,2
- jnz LWLBLoopTop
-
-LExit:
- pop ebx
- pop edi
- ret
-	}
-}
-
-#endif
 
 
 void S_TransferStereo16 (unsigned long *pbuf, int endtime)
@@ -171,7 +125,7 @@ void S_TransferStereo16 (unsigned long *pbuf, int endtime)
 		snd_linear_count <<= 1;
 
 	// write a linear blast of samples
-		S_WriteLinearBlastStereo16 ();
+		S_WriteLinearBlastStereo16 ( ls_paintedtime );
 
 		snd_p += snd_linear_count;
 		ls_paintedtime += (snd_linear_count>>1);
@@ -203,6 +157,9 @@ void S_TransferPaintBuffer(int endtime)
 
 	pbuf = (unsigned long *)dma.buffer;
 
+	// the device takes what is in the ring from another thread: hold it off while writing (only this, the copy, so
+	// it is never kept waiting for the mixing)
+	SNDDMA_BeginPainting ();
 
 	if ( s_testsound->integer ) {
 		int		i;
@@ -234,11 +191,7 @@ void S_TransferPaintBuffer(int endtime)
 			{
 				val = *p >> 8;
 				p+= step;
-				if (val > 0x7fff)
-					val = 0x7fff;
-				else if (val < (short)0x8000)
-					val = (short)0x8000;
-				out[out_idx] = (short)val;
+				out[out_idx] = S_LimitSample( val );
 				out_idx = (out_idx + 1) & out_mask;
 			}
 		}
@@ -247,17 +200,15 @@ void S_TransferPaintBuffer(int endtime)
 			unsigned char *out = (unsigned char *) pbuf;
 			while (count--)
 			{
-				val = *p >> 8;
+				val = S_LimitSample( *p >> 8 );
 				p+= step;
-				if (val > 0x7fff)
-					val = 0x7fff;
-				else if (val < (short)0x8000)
-					val = (short)0x8000;
 				out[out_idx] = (short)((val>>8) + 128);
 				out_idx = (out_idx + 1) & out_mask;
 			}
 		}
 	}
+
+	SNDDMA_Submit ();
 }
 
 
@@ -279,17 +230,26 @@ static void S_PaintChannelFrom16( channel_t *ch, const sfx_t *sfx, int count, in
 
 	pSamplesDest	= &paintbuffer[ bufferOffset ];
 
+	if ( !( ch->doppler && ch->dopplerScale > 1 ) )
+	{
+		// (the usual case: one sample after another)
+		const short *pSrc = sfx->pSoundData + sampleOffset;
+		for ( int i=0 ; i<count ; i++ )
+		{
+			iData = pSrc[i];
+			pSamplesDest[i].left  += (iData * iLeftVol )>>8;
+			pSamplesDest[i].right += (iData * iRightVol)>>8;
+		}
+		return;
+	}
+
 	for ( int i=0 ; i<count ; i++ )
 	{
 		iData = sfx->pSoundData[ (int)ofst ];
 
 		pSamplesDest[i].left  += (iData * iLeftVol )>>8;
 		pSamplesDest[i].right += (iData * iRightVol)>>8;
-		if (ch->doppler && ch->dopplerScale > 1) {
-			ofst += 1 * ch->dopplerScale;
-		} else {
-			ofst++;
-		}
+		ofst += ch->dopplerScale;
 	}
 }
 
@@ -367,7 +327,7 @@ void ChannelPaint(channel_t *ch, sfx_t *sc, int count, int sampleOffset, int buf
 
 
 
-void S_PaintChannels( int endtime ) {
+void S_PaintChannels( int endtime, qboolean bReserve ) {
 	int 	i;
 	int 	end;
 	channel_t *ch;
@@ -376,8 +336,15 @@ void S_PaintChannels( int endtime ) {
 	int		sampleOffset;
 	int	normal_vol,voice_vol;
 
-	snd_vol = normal_vol = s_volume->value*256;
-	voice_vol  = (int)(s_volumeVoice->value*256);
+	// (a sample times a volume of 255 times more than 256 doesn't fit in 32 bits)
+	snd_vol = normal_vol = Com_Clampi( 0, 256, (int)( s_volume->value*256 ) );
+	voice_vol = Com_Clampi( 0, 256, (int)( s_volumeVoice->value*256 ) );
+
+	// the update's mix is crossfaded with the ring where it starts and ends (unless it is recorded, which takes it as it
+	// is); the reserve carries on from it as it is
+	s_crossfade = (qboolean)( !bReserve && !CL_VideoRecording() );
+	s_crossfadeStart = s_paintedtime;
+	s_crossfadeEnd = endtime;
 
 //Com_Printf ("%i to %i\n", s_paintedtime, endtime);
 	while ( s_paintedtime < endtime ) {
@@ -440,6 +407,14 @@ void S_PaintChannels( int endtime ) {
 					sampleOffset = ltime % sc->iSoundLengthInSamples;
 				} else {
 					sampleOffset = ltime - ch->startSample;
+					if ( sampleOffset < 0 ) {
+						// the sound starts later in this piece
+						ltime -= sampleOffset;
+						sampleOffset = 0;
+						if ( ltime >= end ) {
+							break;
+						}
+					}
 				}
 
 				count = end - ltime;

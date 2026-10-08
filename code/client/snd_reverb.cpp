@@ -68,7 +68,7 @@ typedef struct
 	int		pos;
 } delay_t;
 
-static struct
+typedef struct
 {
 	delay_t	line[NUM_LINES];
 	float	lowPassState[NUM_LINES];
@@ -87,7 +87,11 @@ static struct
 	// across a block, because a step in a delay or a level is a click (and the room changes all the time)
 	float	lastPreSamples, lastErFirst, lastErLevel, lastTailLevel;
 	bool	ready;
-} sR;
+} reverbState_t;
+
+static reverbState_t	sR;
+static reverbState_t	sMark;		// sR as it was at S_Reverb_Mark
+static bool				sMarkValid = false;
 
 static void Delay_Alloc( delay_t *pDelay, int size )
 {
@@ -144,6 +148,7 @@ void S_Reverb_Init( int sampleRate )
 	sR.target = sR.current;
 	sR.lastPreSamples = -1.0f;	// (the first block starts where it ends)
 	sR.ready = true;
+	sMarkValid = false;
 }
 
 void S_Reverb_SetTarget( const reverbParams_t *pParams )
@@ -154,6 +159,70 @@ void S_Reverb_SetTarget( const reverbParams_t *pParams )
 void S_Reverb_SetNow( const reverbParams_t *pParams )
 {
 	sR.target = sR.current = *pParams;
+	sMark.current = *pParams;
+}
+
+static void Delay_Copy( delay_t *pDst, const delay_t *pSrc )
+{
+	if ( pDst->size != pSrc->size || !pDst->pBuf )
+	{
+		free( pDst->pBuf );
+		pDst->pBuf = (float *)malloc( pSrc->size * sizeof( float ) );
+		pDst->size = pSrc->size;
+	}
+	if ( pDst->pBuf && pSrc->pBuf )
+		memcpy( pDst->pBuf, pSrc->pBuf, pSrc->size * sizeof( float ) );
+	pDst->pos = pSrc->pos;
+}
+
+// everything the reverb has in it and where it has got to (not where it is heading: that is set from outside)
+static bool Reverb_CopyState( reverbState_t *pDst, const reverbState_t *pSrc )
+{
+	for ( int i = 0; i < NUM_LINES; i++ )
+		Delay_Copy( &pDst->line[i], &pSrc->line[i] );
+	for ( int i = 0; i < NUM_DIFFUSERS; i++ )
+		Delay_Copy( &pDst->diffuser[i], &pSrc->diffuser[i] );
+	Delay_Copy( &pDst->preDelay, &pSrc->preDelay );
+	Delay_Copy( &pDst->earlyReflections, &pSrc->earlyReflections );
+
+	memcpy( pDst->lowPassState, pSrc->lowPassState, sizeof( pDst->lowPassState ) );
+	memcpy( pDst->lineGain, pSrc->lineGain, sizeof( pDst->lineGain ) );
+	memcpy( pDst->lineLowPass, pSrc->lineLowPass, sizeof( pDst->lineLowPass ) );
+	pDst->rate = pSrc->rate;
+	pDst->current = pSrc->current;
+	pDst->tailGain = pSrc->tailGain;
+	pDst->lastPreSamples = pSrc->lastPreSamples;
+	pDst->lastErFirst = pSrc->lastErFirst;
+	pDst->lastErLevel = pSrc->lastErLevel;
+	pDst->lastTailLevel = pSrc->lastTailLevel;
+	pDst->ready = pSrc->ready;
+
+	for ( int i = 0; i < NUM_LINES; i++ )
+		if ( !pDst->line[i].pBuf ) return false;
+	for ( int i = 0; i < NUM_DIFFUSERS; i++ )
+		if ( !pDst->diffuser[i].pBuf ) return false;
+	return pDst->preDelay.pBuf && pDst->earlyReflections.pBuf;
+}
+
+void S_Reverb_Mark( void )
+{
+	sMarkValid = sR.ready && Reverb_CopyState( &sMark, &sR );
+}
+
+int S_Reverb_Rewind( void )
+{
+	if ( !sMarkValid )
+		return 0;
+
+	const reverbParams_t target = sR.target;
+	if ( !Reverb_CopyState( &sR, &sMark ) )
+	{
+		sR.ready = false;	// (out of memory: silence rather than garbage)
+		sMarkValid = false;
+		return 0;
+	}
+	sR.target = target;
+	return 1;
 }
 
 // what the filters of the lines have to be for the current room
@@ -261,7 +330,9 @@ void S_Reverb_Process( const float *pIn, int n, float *pOutLeft, float *pOutRigh
 
 	for ( int s = 0; s < n; s++ )
 	{
-		const float x = pIn[s];
+		// (the tiny offset, far below anything audible, keeps the fading tail from ending up as denormal numbers,
+		// which are very slow to work with on some processors)
+		const float x = pIn[s] + 1e-18f;
 
 		preNow += preStep;
 		erNow += erStep;
