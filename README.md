@@ -16,48 +16,104 @@ that nobody needs any more. Fixes that suit upstream are sent back to it as pull
 
 | Game | Single player | Multiplayer |
 | - | - | - |
-| Jedi Academy | Works, with all the features below | Builds and runs as in OpenJK; none of the new features are in it yet |
-| Jedi Outcast | Works, with all the features below | Works (1.04), see [Jedi Outcast multiplayer](#jedi-outcast-multiplayer) |
+| Jedi Academy | Works, with all the features below | Works, with the sound improvements below; the other new features are single player only for now |
+| Jedi Outcast | Works, with all the features below | Works (1.04), with the sound improvements below, see [Jedi Outcast multiplayer](#jedi-outcast-multiplayer) |
 
 Shin is developed and tested on Linux. Windows is kept supported by the build system and the platform code, but is not
 yet tested by the author. macOS code paths still compile but nothing is packaged for it.
 
 ## What is new
 
-### Screen
-- **Your screen's own resolution by default**, in a borderless fullscreen window, so there is no mode switch.
-  Ultrawide and any other aspect ratio work.
-- The **resolution list in the video menu** comes from what your display reports instead of a fixed list of 4:3
-  modes, with a "Desktop resolution" entry.
-- **Widescreen done properly**: horizontal-plus field of view, menus and HUD that keep their proportions in the
-  middle of a wide screen instead of being stretched, and videos shown with black bars instead of stretched.
-  The **mouse cursor in the menus goes over the whole screen**, and the **HUD sticks to the corners of the screen**
-  (health and armor to the left, force and ammo to the right) instead of staying in the 4:3 area.
+Everything here works out of the box. Where there is a setting, the menu entry is given, and for the curious the
+console variable is in brackets (you can type those in the console, opened with Shift+Escape or the key above Tab).
 
-### Shadows and draw distance
-- **Stencil shadows (`cg_shadows 2`) work properly**: characters are no longer darkened by their own shadow, the
-  shadows have soft edges, follow the light, fade with how much directional light there is, and no longer leak through
-  walls or reach down to height 0. See [docs/shadows.md](docs/shadows.md).
-- **Grass and bushes are drawn about three times further** (`r_surfaceSpriteRange`), widescreen no longer shortens
-  that, and characters keep their detailed models twice as far away (`r_lodscale`).
+### Screen
+- **The game starts at your screen's own resolution**, filling the screen without switching display modes
+  (a borderless window). Ultrawide and any other screen shape work.
+- **Setup > Video > Video Mode** lists the resolutions your screen really supports, plus "Desktop resolution".
+- **Widescreen done properly**: on a wide screen you see more to the sides (instead of less above and below), the menus
+  and the HUD keep their shape instead of being stretched, and videos get black bars instead of being stretched. The
+  mouse pointer in the menus reaches the whole screen, and the HUD sits in the corners of the screen (health and
+  armour on the left, force and ammo on the right).
+
+### Smooth at any frame rate (single player)
+- **The frame rate follows your monitor**: vsync is on, so a 144 Hz monitor gets 144 frames per second with no
+  tearing (the line across the picture when the screen and the game are out of step). If a frame comes late, the game
+  shows it a little torn instead of dropping to half the frame rate, where the graphics driver allows it. You can
+  still set your own limit (`com_maxfps`), for example just under the refresh rate on a G-Sync or FreeSync monitor.
+- **The frame limit is exact**: 144 gives 144 frames per second (it used to give 166).
+- Old settings files that held the game at 125 frames per second with tearing are corrected once, the first time you
+  play.
+- **The same game at any frame rate**: footsteps, the bobbing of the view, leaning and a few other things used to run
+  faster or slower with the frame rate. They don't any more.
+- **Smoother movement**: running had a slight wobble twenty times a second. It's gone.
+
+### Picture quality (single player)
+- **Smooth edges**: Setup > Video > **Anti-Aliasing** (Off, 2x, 4x, 8x) takes the jagged "staircase" off the edges of
+  everything. The quality presets set it for you. If your graphics card can't do the level you picked, it uses the
+  highest it can. With it on, leaves, fences and grates get smooth edges too.
+- **Sharper textures at an angle**: Setup > More Video > **Anisotropic Filtering** lets you choose from Off to 16x
+  (higher keeps floors and walls sharp when you look along them).
+- Textures stay sharper in the distance, because their smaller versions are made with a better filter.
+- See [docs/antialiasing.md](docs/antialiasing.md).
+
+### Shadows and draw distance (single player)
+- **"Volumetric" shadows work properly** (Setup > More Video > Shadows): characters are no longer darkened by their
+  own shadow, the shadows have soft edges, fall away from the light, are lighter where there is little direct light,
+  and no longer show through walls or stretch far down below the character. See [docs/shadows.md](docs/shadows.md).
+- **Grass and bushes are drawn about three times further away**, and characters keep their detailed look twice as
+  far away.
+
+### Mouse (single player)
+- **The sensitivity slider suits today's mice**: it goes from 0.05 to 30 (it used to start at 2, which was already
+  too fast for a modern mouse), and it is finer at the slow end where you need it. The default is slower (1.5).
+- **Setup > Controls > Mouse/Joystick > Mouse DPI**: tell the game the DPI of your mouse (it is on the box or in the
+  mouse's own software) and a sensitivity feels the same on any mouse. Old settings keep working. See
+  [docs/mouse.md](docs/mouse.md).
 
 ### Sound
-- The game **mixes at your sound device's own rate** (usually 48 kHz) instead of 22 or 44.1 kHz, so the system
-  doesn't convert the sound again. The old "sound quality" setting is gone from the menu because it no longer means
-  anything; the `s_khz` console variable is still there for anyone who wants to force a rate.
-- **Better resampling** of the game's sounds (a band-limited windowed-sinc resampler replaces the nearest-neighbour
-  one), and a soft limiter instead of hard clipping when many loud sounds play at once.
-- **Fixed the crackling in videos**, such as the opening logos, caused by music and video sound fighting over the same
-  buffer.
-- **Lower and adaptive latency**: sounds start roughly half as long after they happen as they used to.
-- **Binaural 3D sound for headphones** (Setup > Sound > Headphone 3D, `s_hrtf`, off by default): sounds are
-  positioned around your head, including from behind, above and below. See [docs/hrtf.md](docs/hrtf.md).
-- **The sound of the room** (Setup > Sound > Room echo, `s_reverb`, on by default): sounds echo like the room they
-  are in, are muffled by walls between you and them, and muffled under water, worked out as you play so it works in
-  every level. See [docs/reverb.md](docs/reverb.md).
-- The game can keep playing sound when its window isn't in front (`s_muteWhenUnfocused 0`).
+
+The items marked (single player) are only in the single player games; the rest are in multiplayer too.
+
+- **More sounds at once**: up to 128 sounds play together instead of 32, so in a big fight sounds are no longer cut
+  off. (In a test with 31 bots fighting in multiplayer, the old limit cut off about 25 sounds every second.)
+- **Clearer sound**: the old low quality sound effects are converted carefully so they no longer sound harsh or
+  gritty, and when many loud sounds play at once they are gently held back instead of distorting. In single player
+  the game also plays at your sound card's own quality (usually 48 kHz) instead of converting everything down and up
+  again.
+- **Headphone 3D** (single player; Setup > Sound > Headphone 3D, off by default): with headphones you hear sounds
+  from behind, above and below, not only from the left and the right. On speakers leave it off.
+  See [docs/hrtf.md](docs/hrtf.md).
+- **Room echo** (single player; Setup > Sound > Room echo, on by default): sounds echo like the room you are in, a
+  big hangar differently from a small corridor, sounds behind a wall are muffled, and everything is muffled under
+  water. It is worked out as you play, so it works in every level, mods included. Dialogue in cutscenes stays clear,
+  without echo. See [docs/reverb.md](docs/reverb.md).
+- **Sounds come sooner** (single player): about half the delay there was between something happening and hearing it.
+- **No crackling or stutter**: the crackling when music and a video play together (like the opening logos) is gone.
+  When the game freezes for a moment (saving, loading a weapon, a slow disk), the sound carries on smoothly instead of
+  repeating the last moment or cutting out.
+- **Mouths move with the words**: characters' lip movements follow their dialogue properly again.
+- **Combat music changes land on the beat**: the music now joins in at the exact points it was written for.
+- **Switching windows** (Alt+Tab): the game goes quiet while it is in the background and comes back cleanly. If you
+  want to keep hearing it, set `s_muteWhenUnfocused 0`.
+- **Uses about a third of the processor time it did** for mixing, which helps keep the frame rate up in big fights
+  (`s_mixaheadAuto`).
+- Broken sound files in mods no longer crash the game.
+- The old "sound quality" menu entry is gone from single player because the game always uses the best quality now
+  (`s_khz` is still there to force a rate).
 
 ### Playing
+- **Escape skips cutscenes**, both videos and the ones the game plays itself. Handy for a second playthrough.
+
+### Under the hood
+- The window, input and sound use **SDL3**. SDL2 is no longer supported. SDL3 is used from the system if it is
+  installed, or downloaded and built on the first build.
+- **One command builds everything**: `build.sh` on Linux and `build.ps1` on Windows check that you have what is needed,
+  tell you how to install what is missing, and build all the games. See [Building](#building).
+- The old OpenAL/EAX sound backend, the macOS application bundles and the leftovers of old Visual Studio project
+  generation are removed.
+
+## Playing
 - **Escape skips cutscenes**, both videos and the ones the game plays itself. Handy for testing and for second playthroughs.
 
 ### Under the hood
