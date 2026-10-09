@@ -196,8 +196,8 @@ static VkPipeline CreatePipeline( const vkPipelineKey_t *key )
 	VkPipelineRasterizationStateCreateInfo raster = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
 	raster.polygonMode = ( key->wireframe && vk.features.fillModeNonSolid ) ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
 	raster.cullMode = key->cullMode == 1 ? VK_CULL_MODE_FRONT_BIT : ( key->cullMode == 2 ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE );
-	// (the projection is flipped to Vulkan's Y axis, which turns the winding around)
-	raster.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	// (OpenGL's counter clockwise; the Y flip of the projection and Vulkan's Y down framebuffer cancel out)
+	raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	raster.depthBiasEnable = key->polyOffset ? VK_TRUE : VK_FALSE;
 	raster.lineWidth = 1.0f;
 

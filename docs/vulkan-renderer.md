@@ -34,7 +34,7 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
       driven by `RE_BeginFrame` / `RE_EndFrame`; vsync and resize / `vid_restart`.
 - [x] 4. Textures: `qglTexImage2D`, `TexSubImage2D`, mips, filters, wrap, anisotropy -> `VkImage` + samplers.
 - [x] 5. 2D drawing (immediate mode + `DrawStretchPic`): menus and console visible.
-- [ ] 6. 3D: matrices, depth, blend, alpha test, cull, multitexture + texenv, fog, clip plane, polygon offset, scissor,
+- [x] 6. 3D: matrices, depth, blend, alpha test, cull, multitexture + texenv, fog, clip plane, polygon offset, scissor,
       stencil (shadows), depth range (weapon), vertex arrays.
 - [ ] 7. `ReadPixels` (screenshots), `CopyTexSubImage2D` (screen warp / glow / cinematics), gamma, `DrawStretchRaw`.
 - [ ] 8. MSAA, anisotropy, validation layers clean, performance pass, Wine/Windows check.
