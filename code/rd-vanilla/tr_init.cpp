@@ -747,11 +747,19 @@ static void InitOpenGL( void )
 
 	if ( glConfig.vidWidth == 0 )
 	{
+#ifdef RD_VULKAN
+		windowDesc_t windowDesc = { GRAPHICS_API_VULKAN };
+#else
 		windowDesc_t windowDesc = { GRAPHICS_API_OPENGL };
+#endif
 		memset(&glConfig, 0, sizeof(glConfig));
 
 		window = ri.WIN_Init(&windowDesc, &glConfig);
 
+#ifdef RD_VULKAN
+		// Vulkan device, swapchain and the capabilities the renderer asks glConfig about
+		VK_Init( &glConfig );
+#else
 		// get our config strings
 		glConfig.vendor_string = (const char *)qglGetString (GL_VENDOR);
 		glConfig.renderer_string = (const char *)qglGetString (GL_RENDERER);
@@ -766,6 +774,7 @@ static void InitOpenGL( void )
 
 		// initialize extensions
 		GLimp_InitExtensions( );
+#endif
 
 		// set default state
 		GL_SetDefaultState();

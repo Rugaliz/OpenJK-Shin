@@ -21,7 +21,7 @@ if(NOT InOpenJK)
 	message(FATAL_ERROR "Use the top-level cmake script!")
 endif(NOT InOpenJK)
 
-if(BuildSPRdVanilla OR BuildJK2SPRdVanilla)
+if(BuildSPRdVanilla OR BuildJK2SPRdVanilla OR BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 
 	set(SPRDVanillaRendererIncludeDirectories ${SPDir})
 	set(SPRDVanillaRendererIncludeDirectories
@@ -34,7 +34,8 @@ if(BuildSPRdVanilla OR BuildJK2SPRdVanilla)
 	# Modular Renderer crap (let's hope this works..)
 
 	# Defines
-	set(SPRDVanillaDefines ${SharedDefines} "RENDERER" "_JK2EXE")
+	set(SPRDBaseDefines ${SharedDefines} "RENDERER" "_JK2EXE")
+	set(SPRDVanillaDefines ${SPRDBaseDefines})
 
 	# Files
 
@@ -151,6 +152,9 @@ if(BuildSPRdVanilla OR BuildJK2SPRdVanilla)
 	source_group("rd-common" FILES ${SPRDVanillaRdCommonFiles})
 	set(SPRDVanillaFiles ${SPRDVanillaFiles} ${SPRDVanillaRdCommonFiles})
 
+	# (the Vulkan renderer module only needs the OpenGL headers, not the library)
+	set(SPRDVulkanLibrariesBase ${SPRDVanillaRendererLibraries})
+
 	find_package(OpenGL REQUIRED)
 	set(SPRDVanillaRendererIncludeDirectories ${SPRDVanillaRendererIncludeDirectories} ${OPENGL_INCLUDE_DIR})
 	set(SPRDVanillaRendererLibraries ${SPRDVanillaRendererLibraries} ${OPENGL_LIBRARIES})
@@ -195,4 +199,55 @@ if(BuildSPRdVanilla OR BuildJK2SPRdVanilla)
 		add_sp_renderer_project(${JK2SPVanillaRenderer} "JK2 SP Vanilla Renderer" ${JK2SPEngine} ${JK2InstallDir} ${JK2SPClientComponent})
 	endif(BuildJK2SPRdVanilla)
 
-endif(BuildSPRdVanilla OR BuildJK2SPRdVanilla)
+endif(BuildSPRdVanilla OR BuildJK2SPRdVanilla OR BuildSPRdVulkan OR BuildJK2SPRdVulkan)
+
+# The Vulkan renderer module is these same sources compiled with RD_VULKAN, plus the Vulkan layer in rd-vulkan
+# (see docs/vulkan-renderer.md).
+if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
+	find_package(Vulkan)
+	if(NOT Vulkan_FOUND)
+		message(STATUS "Vulkan headers/loader not found, not building the Vulkan renderer module")
+	else()
+		set(SPRDVulkanFiles
+			${SPRDVanillaG2Files}
+			${SPRDVanillaCommonFiles}
+			${SPRDVanillaCommonSafeFiles}
+			${SPRDVanillaMainFiles}
+			${SPRDVanillaRdCommonFiles}
+			"${SPDir}/rd-vulkan/qgl.h"
+			"${SPDir}/rd-vulkan/vk_local.h"
+			"${SPDir}/rd-vulkan/vk_gl.cpp"
+			"${SPDir}/rd-vulkan/vk_init.cpp"
+			)
+		source_group("vulkan" FILES ${SPRDVulkanFiles})
+
+		set(SPRDVulkanIncludeDirectories "${SPDir}/rd-vulkan" ${SPRDVanillaRendererIncludeDirectories} ${Vulkan_INCLUDE_DIRS})
+		set(SPRDVulkanLibraries ${SPRDVulkanLibrariesBase} Vulkan::Vulkan)
+
+		function(add_sp_vulkan_renderer_project ProjectName Label InstallDir Component Defines)
+			add_library(${ProjectName} SHARED ${SPRDVulkanFiles})
+			if(NOT MSVC)
+				set_target_properties(${ProjectName} PROPERTIES PREFIX "")
+			endif()
+
+			if(WIN32)
+				install(TARGETS ${ProjectName} RUNTIME DESTINATION ${InstallDir} COMPONENT ${Component})
+			else(WIN32)
+				install(TARGETS ${ProjectName} LIBRARY DESTINATION ${InstallDir} COMPONENT ${Component})
+			endif()
+
+			set_target_properties(${ProjectName} PROPERTIES COMPILE_DEFINITIONS "${Defines}")
+			set_property(TARGET ${ProjectName} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
+			set_target_properties(${ProjectName} PROPERTIES INCLUDE_DIRECTORIES "${SPRDVulkanIncludeDirectories}")
+			set_target_properties(${ProjectName} PROPERTIES PROJECT_LABEL ${Label})
+			target_link_libraries(${ProjectName} ${SPRDVulkanLibraries})
+		endfunction(add_sp_vulkan_renderer_project)
+
+		if(BuildSPRdVulkan)
+			add_sp_vulkan_renderer_project(${SPRDVulkanRenderer} "SP Vulkan Renderer" ${JKAInstallDir} ${JKASPClientComponent} "${SPRDBaseDefines};RD_VULKAN")
+		endif(BuildSPRdVulkan)
+		if(BuildJK2SPRdVulkan)
+			add_sp_vulkan_renderer_project(${JK2SPVulkanRenderer} "JK2 SP Vulkan Renderer" ${JK2InstallDir} ${JK2SPClientComponent} "${SPRDBaseDefines};JK2_MODE;RD_VULKAN")
+		endif(BuildJK2SPRdVulkan)
+	endif()
+endif(BuildSPRdVulkan OR BuildJK2SPRdVulkan)

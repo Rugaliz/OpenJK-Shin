@@ -29,7 +29,12 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "tr_common.h"
 #include "tr_public.h"
 #include "mdx_format.h"
+#ifdef RD_VULKAN
+#include "../rd-vulkan/qgl.h"	// the Vulkan renderer module: qgl* calls are answered by rd-vulkan/vk_gl.cpp
+#include "../rd-vulkan/vk_local.h"
+#else
 #include "qgl.h"
+#endif
 
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
 typedef unsigned int glIndex_t;

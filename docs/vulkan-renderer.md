@@ -28,7 +28,7 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
 - [x] 0. This plan.
 - [x] 1. Engine plumbing: `GRAPHICS_API_VULKAN` window (SDL_WINDOW_VULKAN), renderer imports for instance extensions,
       surface creation, drawable size; `REF_API_VERSION` 20.
-- [ ] 2. CMake targets `rdsp-vulkan` / `rdjosp-vulkan` (option `BuildSPRdVulkan`, needs the Vulkan headers and `glslc`),
+- [x] 2. CMake targets `rdsp-vulkan` / `rdjosp-vulkan` (option `BuildSPRdVulkan`, needs the Vulkan headers and `glslc`),
       `RD_VULKAN` build with a null `qgl` layer so it links and starts (blank window).
 - [ ] 3. Vulkan core: instance, device, swapchain, per-frame sync, depth/stencil (+MSAA) target, clear and present
       driven by `RE_BeginFrame` / `RE_EndFrame`; vsync and resize / `vid_restart`.
