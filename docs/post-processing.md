@@ -3,8 +3,13 @@
 The single player renderer (`code/rd-vanilla`) is the original fixed function OpenGL 1.x one. It can now also run
 GLSL shader programs where that is useful, and every use keeps the original way of drawing as its fallback: if the
 graphics card or driver does not support what is needed, or a shader does not build, the old drawing is used and
-nothing else changes. All of it is off by default, nothing changes unless you turn it on. Type the settings in the
-console (the key left of 1, or Shift+Esc) or put them in your config file; they are saved.
+nothing else changes. All of it is off by default, nothing changes unless you turn it on. The menu is the easy way; the settings can also be typed in the
+console (the key left of 1, or Shift+Esc) or put in your config file, and they are saved.
+
+You do not need the console: **Setup > More Video** has a row for each of them (Ambient Occlusion, Bloom, SMAA Edge
+Smoothing, Shader Dynamic Lights), which take effect at once. A row only shows up if what it needs is there (SMAA needs
+OpenGL 3.3, the rest OpenGL 2.0). To make room, the rows of that page are a little closer together than before, and
+in Jedi Academy the panel is taller.
 
 `r_glsl 0` (then `vid_restart`) turns all of it off. The start-up log says what was found: `...using GLSL`,
 `...using post processing`.

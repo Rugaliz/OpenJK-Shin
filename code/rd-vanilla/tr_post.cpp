@@ -230,8 +230,15 @@ static const char *postCompositeFragmentSource =
 	"	gl_FragColor = vec4( colour, 1.0 );\n"
 	"}\n";
 
+static void Post_SetAvailable( const char *name, qboolean available ) {
+	ri.Cvar_Get( name, "0", 0 );
+	ri.Cvar_Set( name, available ? "1" : "0" );	// what the menus look at to show the rows for what needs it
+}
+
 void R_Post_Init( void ) {
 	memset( &post, 0, sizeof( post ) );
+	Post_SetAvailable( "r_postAvail", qfalse );
+	Post_SetAvailable( "r_smaaAvail", qfalse );
 
 	if ( !R_GLSL_Available() || !qglActiveTextureARB || !qglMultiTexCoord2fARB ) {
 		return;
@@ -264,6 +271,8 @@ void R_Post_Init( void ) {
 			Com_Printf( "...SMAA needs OpenGL 3.3\n" );
 		}
 	}
+	Post_SetAvailable( "r_postAvail", qtrue );
+	Post_SetAvailable( "r_smaaAvail", post.smaaOk );
 }
 
 static GLuint Post_NewTexture( GLint internalFormat, GLenum format, GLenum type, int width, int height ) {
