@@ -36,13 +36,37 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
 - [x] 5. 2D drawing (immediate mode + `DrawStretchPic`): menus and console visible.
 - [x] 6. 3D: matrices, depth, blend, alpha test, cull, multitexture + texenv, fog, clip plane, polygon offset, scissor,
       stencil (shadows), depth range (weapon), vertex arrays.
-- [ ] 7. `ReadPixels` (screenshots), `CopyTexSubImage2D` (screen warp / glow / cinematics), gamma, `DrawStretchRaw`.
-- [ ] 8. MSAA, anisotropy, validation layers clean, performance pass, Wine/Windows check.
+- [x] 7. `ReadPixels` (screenshots), `CopyTexImage2D` / `CopyTexSubImage2D` (distortion effects), depth read back (flares), cinematics (`DrawStretchRaw`). Gamma is done by the renderer on the textures, as in the OpenGL one.
+- [~] 8. Done: MSAA (with alpha to coverage and sample shading), anisotropy, vsync modes, `vid_restart` and mode changes, a pipeline cache kept between runs, 3440x1440 at 8x MSAA reaches the 250 fps cap. Still to do: run with the validation layer (`r_vkValidation 1`, needs the layer installed: `vulkan-validation-layers`), Windows / Wine check.
 - [ ] 9. Post effects (SSAO, bloom, SMAA, shader dynamic lights) natively in Vulkan; menu rows show only when available.
 - [ ] 10. Docs, README, CI (build the module only when the Vulkan headers and `glslc` exist).
 
 Shaders are GLSL compiled to SPIR-V at build time with `glslc`; the generated SPIR-V is also checked in as a header
 (same idea as `tr_smaa_data.h`) so a Windows build without the Vulkan SDK still works.
+
+## Using it
+
+Build as usual (the module is built when the Vulkan headers are found; `-DBuildSPRdVulkan=OFF` / `-DBuildJK2SPRdVulkan=OFF`
+skip it), then start the game with `+set cl_renderer rdsp-vulkan` (Jedi Academy) or `+set cl_renderer rdjosp-vulkan`
+(Jedi Outcast). `cl_renderer` is saved, `cl_renderer rdsp-vanilla` (`rdjosp-vanilla`) goes back to OpenGL.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `r_ext_multisample` | 0 | Multisampling (2, 4, 8, 16: the highest the graphics card has up to what is asked). Same setting as in OpenGL. |
+| `r_swapInterval`, `r_adaptiveVsync` | as in OpenGL | Vertical sync; 0 shows frames as soon as they are done, 1 waits for the display (with `r_adaptiveVsync` a late frame tears instead of waiting a whole refresh). |
+| `r_vkDevice` | -1 | Which graphics card (the numbers are listed in the log at start-up); -1 takes the best one that can show the window. |
+| `r_vkValidation` | 0 | Turns on the Khronos validation layer if it is installed (for developers). |
+
+The first run of a scene builds pipelines, which can be seen as short stutters; they are kept in `vk_pipeline_cache.bin`
+(next to the config), so the next runs are smooth.
+
+## What is not there yet
+
+* Screen effects (ambient occlusion, bloom, SMAA) and shader dynamic lights: they exist in the OpenGL renderer only, the
+  Setup > More Video rows for them do not show with the Vulkan one (step 9).
+* The dynamic glow (needs old NVIDIA / ARB programs), as in OpenGL on current drivers.
+* Texture compression (the textures are uploaded as RGBA8, the graphics memory use is higher than in OpenGL).
+* Not tried on Windows yet.
 
 ## Status
 
