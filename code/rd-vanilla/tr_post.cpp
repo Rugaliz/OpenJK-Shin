@@ -49,8 +49,10 @@ static struct {
 	int				width, height;		// size of the view the textures below are made for
 	GLuint			sceneTexture;		// copy of the colour of the view
 	GLuint			depthTexture;		// copy of its depth
-	postProgram_t	copy;
-	qboolean		copyFailed;
+	postTarget_t	aoA, aoB;			// the occlusion as it is made, and while it is blurred
+	postProgram_t	composite;			// puts the effects together and draws them over the view
+	postProgram_t	ssao, ssaoBlur;
+	qboolean		failed;				// a program did not build, stop trying
 } post;
 
 static const char *postVertexSource =
@@ -59,12 +61,104 @@ static const char *postVertexSource =
 	"	gl_Position = gl_Vertex;\n"	// the quad is given in clip space
 	"}\n";
 
-static const char *postCopyFragmentSource =
+// the view space position of a pixel, from its depth and the projection matrix of the view
+#define POST_VIEWPOS_SOURCE \
+	"uniform sampler2D uDepth;\n" \
+	"uniform vec4 uProjA;\n"		/* the matrix: [0] [5] [8] [9] */ \
+	"uniform vec2 uProjB;\n"		/* [10] [14] */ \
+	"float viewZ( float depth ) {\n" \
+	"	return -uProjB.y / ( depth * 2.0 - 1.0 + uProjB.x );\n" \
+	"}\n" \
+	"vec3 viewPos( vec2 uv ) {\n" \
+	"	float z = viewZ( texture2D( uDepth, uv ).r );\n" \
+	"	vec2 ndc = uv * 2.0 - 1.0;\n" \
+	"	return vec3( -( ndc.x + uProjA.z ) * z / uProjA.x, -( ndc.y + uProjA.w ) * z / uProjA.y, z );\n" \
+	"}\n"
+
+// Depth below 0.3 is the weapon in front of the player, which the engine draws squeezed into the nearest part of
+// the depth range, so it is left out of the occlusion; a depth of 1 is the sky.
+static const char *postSsaoFragmentSource =
+	"#version 120\n"
+	POST_VIEWPOS_SOURCE
+	"uniform vec2 uSize;\n"
+	"uniform vec4 uParams;\n"		// radius in units, strength, bias
+	"void main() {\n"
+	"	vec2 uv = gl_FragCoord.xy / uSize;\n"
+	"	float depth = texture2D( uDepth, uv ).r;\n"
+	"	if ( depth >= 1.0 || depth < 0.3 ) {\n"
+	"		gl_FragColor = vec4( 1.0 );\n"
+	"		return;\n"
+	"	}\n"
+	"	vec3 p = viewPos( uv );\n"
+	"	vec2 px = 1.0 / uSize;\n"
+	"	vec3 pr = viewPos( uv + vec2( px.x, 0.0 ) );\n"
+	"	vec3 pl = viewPos( uv - vec2( px.x, 0.0 ) );\n"
+	"	vec3 pu = viewPos( uv + vec2( 0.0, px.y ) );\n"
+	"	vec3 pd = viewPos( uv - vec2( 0.0, px.y ) );\n"
+	// the normal from the neighbours on the side of the smaller step in depth, so that it holds at edges
+	"	vec3 dx = abs( pr.z - p.z ) < abs( p.z - pl.z ) ? pr - p : p - pl;\n"
+	"	vec3 dy = abs( pu.z - p.z ) < abs( p.z - pd.z ) ? pu - p : p - pd;\n"
+	"	vec3 n = normalize( cross( dx, dy ) );\n"
+	"	if ( dot( n, p ) > 0.0 ) {\n"
+	"		n = -n;\n"
+	"	}\n"
+	"	float radius = uParams.x;\n"
+	"	float radiusPx = clamp( radius * uProjA.x * 0.5 * uSize.x / -p.z, 3.0, 0.25 * uSize.y );\n"
+	"	float noise = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );\n"
+	"	float occlusion = 0.0;\n"
+	"	for ( int i = 0; i < 16; i++ ) {\n"
+	"		float angle = noise * 6.2831853 + float( i ) * 2.3999632;\n"
+	"		float dist = sqrt( ( float( i ) + 0.5 ) / 16.0 ) * radiusPx;\n"
+	"		vec2 suv = uv + vec2( cos( angle ), sin( angle ) ) * dist / uSize;\n"
+	"		if ( texture2D( uDepth, suv ).r < 0.3 ) {\n"
+	"			continue;\n"
+	"		}\n"
+	"		vec3 v = viewPos( suv ) - p;\n"
+	"		float vv = dot( v, v );\n"
+	"		float falloff = clamp( 1.0 - vv / ( radius * radius ), 0.0, 1.0 );\n"
+	"		occlusion += falloff * max( dot( v, n ) * inversesqrt( vv + 0.0001 ) - uParams.z, 0.0 );\n"
+	"	}\n"
+	"	gl_FragColor = vec4( vec3( clamp( 1.0 - uParams.y * occlusion / 16.0, 0.0, 1.0 ) ), 1.0 );\n"
+	"}\n";
+
+// blurs the occlusion along one axis, across pixels of about the same depth only so that it does not run over edges
+static const char *postSsaoBlurFragmentSource =
+	"#version 120\n"
+	POST_VIEWPOS_SOURCE
+	"uniform sampler2D uAO;\n"
+	"uniform vec2 uSize;\n"
+	"uniform vec2 uDir;\n"
+	"void main() {\n"
+	"	vec2 uv = gl_FragCoord.xy / uSize;\n"
+	"	float centreZ = viewZ( texture2D( uDepth, uv ).r );\n"
+	"	float sum = 0.0;\n"
+	"	float weights = 0.0;\n"
+	"	for ( int i = -4; i <= 4; i++ ) {\n"
+	"		vec2 suv = uv + uDir * float( i ) / uSize;\n"
+	"		float spatial = exp( -float( i * i ) / 8.0 );\n"
+	"		float dz = abs( viewZ( texture2D( uDepth, suv ).r ) - centreZ );\n"
+	"		float w = spatial * max( 1.0 - dz / ( 4.0 + 0.02 * abs( centreZ ) ), 0.0 );\n"
+	"		sum += w * texture2D( uAO, suv ).r;\n"
+	"		weights += w;\n"
+	"	}\n"
+	"	gl_FragColor = vec4( vec3( sum / max( weights, 0.0001 ) ), 1.0 );\n"
+	"}\n";
+
+// the view with the effects on it
+static const char *postCompositeFragmentSource =
 	"#version 120\n"
 	"uniform sampler2D uScene;\n"
+	"uniform sampler2D uAO;\n"
 	"uniform vec4 uRect;\n"			// x, y, width, height of the view in the window
+	"uniform vec2 uMode;\n"			// 1 if the occlusion is on, 1 to show it alone
 	"void main() {\n"
-	"	gl_FragColor = vec4( texture2D( uScene, ( gl_FragCoord.xy - uRect.xy ) / uRect.zw ).rgb, 1.0 );\n"
+	"	vec2 uv = ( gl_FragCoord.xy - uRect.xy ) / uRect.zw;\n"
+	"	vec3 colour = texture2D( uScene, uv ).rgb;\n"
+	"	if ( uMode.x > 0.5 ) {\n"
+	"		float ao = texture2D( uAO, uv ).r;\n"
+	"		colour = uMode.y > 0.5 ? vec3( ao ) : colour * ao;\n"
+	"	}\n"
+	"	gl_FragColor = vec4( colour, 1.0 );\n"
 	"}\n";
 
 void R_Post_Init( void ) {
@@ -107,6 +201,28 @@ static GLuint Post_NewTexture( GLint internalFormat, GLenum format, GLenum type,
 	return texture;
 }
 
+static void Post_FreeTarget( postTarget_t *target ) {
+	if ( target->fbo ) {
+		qglDeleteFramebuffers( 1, &target->fbo );
+	}
+	if ( target->texture ) {
+		qglDeleteTextures( 1, &target->texture );
+	}
+	memset( target, 0, sizeof( *target ) );
+}
+
+static void Post_NewTarget( postTarget_t *target, int width, int height ) {
+	target->texture = Post_NewTexture( GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, width, height );
+	qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	qglGenFramebuffers( 1, &target->fbo );
+	qglBindFramebuffer( GL_FRAMEBUFFER, target->fbo );
+	qglFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target->texture, 0 );
+	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	target->width = width;
+	target->height = height;
+}
+
 static void Post_FreeTargets( void ) {
 	if ( post.sceneTexture ) {
 		qglDeleteTextures( 1, &post.sceneTexture );
@@ -115,6 +231,8 @@ static void Post_FreeTargets( void ) {
 		qglDeleteTextures( 1, &post.depthTexture );
 	}
 	post.sceneTexture = post.depthTexture = 0;
+	Post_FreeTarget( &post.aoA );
+	Post_FreeTarget( &post.aoB );
 	post.width = post.height = 0;
 }
 
@@ -126,6 +244,8 @@ static void Post_EnsureTargets( int width, int height ) {
 	Post_FreeTargets();
 	post.sceneTexture = Post_NewTexture( GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, width, height );
 	post.depthTexture = Post_NewTexture( GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, width, height );
+	Post_NewTarget( &post.aoA, width, height );
+	Post_NewTarget( &post.aoB, width, height );
 	post.width = width;
 	post.height = height;
 }
@@ -168,7 +288,66 @@ static qboolean Post_Wanted( void ) {
 	if ( backEnd.viewParms.isPortal || backEnd.viewParms.viewportWidth < 64 || backEnd.viewParms.viewportHeight < 64 ) {
 		return qfalse;
 	}
-	return (qboolean)( r_postDebug->integer != 0 );
+	return (qboolean)( r_ssao->integer || r_postDebug->integer );
+}
+
+// draws the quad into a target (or the window, with 0), with the viewport set for it
+static void Post_DrawInto( const postTarget_t *target ) {
+	qglBindFramebuffer( GL_FRAMEBUFFER, target->fbo );
+	qglViewport( 0, 0, target->width, target->height );
+	Post_Quad();
+}
+
+/*
+================
+Post_Ssao
+
+Ambient occlusion from the depth of the view: how much of the space around a pixel, in a sphere of r_ssaoRadius
+units, is taken by surfaces in front of it. Leaves it, blurred, in post.aoA.
+================
+*/
+static qboolean Post_Ssao( void ) {
+	static const char *const ssaoUniforms[] = { "uDepth", "uProjA", "uProjB", "uSize", "uParams", NULL };
+	static const char *const blurUniforms[] = { "uDepth", "uProjA", "uProjB", "uAO", "uSize", "uDir", NULL };
+	const float	*proj = backEnd.viewParms.projectionMatrix;
+	const float	size[2] = { (float)post.width, (float)post.height };
+	const float	params[4] = { r_ssaoRadius->value, r_ssaoStrength->value, 0.1f, 0.0f };
+	const float	horizontal[2] = { 1.0f, 0.0f };
+	const float	vertical[2] = { 0.0f, 1.0f };
+
+	if ( ( !post.ssao.id && !Post_BuildProgram( &post.ssao, "ssao", postSsaoFragmentSource, ssaoUniforms ) ) ||
+		 ( !post.ssaoBlur.id && !Post_BuildProgram( &post.ssaoBlur, "ssao blur", postSsaoBlurFragmentSource, blurUniforms ) ) ) {
+		return qfalse;
+	}
+
+	// the depth of the view
+	Post_BindTexture( 0, post.depthTexture );
+	qglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, backEnd.viewParms.viewportX, backEnd.viewParms.viewportY, post.width, post.height );
+
+	qglUseProgram( post.ssao.id );
+	qglUniform1i( post.ssao.uniforms[0], 0 );
+	qglUniform4f( post.ssao.uniforms[1], proj[0], proj[5], proj[8], proj[9] );
+	qglUniform2f( post.ssao.uniforms[2], proj[10], proj[14] );
+	qglUniform2fv( post.ssao.uniforms[3], 1, size );
+	qglUniform4fv( post.ssao.uniforms[4], 1, params );
+	Post_DrawInto( &post.aoA );
+
+	qglUseProgram( post.ssaoBlur.id );
+	qglUniform1i( post.ssaoBlur.uniforms[0], 0 );
+	qglUniform4f( post.ssaoBlur.uniforms[1], proj[0], proj[5], proj[8], proj[9] );
+	qglUniform2f( post.ssaoBlur.uniforms[2], proj[10], proj[14] );
+	qglUniform1i( post.ssaoBlur.uniforms[3], 1 );
+	qglUniform2fv( post.ssaoBlur.uniforms[4], 1, size );
+
+	Post_BindTexture( 1, post.aoA.texture );
+	qglUniform2fv( post.ssaoBlur.uniforms[5], 1, horizontal );
+	Post_DrawInto( &post.aoB );
+
+	Post_BindTexture( 1, post.aoB.texture );
+	qglUniform2fv( post.ssaoBlur.uniforms[5], 1, vertical );
+	Post_DrawInto( &post.aoA );
+
+	return qtrue;
 }
 
 /*
@@ -180,22 +359,23 @@ notice.
 ================
 */
 void RB_PostProcess( void ) {
-	static const char *const copyUniforms[] = { "uScene", "uRect", NULL };
+	static const char *const compositeUniforms[] = { "uScene", "uAO", "uRect", "uMode", NULL };
 	const int	x = backEnd.viewParms.viewportX;
 	const int	y = backEnd.viewParms.viewportY;
 	const int	width = backEnd.viewParms.viewportWidth;
 	const int	height = backEnd.viewParms.viewportHeight;
 	const float	rect[4] = { (float)x, (float)y, (float)width, (float)height };
+	const GLboolean	scissored = qglIsEnabled( GL_SCISSOR_TEST );
+	qboolean	ssao;
 
-	if ( !Post_Wanted() ) {
+	if ( post.failed || !Post_Wanted() ) {
 		return;
 	}
 
-	if ( !post.copy.id ) {
-		if ( post.copyFailed || !Post_BuildProgram( &post.copy, "post copy", postCopyFragmentSource, copyUniforms ) ) {
-			post.copyFailed = qtrue;
-			return;
-		}
+	if ( !post.composite.id &&
+		 !Post_BuildProgram( &post.composite, "post composite", postCompositeFragmentSource, compositeUniforms ) ) {
+		post.failed = qtrue;
+		return;
 	}
 
 	Post_EnsureTargets( width, height );
@@ -214,11 +394,23 @@ void RB_PostProcess( void ) {
 	GL_State( GLS_DEPTHTEST_DISABLE );
 	GL_Cull( CT_TWO_SIDED );
 	qglDisable( GL_CLIP_PLANE0 );
+	qglDisable( GL_SCISSOR_TEST );
+
+	ssao = (qboolean)( r_ssao->integer && Post_Ssao() );
+	if ( r_ssao->integer && !ssao ) {
+		post.failed = qtrue;
+	}
 
 	// draw the result over the view
-	qglUseProgram( post.copy.id );
-	qglUniform1i( post.copy.uniforms[0], 0 );
-	qglUniform4fv( post.copy.uniforms[1], 1, rect );
+	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	qglViewport( x, y, width, height );
+	Post_BindTexture( 0, post.sceneTexture );
+	Post_BindTexture( 1, post.aoA.texture );
+	qglUseProgram( post.composite.id );
+	qglUniform1i( post.composite.uniforms[0], 0 );
+	qglUniform1i( post.composite.uniforms[1], 1 );
+	qglUniform4fv( post.composite.uniforms[2], 1, rect );
+	qglUniform2f( post.composite.uniforms[3], ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f );
 	Post_Quad();
 	qglUseProgram( 0 );
 
@@ -227,6 +419,11 @@ void RB_PostProcess( void ) {
 	Post_BindTexture( 0, 0 );
 	glState.currenttextures[0] = glState.currenttextures[1] = 0;
 	qglActiveTextureARB( GL_TEXTURE0_ARB + glState.currenttmu );
+
+	if ( scissored ) {
+		qglEnable( GL_SCISSOR_TEST );
+	}
+	SetViewportAndScissor();	// also sets the projection matrix, which the pops below put back anyway
 
 	qglMatrixMode( GL_PROJECTION );
 	qglPopMatrix();

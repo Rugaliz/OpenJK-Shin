@@ -43,6 +43,9 @@ PFNGLGETUNIFORMLOCATIONPROC		qglGetUniformLocation;
 PFNGLUNIFORM1IPROC				qglUniform1i;
 PFNGLUNIFORM1FPROC				qglUniform1f;
 PFNGLUNIFORM3FPROC				qglUniform3f;
+PFNGLUNIFORM2FPROC				qglUniform2f;
+PFNGLUNIFORM2FVPROC				qglUniform2fv;
+PFNGLUNIFORM4FPROC				qglUniform4f;
 PFNGLUNIFORM4FVPROC				qglUniform4fv;
 
 static qboolean	glslAvailable = qfalse;
@@ -169,12 +172,16 @@ void R_GLSL_Init( void ) {
 	qglUniform1i			= (PFNGLUNIFORM1IPROC)				ri.GL_GetProcAddress( "glUniform1i" );
 	qglUniform1f			= (PFNGLUNIFORM1FPROC)				ri.GL_GetProcAddress( "glUniform1f" );
 	qglUniform3f			= (PFNGLUNIFORM3FPROC)				ri.GL_GetProcAddress( "glUniform3f" );
+	qglUniform2f			= (PFNGLUNIFORM2FPROC)				ri.GL_GetProcAddress( "glUniform2f" );
+	qglUniform2fv			= (PFNGLUNIFORM2FVPROC)				ri.GL_GetProcAddress( "glUniform2fv" );
+	qglUniform4f			= (PFNGLUNIFORM4FPROC)				ri.GL_GetProcAddress( "glUniform4f" );
 	qglUniform4fv			= (PFNGLUNIFORM4FVPROC)				ri.GL_GetProcAddress( "glUniform4fv" );
 
 	if ( !qglCreateShader || !qglShaderSource || !qglCompileShader || !qglGetShaderiv || !qglGetShaderInfoLog ||
 		 !qglDeleteShader || !qglCreateProgram || !qglAttachShader || !qglLinkProgram || !qglGetProgramiv ||
 		 !qglGetProgramInfoLog || !qglDeleteProgram || !qglUseProgram || !qglGetUniformLocation ||
-		 !qglUniform1i || !qglUniform1f || !qglUniform3f || !qglUniform4fv ) {
+		 !qglUniform1i || !qglUniform1f || !qglUniform3f || !qglUniform4fv || !qglUniform2f || !qglUniform2fv ||
+		 !qglUniform4f ) {
 		Com_Printf( "...GLSL found, but an entry point is missing\n" );
 		return;
 	}

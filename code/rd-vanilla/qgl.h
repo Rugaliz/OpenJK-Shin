@@ -451,6 +451,9 @@ extern PFNGLGETUNIFORMLOCATIONPROC qglGetUniformLocation;
 extern PFNGLUNIFORM1IPROC qglUniform1i;
 extern PFNGLUNIFORM1FPROC qglUniform1f;
 extern PFNGLUNIFORM3FPROC qglUniform3f;
+extern PFNGLUNIFORM2FPROC qglUniform2f;
+extern PFNGLUNIFORM2FVPROC qglUniform2fv;
+extern PFNGLUNIFORM4FPROC qglUniform4f;
 extern PFNGLUNIFORM4FVPROC qglUniform4fv;
 
 extern PFNGLLOCKARRAYSEXTPROC qglLockArraysEXT;
