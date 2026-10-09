@@ -56,6 +56,11 @@ console variable is in brackets (you can type those in the console, opened with 
   (higher keeps floors and walls sharp when you look along them).
 - Textures stay sharper in the distance, because their smaller versions are made with a better filter.
 - See [docs/antialiasing.md](docs/antialiasing.md).
+- **Optional screen effects** (off by default, set in the console, see
+  [docs/post-processing.md](docs/post-processing.md)): `r_ssao 1` adds soft shading in corners and where things meet,
+  `r_bloom 1` a soft glow around the brightest lights, `r_smaa 1` a high quality edge smoothing that does not blur the
+  textures (unlike FXAA), and `r_dlightGLSL 1` makes the light of lightsabers, blaster bolts and explosions follow the
+  shape of what it falls on.
 
 ### Shadows and draw distance (single player)
 - **"Volumetric" shadows work properly** (Setup > More Video > Shadows): characters are no longer darkened by their
