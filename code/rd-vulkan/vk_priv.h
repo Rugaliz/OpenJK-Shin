@@ -114,6 +114,7 @@ void		VK_ImageBarrier( VkCommandBuffer cmd, VkImage image, VkImageAspectFlags as
 				VkPipelineStageFlags dstStage, VkAccessFlags dstAccess );
 void		VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum type, void *pixels );
 void		VK_WaitIdle( void );
+float		VK_ReadDepth( int x, int y );
 
 // vk_mem.cpp
 typedef struct vkAlloc_s {
@@ -146,6 +147,7 @@ vkTexture_t	*VK_WhiteTexture( void );
 void		VK_TexImage2D( GLuint id, GLint level, GLint internalFormat, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels );
 void		VK_TexSubImage2D( GLuint id, GLint level, GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels );
 void		VK_TexParameter( GLuint id, GLenum pname, GLfloat value );
+void		VK_CopyFramebuffer( GLuint id, int createWidth, int createHeight, int dstX, int dstY, int srcX, int srcY, int width, int height );
 void		VK_DeleteTexture( GLuint id );
 VkSampler	VK_SamplerFor( const vkTexture_t *texture );
 void		VK_FlushUploads( bool wait );
@@ -218,3 +220,4 @@ void		VK_ResetCommandBufferState( void );	// a new command buffer starts: nothin
 
 // vk_gl.cpp
 void		VK_ResetGLState( void );
+
