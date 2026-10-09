@@ -40,6 +40,9 @@ typedef struct clientArray_s {
 
 static struct vkglState_s {
 	// switches
+	bool			alphaToCoverage;
+	float			sampleShading;	// glMinSampleShading while GL_SAMPLE_SHADING is on, else 0
+	bool			sampleShadingOn;
 	bool			blend, depthTest, cullFace, alphaTest, stencilTest, scissorTest, polyOffsetFill, polyOffsetLine, fog, clip0;
 	bool			texture2D[MAX_UNITS];
 
@@ -237,6 +240,8 @@ static void SetSwitch( GLenum cap, bool on )
 	case GL_POLYGON_OFFSET_LINE:	gl.polyOffsetLine = on; break;
 	case GL_FOG:				gl.fog = on; break;
 	case GL_CLIP_PLANE0:		gl.clip0 = on; break;
+	case GL_SAMPLE_ALPHA_TO_COVERAGE:	gl.alphaToCoverage = on; break;
+	case GL_SAMPLE_SHADING_ARB:	gl.sampleShadingOn = on; break;
 	case GL_TEXTURE_2D:			gl.texture2D[gl.activeUnit] = on; break;
 	default:					break;	// (multisampling, ARB programs, rectangle textures: not here)
 	}
@@ -435,6 +440,11 @@ void APIENTRY vkglClientActiveTextureARB( GLenum texture )
 	if ( unit >= 0 && unit < MAX_UNITS ) gl.clientUnit = unit;
 }
 
+void APIENTRY vkglMinSampleShadingARB( GLclampf value )
+{
+	gl.sampleShading = value;
+}
+
 void APIENTRY vkglMultiTexCoord2fARB( GLenum target, GLfloat s, GLfloat t )
 {
 	const int unit = (int)target - (int)GL_TEXTURE0_ARB;
@@ -607,6 +617,8 @@ static void PrepareDraw( vkPipelineKey_t *key, vkDynamicState_t *dynamic, vkCons
 	key->uv0Const = uv0Const;
 	key->uv1Const = uv1Const;
 	key->stencilTest = gl.stencilTest;
+	key->alphaToCoverage = gl.alphaToCoverage;
+	key->sampleShading = gl.sampleShadingOn ? (unsigned char)Q_max( 1.0f, Q_min( 100.0f, gl.sampleShading * 100.0f ) ) : 0;
 	if ( gl.stencilTest )
 	{
 		for ( int face = 0; face < 2; face++ )
@@ -1139,6 +1151,7 @@ void vkglGetIntegerv( GLenum pname, GLint *params )
 	case GL_MAX_TEXTURE_SIZE:	*params = glConfig.maxTextureSize; break;
 	case GL_PACK_ALIGNMENT:		*params = 4; break;
 	case GL_CULL_FACE:			*params = gl.cullFace ? 1 : 0; break;
+	case GL_SAMPLES:			*params = vk.samples == VK_SAMPLE_COUNT_1_BIT ? 0 : (int)vk.samples; break;
 	default:					*params = 0; break;
 	}
 }

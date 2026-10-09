@@ -66,6 +66,14 @@ typedef struct vk_s {
 	VkImage						depthImage;
 	VkDeviceMemory				depthMemory;
 	VkImageView					depthView;
+	VkSampleCountFlagBits		samples;			// 1 bit: no multisampling; else colour and depth are drawn at this many samples and resolved
+	VkResolveModeFlagBits		stencilResolveMode;
+	VkImage						msaaColorImage;
+	VkDeviceMemory				msaaColorMemory;
+	VkImageView					msaaColorView;
+	VkImage						msaaDepthImage;
+	VkDeviceMemory				msaaDepthMemory;
+	VkImageView					msaaDepthView;
 	VkRenderPass				renderPassClear;	// first pass of the frame: clears colour, depth and stencil
 	VkRenderPass				renderPassLoad;		// after the frame was interrupted (copies, read backs): keeps them
 	VkFramebuffer				framebuffer;
@@ -177,7 +185,9 @@ typedef struct vkPipelineKey_s {
 	unsigned char	colorMask;					// bit per channel
 	unsigned char	colorConst, uv0Const, uv1Const;	// no array: one value for all vertices
 	unsigned char	stencilTest;
-	unsigned char	pad[1];
+	unsigned char	alphaToCoverage;			// the alpha of the colour decides how many samples of a pixel are covered
+	unsigned char	sampleShading;				// percent of the samples of a pixel that are shaded on their own, 0: off
+	unsigned char	pad[2];
 } vkPipelineKey_t;
 
 // Set per draw (dynamic state of the pipelines). Viewport and scissor are OpenGL style (origin bottom left).
