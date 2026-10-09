@@ -25,6 +25,18 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // drawn back over the view. Nothing here runs unless GLSL and framebuffer objects are there and an effect is on.
 
 #include "tr_local.h"
+#include "tr_smaa_data.h"
+#include <string>
+#include <zlib.h>
+
+#ifndef GL_RG8
+#define GL_RG8						0x822B
+#define GL_RG						0x8227
+#endif
+#ifndef GL_R8
+#define GL_R8						0x8229
+#define GL_RED						0x1903
+#endif
 
 static PFNGLGENFRAMEBUFFERSPROC			qglGenFramebuffers;
 static PFNGLBINDFRAMEBUFFERPROC			qglBindFramebuffer;
@@ -56,6 +68,11 @@ static struct {
 	postProgram_t	composite;			// puts the effects together and draws them over the view
 	postProgram_t	ssao, ssaoBlur;
 	postProgram_t	bloomDown, bloomUp;
+	postTarget_t	final, edges, weights;	// for SMAA: the view with the other effects on, the edges found in it, how to blend them
+	postProgram_t	smaaEdges, smaaWeights, smaaBlend;
+	GLuint			smaaAreaTexture, smaaSearchTexture;
+	qboolean		smaaOk;				// GLSL 3.30 is there, which SMAA is written for
+	qboolean		smaaFailed;
 	qboolean		failed;				// a program did not build, stop trying
 } post;
 
@@ -209,7 +226,7 @@ static const char *postCompositeFragmentSource =
 	"		float ao = texture2D( uAO, uv ).r;\n"
 	"		colour = uMode.y > 0.5 ? vec3( ao ) : colour * ao;\n"
 	"	}\n"
-	"	colour += texture2D( uBloom, uv ).rgb * uMode.z;\n"
+	"	colour += texture2D( uBloom, uv ).rgb * uMode.z * ( 1.0 - colour );\n"	// like a screen blend, it does not clip what is bright already
 	"	gl_FragColor = vec4( colour, 1.0 );\n"
 	"}\n";
 
@@ -238,6 +255,15 @@ void R_Post_Init( void ) {
 
 	post.ready = qtrue;
 	Com_Printf( "...using post processing\n" );
+
+	{
+		int major = 0, minor = 0;
+		if ( sscanf( glConfig.version_string, "%d.%d", &major, &minor ) >= 2 && major * 10 + minor >= 33 ) {
+			post.smaaOk = qtrue;
+		} else {
+			Com_Printf( "...SMAA needs OpenGL 3.3\n" );
+		}
+	}
 }
 
 static GLuint Post_NewTexture( GLint internalFormat, GLenum format, GLenum type, int width, int height ) {
@@ -287,6 +313,9 @@ static void Post_FreeTargets( void ) {
 	post.sceneTexture = post.depthTexture = 0;
 	Post_FreeTarget( &post.aoA );
 	Post_FreeTarget( &post.aoB );
+	Post_FreeTarget( &post.final );
+	Post_FreeTarget( &post.edges );
+	Post_FreeTarget( &post.weights );
 	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
 		Post_FreeTarget( &post.bloom[i] );
 	}
@@ -308,15 +337,20 @@ static void Post_EnsureTargets( int width, int height ) {
 	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
 		Post_NewTarget( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
 	}
+	if ( post.smaaOk ) {
+		Post_NewTarget( &post.final, width, height );
+		Post_NewTarget( &post.edges, width, height );
+		Post_NewTarget( &post.weights, width, height );
+	}
 	post.width = width;
 	post.height = height;
 }
 
-static qboolean Post_BuildProgram( postProgram_t *program, const char *name, const char *fragmentSource,
-								   const char *const *uniformNames ) {
+static qboolean Post_BuildProgramWith( postProgram_t *program, const char *name, const char *vertexSource,
+									   const char *fragmentSource, const char *const *uniformNames ) {
 	int i;
 
-	program->id = R_GLSL_BuildProgram( name, postVertexSource, fragmentSource );
+	program->id = R_GLSL_BuildProgram( name, vertexSource, fragmentSource );
 	if ( !program->id ) {
 		return qfalse;
 	}
@@ -324,6 +358,11 @@ static qboolean Post_BuildProgram( postProgram_t *program, const char *name, con
 		program->uniforms[i] = qglGetUniformLocation( program->id, uniformNames[i] );
 	}
 	return qtrue;
+}
+
+static qboolean Post_BuildProgram( postProgram_t *program, const char *name, const char *fragmentSource,
+								   const char *const *uniformNames ) {
+	return Post_BuildProgramWith( program, name, postVertexSource, fragmentSource, uniformNames );
 }
 
 static void Post_Quad( void ) {
@@ -344,6 +383,145 @@ static void Post_BindTexture( int unit, GLuint texture ) {
 	qglBindTexture( GL_TEXTURE_2D, texture );
 }
 
+/*
+================
+SMAA
+
+Subpixel morphological antialiasing, in the three passes of its authors: find the edges (from the brightness of
+the pixels), work out from the shape of every edge how much of the pixels on both sides to blend, and blend. It
+only moves pixels along the edges it finds, so unlike FXAA it does not soften the rest of the picture. The code
+and the lookup textures are theirs (tr_smaa_data.h); this is the glue.
+================
+*/
+static const char *postVertex330Source =
+	"#version 330 compatibility\n"
+	"void main() {\n"
+	"	gl_Position = gl_Vertex;\n"
+	"	gl_TexCoord[0] = gl_MultiTexCoord0;\n"
+	"}\n";
+
+static const char *smaaEdgesMain =
+	"uniform sampler2D uColor;\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].st;\n"
+	"	vec4 offset[3];\n"
+	"	SMAAEdgeDetectionVS( uv, offset );\n"
+	"	gl_FragColor = vec4( SMAALumaEdgeDetectionPS( uv, offset, uColor ), 0.0, 0.0 );\n"
+	"}\n";
+
+static const char *smaaWeightsMain =
+	"uniform sampler2D uEdges;\n"
+	"uniform sampler2D uArea;\n"
+	"uniform sampler2D uSearch;\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].st;\n"
+	"	vec2 pixcoord;\n"
+	"	vec4 offset[3];\n"
+	"	SMAABlendingWeightCalculationVS( uv, pixcoord, offset );\n"
+	"	gl_FragColor = SMAABlendingWeightCalculationPS( uv, pixcoord, offset, uEdges, uArea, uSearch, vec4( 0.0 ) );\n"
+	"}\n";
+
+static const char *smaaBlendMain =
+	"uniform sampler2D uColor;\n"
+	"uniform sampler2D uBlend;\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].st;\n"
+	"	vec4 offset;\n"
+	"	SMAANeighborhoodBlendingVS( uv, offset );\n"
+	"	gl_FragColor = SMAANeighborhoodBlendingPS( uv, offset, uColor, uBlend );\n"
+	"}\n";
+
+static qboolean Post_BuildSmaaProgram( postProgram_t *program, const char *name, const char *main,
+									   const char *const *uniformNames ) {
+	std::string source = "#version 330 compatibility\n#define SMAA_GLSL_3 1\n#define SMAA_PRESET_HIGH 1\n"
+		"uniform vec4 uMetrics;\n#define SMAA_RT_METRICS uMetrics\n";
+
+	for ( size_t i = 0; i < ARRAY_LEN( smaaShaderSource ); i++ ) {
+		source += smaaShaderSource[i];
+	}
+	source += main;
+	return Post_BuildProgramWith( program, name, postVertex330Source, source.c_str(), uniformNames );
+}
+
+static int Post_Base64Value( char c ) {
+	if ( c >= 'A' && c <= 'Z' ) return c - 'A';
+	if ( c >= 'a' && c <= 'z' ) return c - 'a' + 26;
+	if ( c >= '0' && c <= '9' ) return c - '0' + 52;
+	return c == '+' ? 62 : 63;
+}
+
+// Makes a texture out of one of the compressed pieces of data in tr_smaa_data.h. Returns 0 if that does not work.
+static GLuint Post_DataTexture( const char *const *pieces, size_t numPieces, int width, int height, GLint internalFormat,
+								GLenum format, int bytesPerPixel, GLint filter ) {
+	std::string text;
+	std::string packed;
+	std::string pixels;
+	GLuint		texture;
+	uLongf		pixelsLength = (uLongf)( width * height * bytesPerPixel );
+	unsigned int bits = 0;
+	int			numBits = 0;
+
+	for ( size_t i = 0; i < numPieces; i++ ) {
+		text += pieces[i];
+	}
+	for ( size_t i = 0; i < text.size() && text[i] != '='; i++ ) {
+		bits = ( bits << 6 ) | Post_Base64Value( text[i] );
+		numBits += 6;
+		if ( numBits >= 8 ) {
+			numBits -= 8;
+			packed += (char)( ( bits >> numBits ) & 0xFF );
+		}
+	}
+
+	pixels.resize( pixelsLength );
+	if ( uncompress( (Bytef *)&pixels[0], &pixelsLength, (const Bytef *)packed.data(), (uLong)packed.size() ) != Z_OK ||
+		 pixelsLength != (uLongf)( width * height * bytesPerPixel ) ) {
+		return 0;
+	}
+
+	qglGenTextures( 1, &texture );
+	qglBindTexture( GL_TEXTURE_2D, texture );
+	qglPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+	qglTexImage2D( GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, GL_UNSIGNED_BYTE, pixels.data() );
+	qglPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+	qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter );
+	qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter );
+	qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	return texture;
+}
+
+// builds what SMAA needs the first time it is used
+static qboolean Post_SmaaReady( void ) {
+	static const char *const edgesUniforms[] = { "uMetrics", "uColor", NULL };
+	static const char *const weightsUniforms[] = { "uMetrics", "uEdges", "uArea", "uSearch", NULL };
+	static const char *const blendUniforms[] = { "uMetrics", "uColor", "uBlend", NULL };
+
+	if ( post.smaaFailed ) {
+		return qfalse;
+	}
+	if ( post.smaaEdges.id && post.smaaAreaTexture ) {
+		return qtrue;
+	}
+
+	if ( !Post_BuildSmaaProgram( &post.smaaEdges, "smaa edges", smaaEdgesMain, edgesUniforms ) ||
+		 !Post_BuildSmaaProgram( &post.smaaWeights, "smaa weights", smaaWeightsMain, weightsUniforms ) ||
+		 !Post_BuildSmaaProgram( &post.smaaBlend, "smaa blend", smaaBlendMain, blendUniforms ) ) {
+		post.smaaFailed = qtrue;
+		return qfalse;
+	}
+	post.smaaAreaTexture = Post_DataTexture( smaaAreaTexZ, ARRAY_LEN( smaaAreaTexZ ), SMAA_AREATEX_WIDTH,
+		SMAA_AREATEX_HEIGHT, GL_RG8, GL_RG, 2, GL_LINEAR );
+	post.smaaSearchTexture = Post_DataTexture( smaaSearchTexZ, ARRAY_LEN( smaaSearchTexZ ), SMAA_SEARCHTEX_WIDTH,
+		SMAA_SEARCHTEX_HEIGHT, GL_R8, GL_RED, 1, GL_NEAREST );
+	if ( !post.smaaAreaTexture || !post.smaaSearchTexture ) {
+		Com_Printf( S_COLOR_YELLOW "SMAA: the lookup textures do not unpack\n" );
+		post.smaaFailed = qtrue;
+		return qfalse;
+	}
+	return qtrue;
+}
+
 static qboolean Post_Wanted( void ) {
 	if ( !post.ready ) {
 		return qfalse;
@@ -354,7 +532,7 @@ static qboolean Post_Wanted( void ) {
 	if ( backEnd.viewParms.isPortal || backEnd.viewParms.viewportWidth < 64 || backEnd.viewParms.viewportHeight < 64 ) {
 		return qfalse;
 	}
-	return (qboolean)( r_ssao->integer || r_bloom->integer || r_postDebug->integer );
+	return (qboolean)( r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer );
 }
 
 // draws the quad into a target (or the window, with 0), with the viewport set for it
@@ -414,6 +592,48 @@ static qboolean Post_Ssao( void ) {
 	Post_DrawInto( &post.aoA );
 
 	return qtrue;
+}
+
+static void Post_ClearTarget( const postTarget_t *target ) {
+	qglBindFramebuffer( GL_FRAMEBUFFER, target->fbo );
+	qglClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
+	qglClear( GL_COLOR_BUFFER_BIT );
+}
+
+// the three passes, from post.final to the view in the window
+static void Post_Smaa( int x, int y, int width, int height ) {
+	const float	metrics[4] = { 1.0f / width, 1.0f / height, (float)width, (float)height };
+
+	// the edges
+	Post_ClearTarget( &post.edges );
+	Post_BindTexture( 0, post.final.texture );
+	qglUseProgram( post.smaaEdges.id );
+	qglUniform4fv( post.smaaEdges.uniforms[0], 1, metrics );
+	qglUniform1i( post.smaaEdges.uniforms[1], 0 );
+	Post_DrawInto( &post.edges );
+
+	// how to blend them
+	Post_ClearTarget( &post.weights );
+	Post_BindTexture( 0, post.edges.texture );
+	Post_BindTexture( 1, post.smaaAreaTexture );
+	Post_BindTexture( 2, post.smaaSearchTexture );
+	qglUseProgram( post.smaaWeights.id );
+	qglUniform4fv( post.smaaWeights.uniforms[0], 1, metrics );
+	qglUniform1i( post.smaaWeights.uniforms[1], 0 );
+	qglUniform1i( post.smaaWeights.uniforms[2], 1 );
+	qglUniform1i( post.smaaWeights.uniforms[3], 2 );
+	Post_DrawInto( &post.weights );
+
+	// the blend, into the window
+	Post_BindTexture( 0, post.final.texture );
+	Post_BindTexture( 1, post.weights.texture );
+	qglUseProgram( post.smaaBlend.id );
+	qglUniform4fv( post.smaaBlend.uniforms[0], 1, metrics );
+	qglUniform1i( post.smaaBlend.uniforms[1], 0 );
+	qglUniform1i( post.smaaBlend.uniforms[2], 1 );
+	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	qglViewport( x, y, width, height );
+	Post_Quad();
 }
 
 /*
@@ -479,8 +699,9 @@ void RB_PostProcess( void ) {
 	const int	width = backEnd.viewParms.viewportWidth;
 	const int	height = backEnd.viewParms.viewportHeight;
 	const float	rect[4] = { (float)x, (float)y, (float)width, (float)height };
+	const float	smaaRect[4] = { 0.0f, 0.0f, (float)width, (float)height };
 	const GLboolean	scissored = qglIsEnabled( GL_SCISSOR_TEST );
-	qboolean	ssao, bloom;
+	qboolean	ssao, bloom, smaa;
 
 	if ( post.failed || !Post_Wanted() ) {
 		return;
@@ -520,9 +741,19 @@ void RB_PostProcess( void ) {
 		post.failed = qtrue;
 	}
 
-	// draw the result over the view
-	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
-	qglViewport( x, y, width, height );
+	smaa = (qboolean)( r_smaa->integer && post.smaaOk && Post_SmaaReady() );
+	if ( r_smaa->integer && post.smaaOk && !smaa ) {
+		post.failed = qtrue;
+	}
+
+	// draw the result over the view, or into the picture SMAA works on
+	if ( smaa ) {
+		qglBindFramebuffer( GL_FRAMEBUFFER, post.final.fbo );
+		qglViewport( 0, 0, width, height );
+	} else {
+		qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+		qglViewport( x, y, width, height );
+	}
 	Post_BindTexture( 0, post.sceneTexture );
 	Post_BindTexture( 1, post.aoA.texture );
 	Post_BindTexture( 2, post.bloom[0].texture );
@@ -530,13 +761,17 @@ void RB_PostProcess( void ) {
 	qglUniform1i( post.composite.uniforms[0], 0 );
 	qglUniform1i( post.composite.uniforms[1], 1 );
 	qglUniform1i( post.composite.uniforms[2], 2 );
-	qglUniform4fv( post.composite.uniforms[3], 1, rect );
+	qglUniform4fv( post.composite.uniforms[3], 1, smaa ? smaaRect : rect );
 	qglUniform3f( post.composite.uniforms[4], ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f,
 		bloom ? r_bloomIntensity->value : 0.0f );
 	Post_Quad();
+	if ( smaa ) {
+		Post_Smaa( x, y, width, height );
+	}
 	qglUseProgram( 0 );
 
 	// the engine caches what is bound to its two texture units, make it look again
+	Post_BindTexture( 3, 0 );
 	Post_BindTexture( 2, 0 );
 	Post_BindTexture( 1, 0 );
 	Post_BindTexture( 0, 0 );

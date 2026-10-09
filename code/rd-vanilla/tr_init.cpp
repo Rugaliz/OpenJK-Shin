@@ -101,6 +101,7 @@ cvar_t	*r_ssaoStrength;
 cvar_t	*r_bloom;
 cvar_t	*r_bloomThreshold;
 cvar_t	*r_bloomIntensity;
+cvar_t	*r_smaa;
 cvar_t	*r_alphaToCoverage;
 cvar_t	*r_sampleShading;
 
@@ -1600,7 +1601,8 @@ void R_Register( void )
 	r_ssaoStrength = ri.Cvar_Get( "r_ssaoStrength", "2", CVAR_ARCHIVE_ND );
 	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE_ND );	// 1 = a soft glow around the bright parts of the picture (needs r_glsl)
 	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.8", CVAR_ARCHIVE_ND );	// how bright, 0 to 1, a pixel has to be to glow
-	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "0.35", CVAR_ARCHIVE_ND );
+	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "0.5", CVAR_ARCHIVE_ND );
+	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE_ND );	// 1 = SMAA, smooths edges without softening the rest of the picture (needs OpenGL 3.3)
 
 	r_DynamicGlow = ri.Cvar_Get( "r_DynamicGlow", "0", CVAR_ARCHIVE_ND );
 	r_DynamicGlowPasses = ri.Cvar_Get( "r_DynamicGlowPasses", "5", CVAR_ARCHIVE_ND );
