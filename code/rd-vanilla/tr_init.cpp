@@ -94,6 +94,7 @@ cvar_t	*r_ext_texture_env_add;
 cvar_t	*r_ext_texture_filter_anisotropic;
 cvar_t	*r_glsl;
 cvar_t	*r_dlightGLSL;
+cvar_t	*r_postDebug;
 cvar_t	*r_alphaToCoverage;
 cvar_t	*r_sampleShading;
 
@@ -703,6 +704,7 @@ static void GLimp_InitExtensions( void )
 	}
 
 	R_GLSL_Init();
+	R_Post_Init();
 
 #if !defined(__APPLE__)
 	qglStencilOpSeparate = (PFNGLSTENCILOPSEPARATEPROC)ri.GL_GetProcAddress("glStencilOpSeparate");
@@ -1586,6 +1588,7 @@ void R_Register( void )
 	ri.Cvar_CheckRange( r_sampleShading, 0, 1, qfalse );
 	r_glsl = ri.Cvar_Get( "r_glsl", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// use GLSL shader programs where the renderer has them (needs OpenGL 2.0)
 	r_dlightGLSL = ri.Cvar_Get( "r_dlightGLSL", "0", CVAR_ARCHIVE_ND );	// 1 = dynamic lights as a shader pass that lights every pixel by distance and surface angle (needs r_glsl)
+	r_postDebug = ri.Cvar_Get( "r_postDebug", "0", 0 );	// 1 = run the post processing plumbing with no effect, the picture must not change
 
 	r_DynamicGlow = ri.Cvar_Get( "r_DynamicGlow", "0", CVAR_ARCHIVE_ND );
 	r_DynamicGlowPasses = ri.Cvar_Get( "r_DynamicGlowPasses", "5", CVAR_ARCHIVE_ND );

@@ -1443,6 +1443,8 @@ const void	*RB_DrawSurfs( const void *data ) {
 		RB_DrawGlowOverlay();
 	}
 
+	RB_PostProcess();
+
 	return (const void *)(cmd + 1);
 }
 

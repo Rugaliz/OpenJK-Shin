@@ -1172,6 +1172,7 @@ extern cvar_t	*r_alphaToCoverage;
 extern cvar_t	*r_sampleShading;
 extern cvar_t	*r_glsl;
 extern cvar_t	*r_dlightGLSL;
+extern cvar_t	*r_postDebug;
 
 extern cvar_t	*r_DynamicGlow;
 extern cvar_t	*r_DynamicGlowPasses;
@@ -1290,6 +1291,13 @@ void	R_GLSL_Init( void );
 qboolean	R_GLSL_Available( void );
 GLuint	R_GLSL_BuildProgram( const char *name, const char *vertexSource, const char *fragmentSource );
 void	R_GLSL_DeleteProgram( GLuint program );
+
+// tr_post.cpp
+void	R_Post_Init( void );
+void	RB_PostProcess( void );
+
+// tr_backend.cpp
+void	SetViewportAndScissor( void );
 void	GL_CheckErrors( void );
 void	GL_State( uint32_t stateVector );
 void	GL_TexEnv( int env );
