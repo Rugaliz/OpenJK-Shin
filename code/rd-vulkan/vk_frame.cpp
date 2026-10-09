@@ -62,6 +62,7 @@ static void VK_BeginCommandBuffer( void )
 	VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	VK_CheckResult( vkBeginCommandBuffer( vk.cmd, &begin ), "vkBeginCommandBuffer" );
+	VK_ResetCommandBufferState();
 }
 
 static void VK_BeginRenderPass( bool clear )
@@ -83,6 +84,7 @@ static void VK_BeginRenderPass( bool clear )
 	begin.pClearValues = clearValues;
 	vkCmdBeginRenderPass( vk.cmd, &begin, VK_SUBPASS_CONTENTS_INLINE );
 	vk.inRenderPass = true;
+	VK_ResetCommandBufferState();
 }
 
 /*
@@ -135,6 +137,8 @@ void VK_EnsureFrame( void )
 
 	VK_CheckResult( vkResetCommandPool( vk.device, frame->pool, 0 ), "vkResetCommandPool" );
 	vk.frameCommandBufferCount[vk.frameIndex] = 0;
+	VK_ProcessDeferredDeletes();
+	VK_BeginFrameDraw();
 	vk.waitedForImage = false;
 	VK_BeginCommandBuffer();
 	VK_BeginRenderPass( true );
@@ -170,6 +174,7 @@ goes on in a new command buffer. The frame's last submit is made by VK_PresentFr
 void VK_SubmitFrame( bool waitIdle )
 {
 	VK_EndRenderPass();
+	VK_FlushUploads( false );	// (the texture uploads come first, the queue works in order)
 	VK_CheckResult( vkEndCommandBuffer( vk.cmd ), "vkEndCommandBuffer" );
 
 	VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -184,6 +189,7 @@ void VK_SubmitFrame( bool waitIdle )
 		vk.waitedForImage = true;
 	}
 	VK_CheckResult( vkQueueSubmit( vk.queue, 1, &submit, VK_NULL_HANDLE ), "vkQueueSubmit" );
+	vk.submitSerial++;
 	if ( waitIdle )
 	{
 		VK_CheckResult( vkQueueWaitIdle( vk.queue ), "vkQueueWaitIdle" );
@@ -210,6 +216,7 @@ void VK_PresentFrame( window_t *window )
 {
 	VK_EnsureFrame();
 	VK_EndRenderPass();
+	VK_FlushUploads( false );
 
 	vkFrame_t *frame = &vk.frames[vk.frameIndex];
 	VkImage target = vk.swapchainImages[vk.imageIndex];
@@ -262,6 +269,8 @@ void VK_PresentFrame( window_t *window )
 	VK_CheckResult( vkResetFences( vk.device, 1, &frame->fence ), "vkResetFences" );
 	VK_CheckResult( vkQueueSubmit( vk.queue, 1, &submit, frame->fence ), "vkQueueSubmit" );
 	frame->fenceSubmitted = true;
+	vk.submitSerial++;
+	vk.frameCounter++;
 
 	VkPresentInfoKHR present = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
 	present.waitSemaphoreCount = 1;
