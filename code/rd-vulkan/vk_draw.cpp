@@ -34,6 +34,9 @@ static VkShaderModule			vertexShader, fragmentShader;
 static VkDescriptorSetLayout	descriptorSetLayout;
 static VkPipelineLayout			pipelineLayout;
 static VkDescriptorPool			descriptorPool;
+static VkPipelineCache			pipelineCache;	// kept between runs: the drivers take a while to build a pipeline
+
+#define PIPELINE_CACHE_FILE	"vk_pipeline_cache.bin"
 static int						descriptorSetCount;
 
 // vertex, index buffer: GEOMETRY_SLOT_SIZE for each frame in flight, host visible
@@ -274,7 +277,7 @@ static VkPipeline CreatePipeline( const vkPipelineKey_t *key )
 	info.subpass = 0;
 
 	VkPipeline pipeline;
-	VK_CheckResult( vkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &info, NULL, &pipeline ), "vkCreateGraphicsPipelines" );
+	VK_CheckResult( vkCreateGraphicsPipelines( vk.device, pipelineCache, 1, &info, NULL, &pipeline ), "vkCreateGraphicsPipelines" );
 	return pipeline;
 }
 
@@ -508,6 +511,21 @@ void VK_Draw( const vkPipelineKey_t *key, const vkDynamicState_t *dynamic, const
 
 void VK_InitDraw( void )
 {
+	// the cache of a previous run (the driver ignores one that is not from this device and driver)
+	void *cacheData = NULL;
+	const long cacheSize = ri.FS_ReadFile( PIPELINE_CACHE_FILE, &cacheData );
+	VkPipelineCacheCreateInfo cacheInfo = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+	if ( cacheData && cacheSize > 0 )
+	{
+		cacheInfo.initialDataSize = (size_t)cacheSize;
+		cacheInfo.pInitialData = cacheData;
+	}
+	VK_CheckResult( vkCreatePipelineCache( vk.device, &cacheInfo, NULL, &pipelineCache ), "vkCreatePipelineCache" );
+	if ( cacheData )
+	{
+		ri.FS_FreeFile( cacheData );
+	}
+
 	VkShaderModuleCreateInfo shaderInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 	shaderInfo.codeSize = sizeof( vk_spirv_fixed_vert );
 	shaderInfo.pCode = vk_spirv_fixed_vert;
@@ -585,6 +603,17 @@ void VK_InitDraw( void )
 
 void VK_ShutdownDraw( void )
 {
+	size_t cacheSize = 0;
+	if ( vkGetPipelineCacheData( vk.device, pipelineCache, &cacheSize, NULL ) == VK_SUCCESS && cacheSize )
+	{
+		void *cacheData = R_Malloc( (int)cacheSize, TAG_TEMP_WORKSPACE, qfalse );
+		if ( vkGetPipelineCacheData( vk.device, pipelineCache, &cacheSize, cacheData ) == VK_SUCCESS )
+		{
+			ri.FS_WriteFile( PIPELINE_CACHE_FILE, cacheData, (int)cacheSize );
+		}
+		R_Free( cacheData );
+	}
+	vkDestroyPipelineCache( vk.device, pipelineCache, NULL );
 	for ( std::unordered_map<vkPipelineKey_t, VkPipeline, KeyHash, KeyEqual>::iterator it = pipelines.begin(); it != pipelines.end(); ++it )
 	{
 		vkDestroyPipeline( vk.device, it->second, NULL );
