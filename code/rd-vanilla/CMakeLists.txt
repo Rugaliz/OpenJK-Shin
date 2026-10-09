@@ -216,6 +216,8 @@ if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 			${SPRDVanillaRdCommonFiles}
 			"${SPDir}/rd-vulkan/qgl.h"
 			"${SPDir}/rd-vulkan/vk_local.h"
+			"${SPDir}/rd-vulkan/vk_priv.h"
+			"${SPDir}/rd-vulkan/vk_frame.cpp"
 			"${SPDir}/rd-vulkan/vk_gl.cpp"
 			"${SPDir}/rd-vulkan/vk_init.cpp"
 			)
