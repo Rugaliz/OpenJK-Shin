@@ -33,6 +33,7 @@ static cvar_t	*r_vkDevice;
 void APIENTRY vkglActiveTextureARB( GLenum texture );
 void APIENTRY vkglClientActiveTextureARB( GLenum texture );
 void APIENTRY vkglMultiTexCoord2fARB( GLenum target, GLfloat s, GLfloat t );
+void APIENTRY vkglMinSampleShadingARB( GLclampf value );
 void APIENTRY vkglLockArraysEXT( GLint first, GLsizei count );
 void APIENTRY vkglUnlockArraysEXT( void );
 void APIENTRY vkglStencilOpSeparate( GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass );
@@ -147,7 +148,7 @@ static void VK_CreateInstance( void )
 	app.applicationVersion = 1;
 	app.pEngineName = "OpenJK";
 	app.engineVersion = 1;
-	app.apiVersion = VK_API_VERSION_1_1;
+	app.apiVersion = VK_API_VERSION_1_2;	// (1.2 for resolving the depth buffer of a multisampled frame; older devices work without)
 
 	VkInstanceCreateInfo info = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
 	info.pApplicationInfo = &app;
@@ -304,7 +305,7 @@ static VkFormat VK_FindDepthFormat( void )
 	return VK_FORMAT_UNDEFINED;
 }
 
-static void VK_CreateImage( VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect,
+static void VK_CreateImage( VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect, VkSampleCountFlagBits samples,
 	VkImage *image, VkDeviceMemory *memory, VkImageView *view )
 {
 	VkImageCreateInfo info = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -315,7 +316,7 @@ static void VK_CreateImage( VkFormat format, VkImageUsageFlags usage, VkImageAsp
 	info.extent.depth = 1;
 	info.mipLevels = 1;
 	info.arrayLayers = 1;
-	info.samples = VK_SAMPLE_COUNT_1_BIT;
+	info.samples = samples;
 	info.tiling = VK_IMAGE_TILING_OPTIMAL;
 	info.usage = usage;
 	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -405,6 +406,161 @@ static VkRenderPass VK_CreateRenderPass( bool clear )
 	return pass;
 }
 
+// the pass of a multisampled frame: colour and depth are drawn at vk.samples and resolved into the single sample images,
+// which everything else (read backs, copies, the final blit) works with
+static VkRenderPass VK_CreateRenderPassMultisampled( bool clear )
+{
+	VkAttachmentDescription2 attachments[4] = {};
+	for ( int i = 0; i < 4; i++ )
+	{
+		attachments[i].sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+	}
+	attachments[0].format = vk.colorFormat;
+	attachments[0].samples = vk.samples;
+	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		// (as in the single sample pass, the colour is not cleared)
+	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachments[0].initialLayout = attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	attachments[1].format = vk.depthFormat;
+	attachments[1].samples = vk.samples;
+	attachments[1].loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+	attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[1].stencilLoadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+	attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[1].initialLayout = attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	attachments[2].format = vk.colorFormat;
+	attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
+	attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachments[2].initialLayout = attachments[2].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	attachments[3].format = vk.depthFormat;
+	attachments[3].samples = VK_SAMPLE_COUNT_1_BIT;
+	attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[3].initialLayout = attachments[3].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference2 colorRef = { VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2 };
+	colorRef.attachment = 0;
+	colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	colorRef.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	VkAttachmentReference2 depthRef = { VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2 };
+	depthRef.attachment = 1;
+	depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	depthRef.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	VkAttachmentReference2 resolveColorRef = { VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2 };
+	resolveColorRef.attachment = 2;
+	resolveColorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	resolveColorRef.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	VkAttachmentReference2 resolveDepthRef = { VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2 };
+	resolveDepthRef.attachment = 3;
+	resolveDepthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	resolveDepthRef.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+
+	VkSubpassDescriptionDepthStencilResolve depthResolve = { VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE };
+	depthResolve.depthResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+	depthResolve.stencilResolveMode = vk.stencilResolveMode;
+	depthResolve.pDepthStencilResolveAttachment = &resolveDepthRef;
+
+	VkSubpassDescription2 subpass = { VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2 };
+	subpass.pNext = &depthResolve;
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorRef;
+	subpass.pResolveAttachments = &resolveColorRef;
+	subpass.pDepthStencilAttachment = &depthRef;
+
+	VkSubpassDependency2 dependencies[2] = { { VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2 }, { VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2 } };
+	dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[0].dstSubpass = 0;
+	dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+		| VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+		| VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+	dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+		| VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+	dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+		| VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	dependencies[1].srcSubpass = 0;
+	dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[1].srcStageMask = dependencies[0].dstStageMask;
+	dependencies[1].dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+		| VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependencies[1].srcAccessMask = dependencies[0].dstAccessMask;
+	dependencies[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT
+		| VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+	VkRenderPassCreateInfo2 info = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2 };
+	info.attachmentCount = 4;
+	info.pAttachments = attachments;
+	info.subpassCount = 1;
+	info.pSubpasses = &subpass;
+	info.dependencyCount = 2;
+	info.pDependencies = dependencies;
+	VkRenderPass pass;
+	VK_CheckResult( vkCreateRenderPass2( vk.device, &info, NULL, &pass ), "vkCreateRenderPass2" );
+	return pass;
+}
+
+// how many samples the frame can be drawn at: what is wanted (r_ext_multisample) as far as the device allows
+static VkSampleCountFlagBits VK_ChooseSamples( int wanted )
+{
+	vk.stencilResolveMode = VK_RESOLVE_MODE_NONE;
+	if ( wanted < 2 )
+	{
+		return VK_SAMPLE_COUNT_1_BIT;
+	}
+	if ( vk.properties.apiVersion < VK_API_VERSION_1_2 )
+	{
+		Com_Printf( "...multisampling needs Vulkan 1.2 (the device has less)\n" );
+		return VK_SAMPLE_COUNT_1_BIT;
+	}
+
+	// the depth buffer has to be resolved as well (the flares read it back): one sample of it is taken
+	VkPhysicalDeviceDepthStencilResolveProperties resolve = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES };
+	VkPhysicalDeviceProperties2 properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	properties.pNext = &resolve;
+	vkGetPhysicalDeviceProperties2( vk.physicalDevice, &properties );
+	if ( !( resolve.supportedDepthResolveModes & VK_RESOLVE_MODE_SAMPLE_ZERO_BIT ) )
+	{
+		Com_Printf( "...multisampling: the device cannot resolve the depth buffer\n" );
+		return VK_SAMPLE_COUNT_1_BIT;
+	}
+	if ( resolve.independentResolveNone )
+	{
+		vk.stencilResolveMode = VK_RESOLVE_MODE_NONE;
+	}
+	else if ( resolve.supportedStencilResolveModes & VK_RESOLVE_MODE_SAMPLE_ZERO_BIT )
+	{
+		vk.stencilResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+	}
+	else
+	{
+		Com_Printf( "...multisampling: the device cannot resolve the stencil buffer\n" );
+		return VK_SAMPLE_COUNT_1_BIT;
+	}
+
+	const VkSampleCountFlags supported = vk.properties.limits.framebufferColorSampleCounts
+		& vk.properties.limits.framebufferDepthSampleCounts & vk.properties.limits.framebufferStencilSampleCounts;
+	const VkSampleCountFlagBits steps[] = { VK_SAMPLE_COUNT_16_BIT, VK_SAMPLE_COUNT_8_BIT, VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_2_BIT };
+	const int counts[] = { 16, 8, 4, 2 };
+	for ( int i = 0; i < 4; i++ )
+	{
+		if ( counts[i] <= wanted && ( supported & steps[i] ) )
+		{
+			return steps[i];
+		}
+	}
+	return VK_SAMPLE_COUNT_1_BIT;
+}
+
 static void VK_CreateRenderTarget( void )
 {
 	vk.colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -412,18 +568,28 @@ static void VK_CreateRenderTarget( void )
 
 	VK_CreateImage( vk.colorFormat,
 		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		VK_IMAGE_ASPECT_COLOR_BIT, &vk.colorImage, &vk.colorMemory, &vk.colorView );
+		VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLE_COUNT_1_BIT, &vk.colorImage, &vk.colorMemory, &vk.colorView );
 	VK_CreateImage( vk.depthFormat,
 		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, &vk.depthImage, &vk.depthMemory, &vk.depthView );
+		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, VK_SAMPLE_COUNT_1_BIT, &vk.depthImage, &vk.depthMemory, &vk.depthView );
+	if ( vk.samples != VK_SAMPLE_COUNT_1_BIT )
+	{
+		VK_CreateImage( vk.colorFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+			VK_IMAGE_ASPECT_COLOR_BIT, vk.samples, &vk.msaaColorImage, &vk.msaaColorMemory, &vk.msaaColorView );
+		VK_CreateImage( vk.depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+			VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, vk.samples, &vk.msaaDepthImage, &vk.msaaDepthMemory, &vk.msaaDepthView );
+	}
 
-	vk.renderPassClear = VK_CreateRenderPass( true );
-	vk.renderPassLoad = VK_CreateRenderPass( false );
+	const bool multisampled = vk.samples != VK_SAMPLE_COUNT_1_BIT;
+	vk.renderPassClear = multisampled ? VK_CreateRenderPassMultisampled( true ) : VK_CreateRenderPass( true );
+	vk.renderPassLoad = multisampled ? VK_CreateRenderPassMultisampled( false ) : VK_CreateRenderPass( false );
 
-	const VkImageView views[2] = { vk.colorView, vk.depthView };
+	// (multisampled: the multisampled images first, the single sample ones they are resolved into after)
+	const VkImageView views[4] = { multisampled ? vk.msaaColorView : vk.colorView, multisampled ? vk.msaaDepthView : vk.depthView,
+		vk.colorView, vk.depthView };
 	VkFramebufferCreateInfo info = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 	info.renderPass = vk.renderPassClear;
-	info.attachmentCount = 2;
+	info.attachmentCount = multisampled ? 4 : 2;
 	info.pAttachments = views;
 	info.width = (uint32_t)vk.width;
 	info.height = (uint32_t)vk.height;
@@ -456,6 +622,17 @@ static void VK_CreateRenderTarget( void )
 	VK_ImageBarrier( cmd, vk.depthImage, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
 		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
+	if ( multisampled )
+	{
+		VK_ImageBarrier( cmd, vk.msaaColorImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
+		vkCmdClearColorImage( cmd, vk.msaaColorImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &colorRange );
+		VK_ImageBarrier( cmd, vk.msaaColorImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT );
+		VK_ImageBarrier( cmd, vk.msaaDepthImage, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
+	}
 	vkEndCommandBuffer( cmd );
 	VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	submit.commandBufferCount = 1;
@@ -470,6 +647,15 @@ static void VK_DestroyRenderTarget( void )
 	vkDestroyFramebuffer( vk.device, vk.framebuffer, NULL );
 	vkDestroyRenderPass( vk.device, vk.renderPassClear, NULL );
 	vkDestroyRenderPass( vk.device, vk.renderPassLoad, NULL );
+	if ( vk.samples != VK_SAMPLE_COUNT_1_BIT )
+	{
+		vkDestroyImageView( vk.device, vk.msaaDepthView, NULL );
+		vkDestroyImage( vk.device, vk.msaaDepthImage, NULL );
+		vkFreeMemory( vk.device, vk.msaaDepthMemory, NULL );
+		vkDestroyImageView( vk.device, vk.msaaColorView, NULL );
+		vkDestroyImage( vk.device, vk.msaaColorImage, NULL );
+		vkFreeMemory( vk.device, vk.msaaColorMemory, NULL );
+	}
 	vkDestroyImageView( vk.device, vk.depthView, NULL );
 	vkDestroyImage( vk.device, vk.depthImage, NULL );
 	vkFreeMemory( vk.device, vk.depthMemory, NULL );
@@ -633,6 +819,15 @@ void VK_Init( glconfig_t *glConfig )
 
 	VK_CreateInstance();
 	VK_CreateDevice();
+	{
+		cvar_t *multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+		vk.samples = VK_ChooseSamples( multisample->integer );
+		const int actual = vk.samples == VK_SAMPLE_COUNT_1_BIT ? 0 : (int)vk.samples;
+		if ( actual != multisample->integer )
+		{
+			ri.Cvar_Set( "r_ext_multisample", va( "%d", actual ) );	// (so that the menu shows what is in use)
+		}
+	}
 	VK_CreateRenderTarget();
 	VK_CreateSwapchain();
 	VK_CreateFrames();
@@ -672,6 +867,7 @@ void VK_Init( glconfig_t *glConfig )
 	qglLockArraysEXT = vkglLockArraysEXT;
 	qglUnlockArraysEXT = vkglUnlockArraysEXT;
 	qglStencilOpSeparate = vkglStencilOpSeparate;
+	qglMinSampleShadingARB = ( vk.samples != VK_SAMPLE_COUNT_1_BIT && vk.features.sampleRateShading ) ? vkglMinSampleShadingARB : NULL;
 
 	g_bDynamicGlowSupported = false;
 	ri.Cvar_Set( "r_DynamicGlow", "0" );

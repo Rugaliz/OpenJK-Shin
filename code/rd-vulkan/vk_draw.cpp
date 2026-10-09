@@ -205,7 +205,16 @@ static VkPipeline CreatePipeline( const vkPipelineKey_t *key )
 	raster.lineWidth = 1.0f;
 
 	VkPipelineMultisampleStateCreateInfo multisample = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-	multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisample.rasterizationSamples = vk.samples;
+	if ( vk.samples != VK_SAMPLE_COUNT_1_BIT )
+	{
+		multisample.alphaToCoverageEnable = key->alphaToCoverage ? VK_TRUE : VK_FALSE;
+		if ( key->sampleShading && vk.features.sampleRateShading )
+		{
+			multisample.sampleShadingEnable = VK_TRUE;
+			multisample.minSampleShading = key->sampleShading / 100.0f;
+		}
+	}
 
 	VkPipelineDepthStencilStateCreateInfo depthStencil = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 	depthStencil.depthTestEnable = key->depthTest ? VK_TRUE : VK_FALSE;
