@@ -30,7 +30,7 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
       surface creation, drawable size; `REF_API_VERSION` 20.
 - [x] 2. CMake targets `rdsp-vulkan` / `rdjosp-vulkan` (option `BuildSPRdVulkan`, needs the Vulkan headers and `glslc`),
       `RD_VULKAN` build with a null `qgl` layer so it links and starts (blank window).
-- [ ] 3. Vulkan core: instance, device, swapchain, per-frame sync, depth/stencil (+MSAA) target, clear and present
+- [x] 3. Vulkan core: instance, device, swapchain, per-frame sync, depth/stencil (+MSAA) target, clear and present
       driven by `RE_BeginFrame` / `RE_EndFrame`; vsync and resize / `vid_restart`.
 - [ ] 4. Textures: `qglTexImage2D`, `TexSubImage2D`, mips, filters, wrap, anisotropy -> `VkImage` + samplers.
 - [ ] 5. 2D drawing (immediate mode + `DrawStretchPic`): menus and console visible.

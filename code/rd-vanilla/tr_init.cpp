@@ -1939,6 +1939,9 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
+#ifdef RD_VULKAN
+		VK_Shutdown();
+#endif
 		ri.WIN_Shutdown();
 	}
 	tr.registered = qfalse;
