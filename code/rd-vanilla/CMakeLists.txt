@@ -217,9 +217,13 @@ if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 			"${SPDir}/rd-vulkan/qgl.h"
 			"${SPDir}/rd-vulkan/vk_local.h"
 			"${SPDir}/rd-vulkan/vk_priv.h"
+			"${SPDir}/rd-vulkan/vk_spirv.h"
+			"${SPDir}/rd-vulkan/vk_draw.cpp"
 			"${SPDir}/rd-vulkan/vk_frame.cpp"
 			"${SPDir}/rd-vulkan/vk_gl.cpp"
+			"${SPDir}/rd-vulkan/vk_image.cpp"
 			"${SPDir}/rd-vulkan/vk_init.cpp"
+			"${SPDir}/rd-vulkan/vk_mem.cpp"
 			)
 		source_group("vulkan" FILES ${SPRDVulkanFiles})
 

@@ -32,8 +32,8 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
       `RD_VULKAN` build with a null `qgl` layer so it links and starts (blank window).
 - [x] 3. Vulkan core: instance, device, swapchain, per-frame sync, depth/stencil (+MSAA) target, clear and present
       driven by `RE_BeginFrame` / `RE_EndFrame`; vsync and resize / `vid_restart`.
-- [ ] 4. Textures: `qglTexImage2D`, `TexSubImage2D`, mips, filters, wrap, anisotropy -> `VkImage` + samplers.
-- [ ] 5. 2D drawing (immediate mode + `DrawStretchPic`): menus and console visible.
+- [x] 4. Textures: `qglTexImage2D`, `TexSubImage2D`, mips, filters, wrap, anisotropy -> `VkImage` + samplers.
+- [x] 5. 2D drawing (immediate mode + `DrawStretchPic`): menus and console visible.
 - [ ] 6. 3D: matrices, depth, blend, alpha test, cull, multitexture + texenv, fog, clip plane, polygon offset, scissor,
       stencil (shadows), depth range (weapon), vertex arrays.
 - [ ] 7. `ReadPixels` (screenshots), `CopyTexSubImage2D` (screen warp / glow / cinematics), gamma, `DrawStretchRaw`.
