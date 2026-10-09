@@ -433,5 +433,25 @@ extern PFNGLGETPROGRAMIVARBPROC qglGetProgramivARB;
 extern PFNGLGETPROGRAMSTRINGARBPROC qglGetProgramStringARB;
 extern PFNGLISPROGRAMARBPROC qglIsProgramARB;
 
+// GLSL, core since OpenGL 2.0 (tr_glsl.cpp)
+extern PFNGLCREATESHADERPROC qglCreateShader;
+extern PFNGLSHADERSOURCEPROC qglShaderSource;
+extern PFNGLCOMPILESHADERPROC qglCompileShader;
+extern PFNGLGETSHADERIVPROC qglGetShaderiv;
+extern PFNGLGETSHADERINFOLOGPROC qglGetShaderInfoLog;
+extern PFNGLDELETESHADERPROC qglDeleteShader;
+extern PFNGLCREATEPROGRAMPROC qglCreateProgram;
+extern PFNGLATTACHSHADERPROC qglAttachShader;
+extern PFNGLLINKPROGRAMPROC qglLinkProgram;
+extern PFNGLGETPROGRAMIVPROC qglGetProgramiv;
+extern PFNGLGETPROGRAMINFOLOGPROC qglGetProgramInfoLog;
+extern PFNGLDELETEPROGRAMPROC qglDeleteProgram;
+extern PFNGLUSEPROGRAMPROC qglUseProgram;
+extern PFNGLGETUNIFORMLOCATIONPROC qglGetUniformLocation;
+extern PFNGLUNIFORM1IPROC qglUniform1i;
+extern PFNGLUNIFORM1FPROC qglUniform1f;
+extern PFNGLUNIFORM3FPROC qglUniform3f;
+extern PFNGLUNIFORM4FVPROC qglUniform4fv;
+
 extern PFNGLLOCKARRAYSEXTPROC qglLockArraysEXT;
 extern PFNGLUNLOCKARRAYSEXTPROC qglUnlockArraysEXT;
