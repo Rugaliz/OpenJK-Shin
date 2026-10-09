@@ -380,3 +380,71 @@ void VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum t
 	vkDestroyBuffer( vk.device, buffer, NULL );
 	vkFreeMemory( vk.device, memory, NULL );
 }
+
+/*
+=================
+VK_ReadDepth
+
+glReadPixels of one depth value (the flares ask whether something is in front of them), 0 (near) to 1 (far).
+=================
+*/
+float VK_ReadDepth( int x, int y )
+{
+	if ( x < 0 || y < 0 || x >= vk.width || y >= vk.height )
+	{
+		return 1.0f;
+	}
+
+	VK_EnsureFrame();
+	VK_EndRenderPass();
+
+	VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bufferInfo.size = 16;
+	bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	VkBuffer buffer;
+	VK_CheckResult( vkCreateBuffer( vk.device, &bufferInfo, NULL, &buffer ), "vkCreateBuffer" );
+	VkMemoryRequirements requirements;
+	vkGetBufferMemoryRequirements( vk.device, buffer, &requirements );
+	VkMemoryAllocateInfo allocate = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	allocate.allocationSize = requirements.size;
+	allocate.memoryTypeIndex = VK_FindMemoryType( requirements.memoryTypeBits,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+	VkDeviceMemory memory;
+	VK_CheckResult( vkAllocateMemory( vk.device, &allocate, NULL, &memory ), "vkAllocateMemory" );
+	VK_CheckResult( vkBindBufferMemory( vk.device, buffer, memory, 0 ), "vkBindBufferMemory" );
+
+	const VkImageAspectFlags aspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	VK_ImageBarrier( vk.cmd, vk.depthImage, aspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT );
+	VkBufferImageCopy region = {};
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	region.imageSubresource.layerCount = 1;
+	region.imageOffset.x = x;
+	region.imageOffset.y = vk.height - 1 - y;
+	region.imageExtent.width = 1;
+	region.imageExtent.height = 1;
+	region.imageExtent.depth = 1;
+	vkCmdCopyImageToBuffer( vk.cmd, vk.depthImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region );
+	VK_ImageBarrier( vk.cmd, vk.depthImage, aspects, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
+	VK_SubmitFrame( true );
+
+	void *mapped = NULL;
+	VK_CheckResult( vkMapMemory( vk.device, memory, 0, 16, 0, &mapped ), "vkMapMemory" );
+	float depth;
+	if ( vk.depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT )
+	{
+		depth = *(const float *)mapped;
+	}
+	else
+	{
+		// (24 bit depth comes out in the low bits of a 32 bit texel)
+		depth = (float)( *(const unsigned int *)mapped & 0xFFFFFFu ) / 16777215.0f;
+	}
+	vkUnmapMemory( vk.device, memory );
+	vkDestroyBuffer( vk.device, buffer, NULL );
+	vkFreeMemory( vk.device, memory, NULL );
+	return depth;
+}

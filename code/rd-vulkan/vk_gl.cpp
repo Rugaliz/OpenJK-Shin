@@ -1029,9 +1029,21 @@ void vkglTexParameterfv( GLenum target, GLenum pname, const GLfloat *params )
 	// (the border colour is the one vector parameter, and clamp-to-edge does not use it)
 }
 
-// (copies of the frame buffer into textures: later in the plan)
-void vkglCopyTexImage2D( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border ) {}
-void vkglCopyTexSubImage2D( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height ) {}
+void vkglCopyTexImage2D( GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border )
+{
+	if ( target == GL_TEXTURE_2D && level == 0 )
+	{
+		VK_CopyFramebuffer( gl.bound[gl.activeUnit], width, height, 0, 0, x, y, width, height );
+	}
+}
+
+void vkglCopyTexSubImage2D( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height )
+{
+	if ( target == GL_TEXTURE_2D && level == 0 )
+	{
+		VK_CopyFramebuffer( gl.bound[gl.activeUnit], 0, 0, xoffset, yoffset, x, y, width, height );
+	}
+}
 
 /*
 =============================================================================
@@ -1156,8 +1168,9 @@ void vkglReadPixels( GLint x, GLint y, GLsizei width, GLsizei height, GLenum for
 {
 	if ( format == GL_DEPTH_COMPONENT && type == GL_FLOAT )
 	{
-		// (depth read backs are not done yet: report the far plane, which means "nothing in front")
-		for ( int i = 0; i < width * height; i++ ) ( (float *)pixels )[i] = 1.0f;
+		// (only single values are asked for: the flares looking whether something is in front of them)
+		const float depth = VK_ReadDepth( x, y );
+		for ( int i = 0; i < width * height; i++ ) ( (float *)pixels )[i] = depth;
 		return;
 	}
 	VK_ReadPixels( x, y, width, height, format, type, pixels );

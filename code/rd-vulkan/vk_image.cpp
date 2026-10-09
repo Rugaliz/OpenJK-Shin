@@ -410,6 +410,65 @@ void VK_TexSubImage2D( GLuint id, GLint level, GLint x, GLint y, GLsizei width, 
 	UploadRegion( texture, level, x, y, width, height, (const byte *)pixels, false );
 }
 
+/*
+=================
+VK_CopyFramebuffer
+
+glCopyTexImage2D / glCopyTexSubImage2D: a region of the colour buffer (as it is now) goes into a texture, upside
+down relative to the buffer's rows so that it reads like an OpenGL texture (row 0 is the bottom row of the region).
+With createWidth > 0 the texture is made that size first.
+=================
+*/
+void VK_CopyFramebuffer( GLuint id, int createWidth, int createHeight, int dstX, int dstY, int srcX, int srcY, int width, int height )
+{
+	if ( id == 0 || width <= 0 || height <= 0 )
+	{
+		return;
+	}
+	vkTexture_t *texture = VK_TextureForId( id, true );
+	if ( createWidth > 0 && ( !texture->image || texture->width != createWidth || texture->height != createHeight ) )
+	{
+		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+		texture->image = VK_NULL_HANDLE;
+		texture->view = VK_NULL_HANDLE;
+		if ( !CreateStorage( texture, createWidth, createHeight ) )
+		{
+			return;
+		}
+	}
+	if ( !texture->image || srcX < 0 || srcY < 0 || srcX + width > vk.width || srcY + height > vk.height
+		|| dstX < 0 || dstY < 0 || dstX + width > texture->width || dstY + height > texture->height )
+	{
+		return;
+	}
+
+	VK_EnsureFrame();
+	VK_EndRenderPass();
+	VkCommandBuffer cmd = vk.cmd;
+	VK_ImageBarrier( cmd, vk.colorImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT );
+	ImageBarrier( cmd, texture->image, 0, 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
+
+	VkImageBlit blit = {};
+	blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	blit.srcSubresource.layerCount = 1;
+	blit.srcOffsets[0] = { srcX, vk.height - srcY, 0 };
+	blit.srcOffsets[1] = { srcX + width, vk.height - ( srcY + height ), 1 };
+	blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	blit.dstSubresource.layerCount = 1;
+	blit.dstOffsets[0] = { dstX, dstY, 0 };
+	blit.dstOffsets[1] = { dstX + width, dstY + height, 1 };
+	vkCmdBlitImage( cmd, vk.colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1, &blit, VK_FILTER_NEAREST );
+
+	ImageBarrier( cmd, texture->image, 0, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+	VK_ImageBarrier( cmd, vk.colorImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT );
+}
+
 void VK_TexParameter( GLuint id, GLenum pname, GLfloat value )
 {
 	if ( id == 0 )
