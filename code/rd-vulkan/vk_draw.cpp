@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define MAX_DESCRIPTOR_SETS	8192
 
 static VkShaderModule			vertexShader, fragmentShader;
+static VkShaderModule			dlightVertexShader, dlightFragmentShader;
 static VkDescriptorSetLayout	descriptorSetLayout;
 static VkPipelineLayout			pipelineLayout;
 static VkDescriptorPool			descriptorPool;
@@ -175,13 +176,13 @@ static VkPipeline CreatePipeline( const vkPipelineKey_t *key )
 		{ 0, 12, VK_VERTEX_INPUT_RATE_VERTEX },
 		{ 1, key->colorConst ? 0u : 4u, VK_VERTEX_INPUT_RATE_VERTEX },
 		{ 2, key->uv0Const ? 0u : 8u, VK_VERTEX_INPUT_RATE_VERTEX },
-		{ 3, key->uv1Const ? 0u : 8u, VK_VERTEX_INPUT_RATE_VERTEX },
+		{ 3, key->program ? 12u : ( key->uv1Const ? 0u : 8u ), VK_VERTEX_INPUT_RATE_VERTEX },
 	};
 	VkVertexInputAttributeDescription attributes[4] = {
 		{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 },
 		{ 1, 1, VK_FORMAT_R8G8B8A8_UNORM, 0 },
 		{ 2, 2, VK_FORMAT_R32G32_SFLOAT, 0 },
-		{ 3, 3, VK_FORMAT_R32G32_SFLOAT, 0 },
+		{ 3, 3, key->program ? VK_FORMAT_R32G32B32_SFLOAT : VK_FORMAT_R32G32_SFLOAT, 0 },
 	};
 	VkPipelineVertexInputStateCreateInfo vertexInput = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 	vertexInput.vertexBindingDescriptionCount = 4;
@@ -263,12 +264,15 @@ static VkPipeline CreatePipeline( const vkPipelineKey_t *key )
 
 	VkPipelineShaderStageCreateInfo stages[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO }, { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
 	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-	stages[0].module = vertexShader;
+	stages[0].module = key->program ? dlightVertexShader : vertexShader;
 	stages[0].pName = "main";
 	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	stages[1].module = fragmentShader;
+	stages[1].module = key->program ? dlightFragmentShader : fragmentShader;
 	stages[1].pName = "main";
-	stages[1].pSpecializationInfo = &specialization;
+	if ( !key->program )
+	{
+		stages[1].pSpecializationInfo = &specialization;
+	}
 
 	VkGraphicsPipelineCreateInfo info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
 	info.stageCount = 2;
@@ -361,7 +365,7 @@ void VK_AllocateGeometry( vkGeometry_t *geometry, int vertexCount, int indexCoun
 	const VkDeviceSize positionSize = (VkDeviceSize)vertexCount * 12;
 	const VkDeviceSize colorSize = key->colorConst ? 4 : (VkDeviceSize)vertexCount * 4;
 	const VkDeviceSize uv0Size = key->uv0Const ? 8 : (VkDeviceSize)vertexCount * 8;
-	const VkDeviceSize uv1Size = key->uv1Const ? 8 : (VkDeviceSize)vertexCount * 8;
+	const VkDeviceSize uv1Size = key->program ? (VkDeviceSize)vertexCount * 12 : ( key->uv1Const ? 8 : (VkDeviceSize)vertexCount * 8 );
 	const VkDeviceSize indexSize = (VkDeviceSize)indexCount * 4;
 	const VkDeviceSize needed = positionSize + colorSize + uv0Size + uv1Size + indexSize + 5 * 16;
 	if ( needed > GEOMETRY_SLOT_SIZE )
@@ -543,6 +547,13 @@ void VK_InitDraw( void )
 	shaderInfo.pCode = vk_spirv_fixed_frag;
 	VK_CheckResult( vkCreateShaderModule( vk.device, &shaderInfo, NULL, &fragmentShader ), "vkCreateShaderModule" );
 
+	shaderInfo.codeSize = sizeof( vk_spirv_dlight_vert );
+	shaderInfo.pCode = vk_spirv_dlight_vert;
+	VK_CheckResult( vkCreateShaderModule( vk.device, &shaderInfo, NULL, &dlightVertexShader ), "vkCreateShaderModule" );
+	shaderInfo.codeSize = sizeof( vk_spirv_dlight_frag );
+	shaderInfo.pCode = vk_spirv_dlight_frag;
+	VK_CheckResult( vkCreateShaderModule( vk.device, &shaderInfo, NULL, &dlightFragmentShader ), "vkCreateShaderModule" );
+
 	VkDescriptorSetLayoutBinding layoutBindings[2] = {};
 	for ( uint32_t i = 0; i < 2; i++ )
 	{
@@ -634,6 +645,8 @@ void VK_ShutdownDraw( void )
 	vkDestroyDescriptorSetLayout( vk.device, descriptorSetLayout, NULL );
 	vkDestroyShaderModule( vk.device, vertexShader, NULL );
 	vkDestroyShaderModule( vk.device, fragmentShader, NULL );
+	vkDestroyShaderModule( vk.device, dlightVertexShader, NULL );
+	vkDestroyShaderModule( vk.device, dlightFragmentShader, NULL );
 	vkUnmapMemory( vk.device, geometryMemory );
 	vkDestroyBuffer( vk.device, geometryBuffer, NULL );
 	vkFreeMemory( vk.device, geometryMemory, NULL );

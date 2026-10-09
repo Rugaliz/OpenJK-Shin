@@ -139,6 +139,7 @@ void VK_EnsureFrame( void )
 	vk.frameCommandBufferCount[vk.frameIndex] = 0;
 	VK_ProcessDeferredDeletes();
 	VK_BeginFrameDraw();
+	VK_BeginFramePost();
 	vk.waitedForImage = false;
 	VK_BeginCommandBuffer();
 	VK_BeginRenderPass( true );

@@ -38,7 +38,7 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
       stencil (shadows), depth range (weapon), vertex arrays.
 - [x] 7. `ReadPixels` (screenshots), `CopyTexImage2D` / `CopyTexSubImage2D` (distortion effects), depth read back (flares), cinematics (`DrawStretchRaw`). Gamma is done by the renderer on the textures, as in the OpenGL one.
 - [~] 8. Done: MSAA (with alpha to coverage and sample shading), anisotropy, vsync modes, `vid_restart` and mode changes, a pipeline cache kept between runs, 3440x1440 at 8x MSAA reaches the 250 fps cap. Still to do: run with the validation layer (`r_vkValidation 1`, needs the layer installed: `vulkan-validation-layers`), Windows / Wine check.
-- [ ] 9. Post effects (SSAO, bloom, SMAA, shader dynamic lights) natively in Vulkan; menu rows show only when available.
+- [x] 9. Post effects (SSAO, bloom, SMAA, shader dynamic lights) natively in Vulkan (`vk_post.cpp`, shaders `post_*.frag`, `smaa_*.frag`, `dlight.*`); the Setup > More Video rows show with the Vulkan renderer too. Checked against the OpenGL renderer by screenshots (occlusion map, bloom, SMAA) and with 4x multisampling.
 - [ ] 10. Docs, README, CI (build the module only when the Vulkan headers and `glslc` exist).
 
 Shaders are GLSL compiled to SPIR-V at build time with `glslc`; the generated SPIR-V is also checked in as a header
@@ -62,8 +62,6 @@ The first run of a scene builds pipelines, which can be seen as short stutters; 
 
 ## What is not there yet
 
-* Screen effects (ambient occlusion, bloom, SMAA) and shader dynamic lights: they exist in the OpenGL renderer only, the
-  Setup > More Video rows for them do not show with the Vulkan one (step 9).
 * The dynamic glow (needs old NVIDIA / ARB programs), as in OpenGL on current drivers.
 * Texture compression (the textures are uploaded as RGBA8, the graphics memory use is higher than in OpenGL).
 * Not tried on Windows yet.

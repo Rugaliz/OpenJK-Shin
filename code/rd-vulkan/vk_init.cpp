@@ -833,6 +833,7 @@ void VK_Init( glconfig_t *glConfig )
 	VK_CreateFrames();
 	VK_InitImages();
 	VK_InitDraw();
+	VK_InitPost();
 	VK_ResetGLState();
 
 	Com_Printf( "...using %s\n", vk.properties.deviceName );
@@ -872,6 +873,9 @@ void VK_Init( glconfig_t *glConfig )
 	g_bDynamicGlowSupported = false;
 	ri.Cvar_Set( "r_DynamicGlow", "0" );
 
+	R_GLSL_Init();
+	R_Post_Init();
+
 	// the renderer ends a frame with ri.WIN_Present: the Vulkan module presents itself, the window does not
 	ri.WIN_Present = VK_PresentFrame;
 }
@@ -883,6 +887,7 @@ void VK_Shutdown( void )
 		return;
 	}
 	vkDeviceWaitIdle( vk.device );
+	VK_ShutdownPost();
 	VK_ShutdownDraw();
 	VK_ShutdownImages();
 
