@@ -44,14 +44,18 @@ typedef struct {
 	GLint	uniforms[8];
 } postProgram_t;
 
+#define POST_BLOOM_LEVELS	5
+
 static struct {
 	qboolean		ready;				// entry points are there
 	int				width, height;		// size of the view the textures below are made for
 	GLuint			sceneTexture;		// copy of the colour of the view
 	GLuint			depthTexture;		// copy of its depth
 	postTarget_t	aoA, aoB;			// the occlusion as it is made, and while it is blurred
+	postTarget_t	bloom[POST_BLOOM_LEVELS];	// the bright parts of the view, each level half the size of the one before
 	postProgram_t	composite;			// puts the effects together and draws them over the view
 	postProgram_t	ssao, ssaoBlur;
+	postProgram_t	bloomDown, bloomUp;
 	qboolean		failed;				// a program did not build, stop trying
 } post;
 
@@ -59,6 +63,7 @@ static const char *postVertexSource =
 	"#version 120\n"
 	"void main() {\n"
 	"	gl_Position = gl_Vertex;\n"	// the quad is given in clip space
+	"	gl_TexCoord[0] = gl_MultiTexCoord0;\n"
 	"}\n";
 
 // the view space position of a pixel, from its depth and the projection matrix of the view
@@ -144,13 +149,59 @@ static const char *postSsaoBlurFragmentSource =
 	"	gl_FragColor = vec4( vec3( sum / max( weights, 0.0001 ) ), 1.0 );\n"
 	"}\n";
 
+// Shrinks the source to half size with 13 taps, which holds the bright spots together where a plain average of
+// four would make them flicker. On the first level only the part of every tap that is brighter than the
+// threshold goes on, with a soft knee.
+static const char *postBloomDownFragmentSource =
+	"#version 120\n"
+	"uniform sampler2D uSource;\n"
+	"uniform vec2 uTexel;\n"		// size of a texel of the source
+	"uniform vec3 uParams;\n"		// threshold, knee, 1 on the first level
+	"vec3 tap( vec2 uv, vec2 offset ) {\n"
+	"	vec3 c = texture2D( uSource, uv + offset * uTexel ).rgb;\n"
+	"	if ( uParams.z > 0.5 ) {\n"
+	"		float brightness = max( c.r, max( c.g, c.b ) );\n"
+	"		float soft = clamp( brightness - uParams.x + uParams.y, 0.0, 2.0 * uParams.y );\n"
+	"		soft = soft * soft / ( 4.0 * uParams.y + 0.0001 );\n"
+	"		c *= max( soft, brightness - uParams.x ) / max( brightness, 0.0001 );\n"
+	"	}\n"
+	"	return c;\n"
+	"}\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].st;\n"
+	"	vec3 a = tap( uv, vec2( -2.0, -2.0 ) ), b = tap( uv, vec2( 0.0, -2.0 ) ), c = tap( uv, vec2( 2.0, -2.0 ) );\n"
+	"	vec3 d = tap( uv, vec2( -2.0, 0.0 ) ), e = tap( uv, vec2( 0.0, 0.0 ) ), f = tap( uv, vec2( 2.0, 0.0 ) );\n"
+	"	vec3 g = tap( uv, vec2( -2.0, 2.0 ) ), h = tap( uv, vec2( 0.0, 2.0 ) ), i = tap( uv, vec2( 2.0, 2.0 ) );\n"
+	"	vec3 j = tap( uv, vec2( -1.0, -1.0 ) ), k = tap( uv, vec2( 1.0, -1.0 ) );\n"
+	"	vec3 l = tap( uv, vec2( -1.0, 1.0 ) ), m = tap( uv, vec2( 1.0, 1.0 ) );\n"
+	"	vec3 colour = e * 0.125 + ( a + c + g + i ) * 0.03125 + ( b + d + f + h ) * 0.0625 + ( j + k + l + m ) * 0.125;\n"
+	"	gl_FragColor = vec4( colour, 1.0 );\n"
+	"}\n";
+
+// grows the source to twice the size with a tent filter; added on top of what is in the target
+static const char *postBloomUpFragmentSource =
+	"#version 120\n"
+	"uniform sampler2D uSource;\n"
+	"uniform vec2 uTexel;\n"		// size of a texel of the source
+	"uniform float uScale;\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].st;\n"
+	"	vec3 colour = texture2D( uSource, uv ).rgb * 4.0;\n"
+	"	colour += ( texture2D( uSource, uv + vec2( uTexel.x, 0.0 ) ).rgb + texture2D( uSource, uv - vec2( uTexel.x, 0.0 ) ).rgb +\n"
+	"				texture2D( uSource, uv + vec2( 0.0, uTexel.y ) ).rgb + texture2D( uSource, uv - vec2( 0.0, uTexel.y ) ).rgb ) * 2.0;\n"
+	"	colour += texture2D( uSource, uv + uTexel ).rgb + texture2D( uSource, uv - uTexel ).rgb +\n"
+	"			  texture2D( uSource, uv + vec2( uTexel.x, -uTexel.y ) ).rgb + texture2D( uSource, uv + vec2( -uTexel.x, uTexel.y ) ).rgb;\n"
+	"	gl_FragColor = vec4( colour * ( uScale / 16.0 ), 1.0 );\n"
+	"}\n";
+
 // the view with the effects on it
 static const char *postCompositeFragmentSource =
 	"#version 120\n"
 	"uniform sampler2D uScene;\n"
 	"uniform sampler2D uAO;\n"
+	"uniform sampler2D uBloom;\n"
 	"uniform vec4 uRect;\n"			// x, y, width, height of the view in the window
-	"uniform vec2 uMode;\n"			// 1 if the occlusion is on, 1 to show it alone
+	"uniform vec3 uMode;\n"			// 1 if the occlusion is on, 1 to show it alone, how much bloom is added
 	"void main() {\n"
 	"	vec2 uv = ( gl_FragCoord.xy - uRect.xy ) / uRect.zw;\n"
 	"	vec3 colour = texture2D( uScene, uv ).rgb;\n"
@@ -158,13 +209,14 @@ static const char *postCompositeFragmentSource =
 	"		float ao = texture2D( uAO, uv ).r;\n"
 	"		colour = uMode.y > 0.5 ? vec3( ao ) : colour * ao;\n"
 	"	}\n"
+	"	colour += texture2D( uBloom, uv ).rgb * uMode.z;\n"
 	"	gl_FragColor = vec4( colour, 1.0 );\n"
 	"}\n";
 
 void R_Post_Init( void ) {
 	memset( &post, 0, sizeof( post ) );
 
-	if ( !R_GLSL_Available() || !qglActiveTextureARB ) {
+	if ( !R_GLSL_Available() || !qglActiveTextureARB || !qglMultiTexCoord2fARB ) {
 		return;
 	}
 	if ( !ri.GL_ExtensionSupported( "GL_ARB_framebuffer_object" ) ) {
@@ -224,6 +276,8 @@ static void Post_NewTarget( postTarget_t *target, int width, int height ) {
 }
 
 static void Post_FreeTargets( void ) {
+	int i;
+
 	if ( post.sceneTexture ) {
 		qglDeleteTextures( 1, &post.sceneTexture );
 	}
@@ -233,11 +287,16 @@ static void Post_FreeTargets( void ) {
 	post.sceneTexture = post.depthTexture = 0;
 	Post_FreeTarget( &post.aoA );
 	Post_FreeTarget( &post.aoB );
+	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
+		Post_FreeTarget( &post.bloom[i] );
+	}
 	post.width = post.height = 0;
 }
 
 // makes the textures for a view of this size, if they are not there yet
 static void Post_EnsureTargets( int width, int height ) {
+	int i;
+
 	if ( post.width == width && post.height == height && post.sceneTexture ) {
 		return;
 	}
@@ -246,6 +305,9 @@ static void Post_EnsureTargets( int width, int height ) {
 	post.depthTexture = Post_NewTexture( GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, width, height );
 	Post_NewTarget( &post.aoA, width, height );
 	Post_NewTarget( &post.aoB, width, height );
+	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
+		Post_NewTarget( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
+	}
 	post.width = width;
 	post.height = height;
 }
@@ -266,9 +328,13 @@ static qboolean Post_BuildProgram( postProgram_t *program, const char *name, con
 
 static void Post_Quad( void ) {
 	qglBegin( GL_QUADS );
+	qglMultiTexCoord2fARB( GL_TEXTURE0_ARB, 0.0f, 0.0f );
 	qglVertex2f( -1.0f, -1.0f );
+	qglMultiTexCoord2fARB( GL_TEXTURE0_ARB, 1.0f, 0.0f );
 	qglVertex2f( 1.0f, -1.0f );
+	qglMultiTexCoord2fARB( GL_TEXTURE0_ARB, 1.0f, 1.0f );
 	qglVertex2f( 1.0f, 1.0f );
+	qglMultiTexCoord2fARB( GL_TEXTURE0_ARB, 0.0f, 1.0f );
 	qglVertex2f( -1.0f, 1.0f );
 	qglEnd();
 }
@@ -288,7 +354,7 @@ static qboolean Post_Wanted( void ) {
 	if ( backEnd.viewParms.isPortal || backEnd.viewParms.viewportWidth < 64 || backEnd.viewParms.viewportHeight < 64 ) {
 		return qfalse;
 	}
-	return (qboolean)( r_ssao->integer || r_postDebug->integer );
+	return (qboolean)( r_ssao->integer || r_bloom->integer || r_postDebug->integer );
 }
 
 // draws the quad into a target (or the window, with 0), with the viewport set for it
@@ -352,6 +418,54 @@ static qboolean Post_Ssao( void ) {
 
 /*
 ================
+Post_Bloom
+
+The parts of the scene that are brighter than r_bloomThreshold, shrunk through POST_BLOOM_LEVELS levels and
+grown back, every level added to the next larger one, which makes a glow that is wide and smooth. Leaves it in
+post.bloom[0].
+================
+*/
+static qboolean Post_Bloom( void ) {
+	static const char *const downUniforms[] = { "uSource", "uTexel", "uParams", NULL };
+	static const char *const upUniforms[] = { "uSource", "uTexel", "uScale", NULL };
+	int i;
+
+	if ( ( !post.bloomDown.id && !Post_BuildProgram( &post.bloomDown, "bloom down", postBloomDownFragmentSource, downUniforms ) ) ||
+		 ( !post.bloomUp.id && !Post_BuildProgram( &post.bloomUp, "bloom up", postBloomUpFragmentSource, upUniforms ) ) ) {
+		return qfalse;
+	}
+
+	// down: the view, then every level from the one before
+	qglUseProgram( post.bloomDown.id );
+	qglUniform1i( post.bloomDown.uniforms[0], 0 );
+	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
+		const GLuint	source = i ? post.bloom[i - 1].texture : post.sceneTexture;
+		const int		sourceWidth = i ? post.bloom[i - 1].width : post.width;
+		const int		sourceHeight = i ? post.bloom[i - 1].height : post.height;
+
+		Post_BindTexture( 0, source );
+		qglUniform2f( post.bloomDown.uniforms[1], 1.0f / sourceWidth, 1.0f / sourceHeight );
+		qglUniform3f( post.bloomDown.uniforms[2], r_bloomThreshold->value, 0.5f * r_bloomThreshold->value, i ? 0.0f : 1.0f );
+		Post_DrawInto( &post.bloom[i] );
+	}
+
+	// up: every level added to the one above it
+	GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+	qglUseProgram( post.bloomUp.id );
+	qglUniform1i( post.bloomUp.uniforms[0], 0 );
+	qglUniform1f( post.bloomUp.uniforms[2], 0.8f );
+	for ( i = POST_BLOOM_LEVELS - 1; i > 0; i-- ) {
+		Post_BindTexture( 0, post.bloom[i].texture );
+		qglUniform2f( post.bloomUp.uniforms[1], 1.0f / post.bloom[i].width, 1.0f / post.bloom[i].height );
+		Post_DrawInto( &post.bloom[i - 1] );
+	}
+	GL_State( GLS_DEPTHTEST_DISABLE );
+
+	return qtrue;
+}
+
+/*
+================
 RB_PostProcess
 
 Called when the 3D view is finished. Leaves the GL state as it found it, so the 2D drawing after it does not
@@ -359,14 +473,14 @@ notice.
 ================
 */
 void RB_PostProcess( void ) {
-	static const char *const compositeUniforms[] = { "uScene", "uAO", "uRect", "uMode", NULL };
+	static const char *const compositeUniforms[] = { "uScene", "uAO", "uBloom", "uRect", "uMode", NULL };
 	const int	x = backEnd.viewParms.viewportX;
 	const int	y = backEnd.viewParms.viewportY;
 	const int	width = backEnd.viewParms.viewportWidth;
 	const int	height = backEnd.viewParms.viewportHeight;
 	const float	rect[4] = { (float)x, (float)y, (float)width, (float)height };
 	const GLboolean	scissored = qglIsEnabled( GL_SCISSOR_TEST );
-	qboolean	ssao;
+	qboolean	ssao, bloom;
 
 	if ( post.failed || !Post_Wanted() ) {
 		return;
@@ -401,20 +515,29 @@ void RB_PostProcess( void ) {
 		post.failed = qtrue;
 	}
 
+	bloom = (qboolean)( r_bloom->integer && Post_Bloom() );
+	if ( r_bloom->integer && !bloom ) {
+		post.failed = qtrue;
+	}
+
 	// draw the result over the view
 	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
 	qglViewport( x, y, width, height );
 	Post_BindTexture( 0, post.sceneTexture );
 	Post_BindTexture( 1, post.aoA.texture );
+	Post_BindTexture( 2, post.bloom[0].texture );
 	qglUseProgram( post.composite.id );
 	qglUniform1i( post.composite.uniforms[0], 0 );
 	qglUniform1i( post.composite.uniforms[1], 1 );
-	qglUniform4fv( post.composite.uniforms[2], 1, rect );
-	qglUniform2f( post.composite.uniforms[3], ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f );
+	qglUniform1i( post.composite.uniforms[2], 2 );
+	qglUniform4fv( post.composite.uniforms[3], 1, rect );
+	qglUniform3f( post.composite.uniforms[4], ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f,
+		bloom ? r_bloomIntensity->value : 0.0f );
 	Post_Quad();
 	qglUseProgram( 0 );
 
 	// the engine caches what is bound to its two texture units, make it look again
+	Post_BindTexture( 2, 0 );
 	Post_BindTexture( 1, 0 );
 	Post_BindTexture( 0, 0 );
 	glState.currenttextures[0] = glState.currenttextures[1] = 0;
