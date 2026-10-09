@@ -162,8 +162,9 @@ typedef enum graphicsApi_e
 {
 	GRAPHICS_API_GENERIC,
 
-	// Only OpenGL needs special treatment..
+	// Only OpenGL and Vulkan need special treatment (the window has to be created for them)..
 	GRAPHICS_API_OPENGL,
+	GRAPHICS_API_VULKAN,
 } graphicsApi_t;
 
 // Graphics API
@@ -206,5 +207,11 @@ void		WIN_SetGamma( glconfig_t *glConfig, byte red[256], byte green[256], byte b
 void		WIN_Shutdown( void );
 void *		WIN_GL_GetProcAddress( const char *proc );
 qboolean	WIN_GL_ExtensionSupported( const char *extension );
+
+// Vulkan: the window has to have been created with api == GRAPHICS_API_VULKAN. instance is a VkInstance and
+// surface a VkSurfaceKHR (as untyped pointers so that this header does not need the Vulkan headers).
+const char *const *	WIN_Vulkan_GetInstanceExtensions( unsigned int *count );
+qboolean			WIN_Vulkan_CreateSurface( void *instance, void *surface );
+void				WIN_Vulkan_GetDrawableSize( int *width, int *height );
 
 uint8_t ConvertUTF32ToExpectedCharset( uint32_t utf32 );
