@@ -1167,6 +1167,9 @@ void CL_InitRef( void ) {
     rit.WIN_Present = WIN_Present;
 	rit.GL_GetProcAddress = WIN_GL_GetProcAddress;
 	rit.GL_ExtensionSupported = WIN_GL_ExtensionSupported;
+	rit.VK_GetInstanceExtensions = WIN_Vulkan_GetInstanceExtensions;
+	rit.VK_CreateSurface = WIN_Vulkan_CreateSurface;
+	rit.VK_GetDrawableSize = WIN_Vulkan_GetDrawableSize;
 
 	rit.PD_Load = PD_Load;
 	rit.PD_Store = PD_Store;

@@ -20,6 +20,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include "qcommon/qcommon.h"
 #include "rd-common/tr_types.h"
 #include "sys/sys_local.h"
@@ -384,7 +385,7 @@ static bool GLimp_DetectAvailableModes(void)
 GLimp_CreateWindow
 ===============
 */
-static SDL_Window *GLimp_CreateWindow( const char *title, int x, int y, int width, int height, bool opengl, bool borderless )
+static SDL_Window *GLimp_CreateWindow( const char *title, int x, int y, int width, int height, bool opengl, bool vulkan, bool borderless )
 {
 	const SDL_PropertiesID props = SDL_CreateProperties();
 
@@ -394,6 +395,7 @@ static SDL_Window *GLimp_CreateWindow( const char *title, int x, int y, int widt
 	SDL_SetNumberProperty( props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width );
 	SDL_SetNumberProperty( props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height );
 	SDL_SetBooleanProperty( props, SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, opengl );
+	SDL_SetBooleanProperty( props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, vulkan );
 	SDL_SetBooleanProperty( props, SDL_PROP_WINDOW_CREATE_BORDERLESS_BOOLEAN, borderless );
 
 	SDL_Window *window = SDL_CreateWindowWithProperties( props );
@@ -654,7 +656,7 @@ retryWithFewerSamples:
 			SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, !r_allowSoftwareGL->integer );
 
 			if( ( screen = GLimp_CreateWindow( windowTitle, x, y,
-					glConfig->vidWidth, glConfig->vidHeight, true, borderless ) ) == NULL )
+					glConfig->vidWidth, glConfig->vidHeight, true, false, borderless ) ) == NULL )
 			{
 				Com_DPrintf( "SDL_CreateWindow failed: %s\n", SDL_GetError( ) );
 				continue;
@@ -715,9 +717,10 @@ retryWithFewerSamples:
 	}
 	else
 	{
-		// Just create a regular window
+		// Just create a regular window (or a Vulkan one: the renderer makes the instance and surface itself)
+		const bool vulkan = windowDesc->api == GRAPHICS_API_VULKAN;
 		if( ( screen = GLimp_CreateWindow( windowTitle, x, y,
-				glConfig->vidWidth, glConfig->vidHeight, false, borderless ) ) == NULL )
+				glConfig->vidWidth, glConfig->vidHeight, false, vulkan, borderless ) ) == NULL )
 		{
 			Com_DPrintf( "SDL_CreateWindow failed: %s\n", SDL_GetError( ) );
 		}
@@ -740,6 +743,11 @@ retryWithFewerSamples:
 	}
 
 	SDL_DestroySurface( icon );
+
+	if ( windowDesc->api == GRAPHICS_API_VULKAN && screen == NULL )
+	{
+		return RSERR_UNKNOWN;
+	}
 
 	if (!GLimp_DetectAvailableModes())
 	{
@@ -945,4 +953,26 @@ void *WIN_GL_GetProcAddress( const char *proc )
 qboolean WIN_GL_ExtensionSupported( const char *extension )
 {
 	return SDL_GL_ExtensionSupported( extension ) ? qtrue : qfalse;
+}
+
+const char *const *WIN_Vulkan_GetInstanceExtensions( unsigned int *count )
+{
+	Uint32 n = 0;
+	const char *const *extensions = SDL_Vulkan_GetInstanceExtensions( &n );
+	*count = n;
+	return extensions;
+}
+
+qboolean WIN_Vulkan_CreateSurface( void *instance, void *surface )
+{
+	return SDL_Vulkan_CreateSurface( screen, (VkInstance)instance, NULL, (VkSurfaceKHR *)surface ) ? qtrue : qfalse;
+}
+
+void WIN_Vulkan_GetDrawableSize( int *width, int *height )
+{
+	*width = *height = 0;
+	if ( screen )
+	{
+		SDL_GetWindowSizeInPixels( screen, width, height );
+	}
 }
