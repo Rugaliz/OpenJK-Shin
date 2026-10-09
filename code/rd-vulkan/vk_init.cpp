@@ -663,6 +663,7 @@ void VK_Init( glconfig_t *glConfig )
 	glConfig->textureCompression = TC_NONE;
 	glConfig->doStencilShadowsInOneDrawcall = qtrue;
 	glConfig->maxTextureFilterAnisotropy = vk.features.samplerAnisotropy ? vk.properties.limits.maxSamplerAnisotropy : 0.0f;
+	ri.Cvar_SetValue( "r_ext_texture_filter_anisotropic_avail", glConfig->maxTextureFilterAnisotropy );
 
 	// what the layer implements (everything else stays NULL: no GLSL, ARB programs, register combiners, framebuffers)
 	qglActiveTextureARB = vkglActiveTextureARB;
