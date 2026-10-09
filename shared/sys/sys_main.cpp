@@ -390,73 +390,32 @@ enum SearchPathFlag
 	SEARCH_PATH_ROOT	= 1 << 3
 };
 
+// Looks for the library in each of the search paths in turn, in the order they are given, and in every path in the
+// sub-folders asked for by searchFlags (mod, base game, OpenJK, the root of the path) before going on to the next path.
 static void *Sys_LoadDllFromPaths( const char *filename, const char *gamedir, const char **searchPaths,
 									size_t numPaths, uint32_t searchFlags, const char *callerName )
 {
-	char *fn;
-	void *libHandle;
-
-	if ( searchFlags & SEARCH_PATH_MOD )
+	for ( size_t i = 0; i < numPaths; i++ )
 	{
-		for ( size_t i = 0; i < numPaths; i++ )
+		const char *libDir = searchPaths[i];
+		if ( !libDir[0] )
+			continue;
+
+		for ( uint32_t flag = SEARCH_PATH_MOD; flag <= SEARCH_PATH_ROOT; flag <<= 1 )
 		{
-			const char *libDir = searchPaths[i];
-			if ( !libDir[0] )
+			if ( !(searchFlags & flag) )
 				continue;
 
-			fn = FS_BuildOSPath( libDir, gamedir, filename );
-			libHandle = Sys_LoadLibrary( fn );
-			if ( libHandle )
-				return libHandle;
+			const char *fn;
+			switch ( flag )
+			{
+				case SEARCH_PATH_MOD:		fn = FS_BuildOSPath( libDir, gamedir, filename ); break;
+				case SEARCH_PATH_BASE:		fn = FS_BuildOSPath( libDir, BASEGAME, filename ); break;
+				case SEARCH_PATH_OPENJK:	fn = FS_BuildOSPath( libDir, OPENJKGAME, filename ); break;
+				default:					fn = va( "%s%c%s", libDir, PATH_SEP, filename ); break;
+			}
 
-			Com_Printf( "%s(%s) failed: \"%s\"\n", callerName, fn, Sys_LibraryError() );
-		}
-	}
-
-	if ( searchFlags & SEARCH_PATH_BASE )
-	{
-		for ( size_t i = 0; i < numPaths; i++ )
-		{
-			const char *libDir = searchPaths[i];
-			if ( !libDir[0] )
-				continue;
-
-			fn = FS_BuildOSPath( libDir, BASEGAME, filename );
-			libHandle = Sys_LoadLibrary( fn );
-			if ( libHandle )
-				return libHandle;
-
-			Com_Printf( "%s(%s) failed: \"%s\"\n", callerName, fn, Sys_LibraryError() );
-		}
-	}
-
-	if ( searchFlags & SEARCH_PATH_OPENJK )
-	{
-		for ( size_t i = 0; i < numPaths; i++ )
-		{
-			const char *libDir = searchPaths[i];
-			if ( !libDir[0] )
-				continue;
-
-			fn = FS_BuildOSPath( libDir, OPENJKGAME, filename );
-			libHandle = Sys_LoadLibrary( fn );
-			if ( libHandle )
-				return libHandle;
-
-			Com_Printf( "%s(%s) failed: \"%s\"\n", callerName, fn, Sys_LibraryError() );
-		}
-	}
-
-	if ( searchFlags & SEARCH_PATH_ROOT )
-	{
-		for ( size_t i = 0; i < numPaths; i++ )
-		{
-			const char *libDir = searchPaths[i];
-			if ( !libDir[0] )
-				continue;
-
-			fn = va( "%s%c%s", libDir, PATH_SEP, filename );
-			libHandle = Sys_LoadLibrary( fn );
+			void *libHandle = Sys_LoadLibrary( fn );
 			if ( libHandle )
 				return libHandle;
 
@@ -522,11 +481,11 @@ void *Sys_LoadLegacyGameDll( const char *name, VMMainProc **vmMain, SystemCallPr
 		#endif
 
 				const char *searchPaths[] = {
-					homepath,
 		#ifdef MACOS_X
 					apppath,
 		#endif
 					basepath,
+					homepath,
 					cdpath,
 				};
 				size_t numPaths = ARRAY_LEN( searchPaths );
@@ -580,11 +539,11 @@ void *Sys_LoadSPGameDll( const char *name, GetGameAPIProc **GetGameAPI )
 #endif
 
 		const char *searchPaths[] = {
-			homepath,
 #ifdef MACOS_X
 			apppath,
 #endif
 			basepath,
+			homepath,
 			cdpath,
 		};
 		size_t numPaths = ARRAY_LEN( searchPaths );
@@ -655,11 +614,11 @@ void *Sys_LoadGameDll( const char *name, GetModuleAPIProc **moduleAPI )
 #endif
 
 				const char *searchPaths[] = {
-					homepath,
 #ifdef MACOS_X
 					apppath,
 #endif
 					basepath,
+					homepath,
 					cdpath,
 				};
 				size_t numPaths = ARRAY_LEN( searchPaths );
