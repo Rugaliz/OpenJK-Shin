@@ -1173,6 +1173,9 @@ extern cvar_t	*r_sampleShading;
 extern cvar_t	*r_glsl;
 extern cvar_t	*r_dlightGLSL;
 extern cvar_t	*r_postDebug;
+extern cvar_t	*r_ssao;
+extern cvar_t	*r_ssaoRadius;
+extern cvar_t	*r_ssaoStrength;
 
 extern cvar_t	*r_DynamicGlow;
 extern cvar_t	*r_DynamicGlowPasses;
