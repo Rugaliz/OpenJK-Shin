@@ -1176,6 +1176,9 @@ extern cvar_t	*r_postDebug;
 extern cvar_t	*r_ssao;
 extern cvar_t	*r_ssaoRadius;
 extern cvar_t	*r_ssaoStrength;
+extern cvar_t	*r_bloom;
+extern cvar_t	*r_bloomThreshold;
+extern cvar_t	*r_bloomIntensity;
 
 extern cvar_t	*r_DynamicGlow;
 extern cvar_t	*r_DynamicGlowPasses;
