@@ -139,11 +139,17 @@ GLSL is core in OpenGL 2.0, so the check is the version of the context. Builds a
 driver that reports 2.0 but cannot compile is caught here and not at the first use.
 ================
 */
+static void R_GLSL_SetAvailable( qboolean available ) {
+	glslAvailable = available;
+	ri.Cvar_Get( "r_glslAvail", "0", 0 );
+	ri.Cvar_Set( "r_glslAvail", available ? "1" : "0" );	// what the menus look at to show the rows for what needs it
+}
+
 void R_GLSL_Init( void ) {
 	int		major = 0, minor = 0;
 	GLuint	test;
 
-	glslAvailable = qfalse;
+	R_GLSL_SetAvailable( qfalse );
 
 	if ( !r_glsl->integer ) {
 		Com_Printf( "...ignoring GLSL\n" );
@@ -186,7 +192,7 @@ void R_GLSL_Init( void ) {
 		return;
 	}
 
-	glslAvailable = qtrue;
+	glslAvailable = qtrue;	// (so that the test program can be built)
 	test = R_GLSL_BuildProgram( "test",
 		"#version 120\nvoid main() { gl_Position = ftransform(); }\n",
 		"#version 120\nvoid main() { gl_FragColor = vec4( 1.0 ); }\n" );
@@ -196,6 +202,7 @@ void R_GLSL_Init( void ) {
 		return;
 	}
 	qglDeleteProgram( test );
+	R_GLSL_SetAvailable( qtrue );
 
 	Com_Printf( "...using GLSL (OpenGL %d.%d)\n", major, minor );
 }

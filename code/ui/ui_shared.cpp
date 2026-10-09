@@ -1263,6 +1263,118 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 
 /*
 ================
+Menu_AddEffectRows
+
+The "More Video" page of Setup has room for one more row. Make room for one row for each of the screen effects and
+the shader dynamic lights, for the ones this renderer can do, by bringing the rows closer, and move the button for
+the driver info down to the end. Called when the last item of the page, that button, has been read. Does nothing if
+the page is not the one of the stock menu.
+================
+*/
+static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
+{
+	static const struct {
+		const char	*name, *cvar, *avail, *text, *desc;
+	} effects[] = {
+		{ "ssao", "r_ssao", "r_postAvail", "Ambient Occlusion:", "Soft shading in corners and where things meet. Adds depth." },
+		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
+		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
+		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on." },
+	};
+	itemDef_t	*rows[24];
+	int			numRows = 0;
+	itemDef_t	*brightness = NULL, *brightText = NULL, *marks = NULL, *glow = NULL;
+
+	for ( int i = 0; i < menu->itemCount; i++ )
+	{
+		itemDef_t *item = menu->items[i];
+
+		if ( !item->window.name )
+			continue;
+		if ( item->window.group && !Q_stricmp( item->window.group, "video2" ) )
+		{
+			if ( !Q_stricmp( item->window.name, "brightness" ) )
+				brightness = item;
+			else if ( !Q_stricmp( item->window.name, "bright_text" ) )
+				brightText = item;
+			else if ( item != driverButton && ( item->type == ITEM_TYPE_MULTI || item->type == ITEM_TYPE_SLIDER ) && numRows < 16 )
+			{
+				rows[numRows++] = item;
+				if ( !Q_stricmp( item->window.name, "wall_marks" ) )
+					marks = item;
+			}
+		}
+		else if ( !Q_stricmp( item->window.name, "advancedvideobutton_glow" ) )
+			glow = item;
+	}
+	if ( !brightness || !brightText || !marks || marks->type != ITEM_TYPE_MULTI || !marks->typeData || numRows < 5 )
+		return;
+
+	// one new row for each effect that can be used, a copy of the row of the wall marks (an off and on row)
+	for ( size_t e = 0; e < ARRAY_LEN( effects ); e++ )
+	{
+		if ( !DC->getCVarValue( effects[e].avail ) || menu->itemCount >= MAX_MENUITEMS )
+			continue;
+
+		itemDef_t *row = (itemDef_t *)UI_Alloc( sizeof( itemDef_t ) );
+		memcpy( row, marks, sizeof( itemDef_t ) );
+		row->typeData = NULL;
+		Item_ValidateTypeData( row );
+		memcpy( row->typeData, marks->typeData, sizeof( multiDef_t ) );
+		row->window.name = (char *)String_Alloc( effects[e].name );
+		row->cvar = String_Alloc( effects[e].cvar );
+		row->text = (char *)String_Alloc( effects[e].text );
+		row->descText = String_Alloc( effects[e].desc );
+		row->cvarTest = NULL;
+		row->cvarFlags = 0;
+		menu->items[menu->itemCount++] = row;
+		rows[numRows++] = row;
+	}
+	if ( numRows == 0 )
+		return;
+
+	// The rows, from the top: the slider for the brightness, then every row, then the driver info
+#ifdef JK2_MODE
+	const float x = 305, w = 300, brightnessY = 244, firstY = 264, pitch = 15, barHeight = 17, panelExtra = 0;
+	const char *bar = "highlight10";	// the one bar for all the rows, put where the row is
+#else
+	// (there is no room above the rows, so the panel they are on is made taller instead)
+	const float x = 260, w = 340, brightnessY = 0, firstY = 287, pitch = 13, barHeight = 14, panelExtra = 30;
+	const char *bar = "button_glow";
+#endif
+	if ( brightnessY > 0 )
+		brightness->window.rectClient.y = brightnessY;
+	if ( panelExtra > 0 )
+	{
+		for ( int i = 0; i < menu->itemCount; i++ )
+		{
+			if ( menu->items[i]->window.name && !Q_stricmp( menu->items[i]->window.name, "setup_background" ) )
+				menu->items[i]->window.rectClient.h += panelExtra;
+		}
+	}
+	for ( int i = 0; i < numRows; i++ )
+	{
+		const float y = firstY + i * pitch;
+
+		rows[i]->window.rectClient.y = y;
+		rows[i]->window.rectClient.h = pitch;
+		rows[i]->mouseEnter = String_Alloc( va( "\"show\" \"%s\" \"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ", bar, bar, x, y, w, barHeight ) );
+		rows[i]->mouseExit = String_Alloc( va( "\"hide\" \"%s\" ", bar ) );
+	}
+
+	const float driverY = firstY + numRows * pitch + 2;
+	driverButton->window.rectClient.y = driverY;
+#ifdef JK2_MODE
+	if ( glow )
+		glow->window.rectClient.y = driverY;
+#else
+	driverButton->mouseEnter = String_Alloc( va( "\"show\" \"%s\" \"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ", bar, bar, x, driverY, w, barHeight + 2 ) );
+#endif
+	Com_Printf( "More Video: %d rows, the driver info at %.0f\n", numRows, driverY );
+}
+
+/*
+================
 MenuParse_itemDef
 ================
 */
@@ -1281,6 +1393,12 @@ qboolean MenuParse_itemDef( itemDef_t *item )
 		newItem->parent = menu->items[menu->itemCount]->parent = menu;
 		menu->itemCount++;
 		Item_ApplyHacks( newItem );
+
+		if ( newItem->type == ITEM_TYPE_BUTTON && newItem->window.name && !Q_stricmp( newItem->window.name, "advancedvideo" ) &&
+			 newItem->window.group && !Q_stricmp( newItem->window.group, "video2" ) )
+		{
+			Menu_AddEffectRows( menu, newItem );
+		}
 
 		// The stock sound menu has a row for the sound quality, the sample rate to mix at. The sound system here always
 		// mixes at the rate of the output device, so the row is of no use. Use it for the sound of the room (reverb)
