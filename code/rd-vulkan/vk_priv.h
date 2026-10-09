@@ -148,6 +148,7 @@ typedef struct vkTexture_s {
 	float				anisotropy;
 	int					lastUsedFrame;	// vk.frameCounter of the last draw with it
 	unsigned int		lastUsedSubmit;	// vk.submitSerial of the last draw with it
+	bool				external;		// the image belongs to someone else (the post processing): not destroyed with the texture
 } vkTexture_t;
 
 vkTexture_t	*VK_TextureForId( GLuint id, bool create );
@@ -157,6 +158,7 @@ void		VK_TexSubImage2D( GLuint id, GLint level, GLint x, GLint y, GLsizei width,
 void		VK_TexParameter( GLuint id, GLenum pname, GLfloat value );
 void		VK_CopyFramebuffer( GLuint id, int createWidth, int createHeight, int dstX, int dstY, int srcX, int srcY, int width, int height );
 void		VK_DeleteTexture( GLuint id );
+void		VK_SetExternalTexture( GLuint id, VkImage image, VkImageView view, int width, int height );
 VkSampler	VK_SamplerFor( const vkTexture_t *texture );
 void		VK_FlushUploads( bool wait );
 void		VK_ProcessDeferredDeletes( void );
@@ -187,7 +189,8 @@ typedef struct vkPipelineKey_s {
 	unsigned char	stencilTest;
 	unsigned char	alphaToCoverage;			// the alpha of the colour decides how many samples of a pixel are covered
 	unsigned char	sampleShading;				// percent of the samples of a pixel that are shaded on their own, 0: off
-	unsigned char	pad[2];
+	unsigned char	program;					// 0: the fixed function shaders, 1: the dynamic light program (normals come in the second texture coordinate's place)
+	unsigned char	pad[1];
 } vkPipelineKey_t;
 
 // Set per draw (dynamic state of the pipelines). Viewport and scissor are OpenGL style (origin bottom left).
@@ -231,3 +234,8 @@ void		VK_ResetCommandBufferState( void );	// a new command buffer starts: nothin
 // vk_gl.cpp
 void		VK_ResetGLState( void );
 
+
+// vk_post.cpp
+void		VK_InitPost( void );
+void		VK_BeginFramePost( void );		// the frame slot is free again
+void		VK_ShutdownPost( void );

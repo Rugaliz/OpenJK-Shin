@@ -1,6 +1,6 @@
 # Screen effects and shader lighting (single player)
 
-The single player renderer (`code/rd-vanilla`) is the original fixed function OpenGL 1.x one. It can now also run
+The single player renderer (`code/rd-vanilla`; the Vulkan renderer, `docs/vulkan-renderer.md`, has the same effects with the same settings) is the original fixed function OpenGL 1.x one. It can now also run
 GLSL shader programs where that is useful, and every use keeps the original way of drawing as its fallback: if the
 graphics card or driver does not support what is needed, or a shader does not build, the old drawing is used and
 nothing else changes. All of it is off by default, nothing changes unless you turn it on. The menu is the easy way; the settings can also be typed in the

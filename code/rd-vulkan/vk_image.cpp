@@ -486,6 +486,25 @@ void VK_TexParameter( GLuint id, GLenum pname, GLfloat value )
 	}
 }
 
+// a texture that is an image of the post processing: the renderer can draw it like any other
+void VK_SetExternalTexture( GLuint id, VkImage image, VkImageView view, int width, int height )
+{
+	vkTexture_t *texture = VK_TextureForId( id, true );
+	if ( !texture->external && texture->image )
+	{
+		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+	}
+	texture->external = true;
+	texture->image = image;
+	texture->view = view;
+	texture->width = width;
+	texture->height = height;
+	texture->mipLevels = 1;
+	texture->minFilter = texture->magFilter = GL_LINEAR;
+	texture->wrapS = texture->wrapT = GL_CLAMP_TO_EDGE;
+	texture->serial = nextSerial++;
+}
+
 void VK_DeleteTexture( GLuint id )
 {
 	vkTexture_t *texture = VK_TextureForId( id, false );
@@ -493,7 +512,10 @@ void VK_DeleteTexture( GLuint id )
 	{
 		return;
 	}
-	DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+	if ( !texture->external )
+	{
+		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+	}
 	delete texture;
 	textures[id] = NULL;
 }
@@ -594,8 +616,11 @@ void VK_ShutdownImages( void )
 	{
 		if ( textures[i] )
 		{
-			vkDestroyImageView( vk.device, textures[i]->view, NULL );
-			vkDestroyImage( vk.device, textures[i]->image, NULL );
+			if ( !textures[i]->external )
+			{
+				vkDestroyImageView( vk.device, textures[i]->view, NULL );
+				vkDestroyImage( vk.device, textures[i]->image, NULL );
+			}
 			delete textures[i];
 		}
 	}

@@ -208,11 +208,14 @@ if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 	if(NOT Vulkan_FOUND)
 		message(STATUS "Vulkan headers/loader not found, not building the Vulkan renderer module")
 	else()
+		# (tr_glsl.cpp and tr_post.cpp are the OpenGL versions of what vk_post.cpp does)
+		set(SPRDVulkanMainFiles ${SPRDVanillaMainFiles})
+		list(REMOVE_ITEM SPRDVulkanMainFiles "${SPDir}/rd-vanilla/tr_glsl.cpp" "${SPDir}/rd-vanilla/tr_post.cpp")
 		set(SPRDVulkanFiles
 			${SPRDVanillaG2Files}
 			${SPRDVanillaCommonFiles}
 			${SPRDVanillaCommonSafeFiles}
-			${SPRDVanillaMainFiles}
+			${SPRDVulkanMainFiles}
 			${SPRDVanillaRdCommonFiles}
 			"${SPDir}/rd-vulkan/qgl.h"
 			"${SPDir}/rd-vulkan/vk_local.h"
@@ -224,6 +227,7 @@ if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 			"${SPDir}/rd-vulkan/vk_image.cpp"
 			"${SPDir}/rd-vulkan/vk_init.cpp"
 			"${SPDir}/rd-vulkan/vk_mem.cpp"
+			"${SPDir}/rd-vulkan/vk_post.cpp"
 			)
 		source_group("vulkan" FILES ${SPRDVulkanFiles})
 

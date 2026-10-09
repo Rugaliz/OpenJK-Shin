@@ -77,7 +77,14 @@ static struct vkglState_s {
 	int				clientUnit;
 
 	// arrays
-	clientArray_t	vertexArray, colorArray, texCoordArray[MAX_UNITS];
+	clientArray_t	vertexArray, colorArray, normalArray, texCoordArray[MAX_UNITS];
+
+	// the one shader program there is (the dynamic lights): what the renderer last set of it
+	GLuint			program;
+	float			uniformLight[4];
+	float			uniformColor[3];
+	float			uniformTextured;
+	float			uniformAlphaTest;
 
 	// current values
 	float			color[4];
@@ -426,7 +433,6 @@ void vkglDeleteLists( GLuint list, GLsizei range ) {}
 void vkglEndList( void ) {}
 GLuint vkglGenLists( GLsizei range ) { return 0; }
 void vkglNewList( GLuint list, GLenum mode ) {}
-void vkglNormalPointer( GLenum type, GLsizei stride, const GLvoid *ptr ) {}
 
 void APIENTRY vkglActiveTextureARB( GLenum texture )
 {
@@ -519,6 +525,7 @@ static void SetArrayState( GLenum array, bool on )
 	{
 	case GL_VERTEX_ARRAY:			gl.vertexArray.enabled = on; break;
 	case GL_COLOR_ARRAY:			gl.colorArray.enabled = on; break;
+	case GL_NORMAL_ARRAY:			gl.normalArray.enabled = on; break;
 	case GL_TEXTURE_COORD_ARRAY:	gl.texCoordArray[gl.clientUnit].enabled = on; break;
 	default:						break;
 	}
@@ -557,7 +564,65 @@ void vkglTexCoordPointer( GLint size, GLenum type, GLsizei stride, const GLvoid 
 	SetPointer( &gl.texCoordArray[gl.clientUnit], size, type, stride, ptr );
 }
 
+void vkglNormalPointer( GLenum type, GLsizei stride, const GLvoid *ptr )
+{
+	SetPointer( &gl.normalArray, 3, type, stride, ptr );
+}
+
 void vkglArrayElement( GLint i ) {}
+
+/*
+=============================================================================
+
+SHADER PROGRAMS: only the dynamic light program exists (R_GLSL_BuildProgram in vk_post.cpp hands out its number)
+
+=============================================================================
+*/
+
+void APIENTRY vkglUseProgram( GLuint program )
+{
+	gl.program = program;
+}
+
+GLint APIENTRY vkglGetUniformLocation( GLuint program, const GLchar *name )
+{
+	static const char *const names[] = { "uDiffuse", "uLight", "uColor", "uTextured", "uAlphaTest" };
+	for ( int i = 0; i < 5; i++ )
+	{
+		if ( !strcmp( name, names[i] ) ) return i;
+	}
+	return -1;
+}
+
+void APIENTRY vkglUniform1i( GLint location, GLint v0 ) {}
+
+void APIENTRY vkglUniform1f( GLint location, GLfloat v0 )
+{
+	if ( location == 3 ) gl.uniformTextured = v0;
+	else if ( location == 4 ) gl.uniformAlphaTest = v0;
+}
+
+void APIENTRY vkglUniform3f( GLint location, GLfloat v0, GLfloat v1, GLfloat v2 )
+{
+	if ( location == 2 )
+	{
+		gl.uniformColor[0] = v0;
+		gl.uniformColor[1] = v1;
+		gl.uniformColor[2] = v2;
+	}
+}
+
+void APIENTRY vkglUniform4fv( GLint location, GLsizei count, const GLfloat *value )
+{
+	if ( location == 1 ) memcpy( gl.uniformLight, value, sizeof( gl.uniformLight ) );
+}
+
+PFNGLUSEPROGRAMPROC				qglUseProgram = vkglUseProgram;
+PFNGLGETUNIFORMLOCATIONPROC		qglGetUniformLocation = vkglGetUniformLocation;
+PFNGLUNIFORM1IPROC				qglUniform1i = vkglUniform1i;
+PFNGLUNIFORM1FPROC				qglUniform1f = vkglUniform1f;
+PFNGLUNIFORM3FPROC				qglUniform3f = vkglUniform3f;
+PFNGLUNIFORM4FVPROC				qglUniform4fv = vkglUniform4fv;
 
 /*
 =============================================================================
@@ -654,11 +719,32 @@ static void PrepareDraw( vkPipelineKey_t *key, vkDynamicState_t *dynamic, vkCons
 		dynamic->stencilWriteMask[face] = gl.stencilWriteMask;
 	}
 
+	if ( gl.program )
+	{
+		// the dynamic light program: its own shaders, which know nothing of fog, clip planes or texture environments
+		key->program = 1;
+		key->alphaFunc = 0;
+		key->alphaRef = 0.0f;
+		key->unitMask = key->env0 = key->env1 = 0;
+		key->fogMode = 0;
+		key->clip = 0;
+		key->uv1Const = 0;
+	}
+
 	// OpenGL's clip space to Vulkan's: Y down, depth 0 to 1
 	static const float clipFix[16] = { 1,0,0,0, 0,-1,0,0, 0,0,0.5f,0, 0,0,0.5f,1 };
 	float projection[16];
 	MatrixMultiply( clipFix, gl.projection, projection );
 	MatrixMultiply( projection, gl.modelview, constants->mvp );
+
+	if ( gl.program )
+	{
+		memcpy( constants->clipPlane, gl.uniformLight, sizeof( gl.uniformLight ) );
+		memcpy( constants->eyeZ, gl.uniformColor, sizeof( gl.uniformColor ) );
+		constants->eyeZ[3] = gl.uniformTextured;
+		constants->fogColorDensity[0] = gl.uniformAlphaTest;
+		return;
+	}
 
 	constants->eyeZ[0] = gl.modelview[2];
 	constants->eyeZ[1] = gl.modelview[6];
@@ -864,7 +950,25 @@ static void Emit( GLenum mode, const source_t &position, const source_t &color, 
 		geometry.texCoord0[0] = gl.texCoord[0][0];
 		geometry.texCoord0[1] = gl.texCoord[0][1];
 	}
-	if ( useUv1 )
+	if ( gl.program )
+	{
+		// (the normals of the lit surface; a surface without any is lit by distance alone)
+		if ( uv1.array )
+		{
+			for ( int i = 0; i < vertexCount; i++ )
+			{
+				const float *in = (const float *)( uv1.base + (size_t)( vertexFirst + i ) * uv1.stride );
+				geometry.texCoord1[i * 3 + 0] = in[0];
+				geometry.texCoord1[i * 3 + 1] = in[1];
+				geometry.texCoord1[i * 3 + 2] = in[2];
+			}
+		}
+		else
+		{
+			memset( geometry.texCoord1, 0, (size_t)vertexCount * 12 );
+		}
+	}
+	else if ( useUv1 )
 	{
 		WriteTexCoords( uv1, vertexFirst, vertexCount, geometry.texCoord1 );
 	}
@@ -896,7 +1000,7 @@ static void Emit( GLenum mode, const source_t &position, const source_t &color, 
 
 void vkglDrawElements( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices )
 {
-	source_t texCoord1 = ArraySource( gl.texCoordArray[1], 2 );
+	source_t texCoord1 = gl.program ? ArraySource( gl.normalArray, 3 ) : ArraySource( gl.texCoordArray[1], 2 );
 	Emit( mode, ArraySource( gl.vertexArray, 3 ), ArraySource( gl.colorArray, 4 ), ArraySource( gl.texCoordArray[0], 2 ), texCoord1,
 		0, 0, indices, type, count );
 }
@@ -904,7 +1008,7 @@ void vkglDrawElements( GLenum mode, GLsizei count, GLenum type, const GLvoid *in
 void vkglDrawArrays( GLenum mode, GLint first, GLsizei count )
 {
 	Emit( mode, ArraySource( gl.vertexArray, 3 ), ArraySource( gl.colorArray, 4 ), ArraySource( gl.texCoordArray[0], 2 ),
-		ArraySource( gl.texCoordArray[1], 2 ), first, count, NULL, 0, 0 );
+		gl.program ? ArraySource( gl.normalArray, 3 ) : ArraySource( gl.texCoordArray[1], 2 ), first, count, NULL, 0, 0 );
 }
 
 // immediate mode: what is between glBegin and glEnd is collected, then drawn like arrays
