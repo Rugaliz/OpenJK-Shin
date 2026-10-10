@@ -811,6 +811,7 @@ void VK_Init( glconfig_t *glConfig )
 
 	r_vkValidation = ri.Cvar_Get( "r_vkValidation", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_vkDevice = ri.Cvar_Get( "r_vkDevice", "-1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_vkProfile = ri.Cvar_Get( "r_vkProfile", "0", 0 );
 
 	memset( &vk, 0, sizeof( vk ) );
 	vk.width = glConfig->vidWidth;
@@ -887,6 +888,7 @@ void VK_Shutdown( void )
 		return;
 	}
 	vkDeviceWaitIdle( vk.device );
+	VK_ShutdownReadback();
 	VK_ShutdownPost();
 	VK_ShutdownDraw();
 	VK_ShutdownImages();

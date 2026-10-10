@@ -123,6 +123,7 @@ void		VK_ImageBarrier( VkCommandBuffer cmd, VkImage image, VkImageAspectFlags as
 void		VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum type, void *pixels );
 void		VK_WaitIdle( void );
 float		VK_ReadDepth( int x, int y );
+void		VK_ShutdownReadback( void );
 
 // vk_mem.cpp
 typedef struct vkAlloc_s {
@@ -239,3 +240,8 @@ void		VK_ResetGLState( void );
 void		VK_InitPost( void );
 void		VK_BeginFramePost( void );		// the frame slot is free again
 void		VK_ShutdownPost( void );
+
+// profiling (r_vkProfile 1): reports the places where the renderer waits for the GPU, when it takes long
+double		VK_Now( void );			// milliseconds
+void		VK_Slow( const char *what, double start );
+extern cvar_t	*r_vkProfile;

@@ -24,6 +24,27 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 #include "../rd-vanilla/tr_local.h"
 #include "vk_priv.h"
+#include <chrono>
+
+cvar_t *r_vkProfile;
+
+double VK_Now( void )
+{
+	return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now().time_since_epoch() ).count();
+}
+
+// says so when something that waits for the GPU took more than 2 ms
+void VK_Slow( const char *what, double start )
+{
+	if ( r_vkProfile && r_vkProfile->integer )
+	{
+		const double took = VK_Now() - start;
+		if ( took > 2.0 )
+		{
+			Com_Printf( "Vulkan: %s took %.1f ms\n", what, took );
+		}
+	}
+}
 
 void VK_ImageBarrier( VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
 	VkImageLayout oldLayout, VkImageLayout newLayout,
@@ -116,7 +137,9 @@ void VK_EnsureFrame( void )
 	vkFrame_t *frame = &vk.frames[vk.frameIndex];
 	if ( frame->fenceSubmitted )
 	{
+		const double waitStart = VK_Now();
 		VK_CheckResult( vkWaitForFences( vk.device, 1, &frame->fence, VK_TRUE, UINT64_MAX ), "vkWaitForFences" );
+		VK_Slow( "waiting for the frame before last", waitStart );
 		frame->fenceSubmitted = false;
 	}
 
@@ -193,7 +216,9 @@ void VK_SubmitFrame( bool waitIdle )
 	vk.submitSerial++;
 	if ( waitIdle )
 	{
+		const double waitStart = VK_Now();
 		VK_CheckResult( vkQueueWaitIdle( vk.queue ), "vkQueueWaitIdle" );
+		VK_Slow( "waiting for the GPU (frame sent and finished)", waitStart );
 	}
 	VK_BeginCommandBuffer();
 }
@@ -289,9 +314,102 @@ void VK_PresentFrame( window_t *window )
 		VK_CheckResult( result, "vkQueuePresentKHR" );
 	}
 
+	if ( r_vkProfile && r_vkProfile->integer )
+	{
+		static double lastPresent;
+		const double now = VK_Now();
+		if ( lastPresent && now - lastPresent > 40.0 && now - lastPresent < 3000.0 )
+		{
+			Com_Printf( "Vulkan: %.0f ms between two frames\n", now - lastPresent );
+		}
+		lastPresent = now;
+	}
+
 	vk.frameStarted = false;
 	vk.inRenderPass = false;
 	vk.frameIndex = ( vk.frameIndex + 1 ) % VK_FRAMES_IN_FLIGHT;
+}
+
+// The buffer the GPU copies into for read backs, kept between calls. It is in cached host memory: the CPU reads
+// memory that is not cached (what the upload buffers use) many times slower, which made a screenshot take over 100 ms.
+static VkBuffer			readbackBuffer;
+static VkDeviceMemory	readbackMemory;
+static VkDeviceSize		readbackSize;
+static byte				*readbackMapped;
+static bool				readbackCoherent;
+
+static void EnsureReadback( VkDeviceSize size )
+{
+	if ( readbackSize >= size )
+	{
+		return;
+	}
+	VK_ShutdownReadback();
+	VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bufferInfo.size = size;
+	bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	VK_CheckResult( vkCreateBuffer( vk.device, &bufferInfo, NULL, &readbackBuffer ), "vkCreateBuffer" );
+	VkMemoryRequirements requirements;
+	vkGetBufferMemoryRequirements( vk.device, readbackBuffer, &requirements );
+
+	const VkMemoryPropertyFlags wanted[3] = {
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT };
+	uint32_t type = 0xFFFFFFFFu;
+	for ( int i = 0; i < 3 && type == 0xFFFFFFFFu; i++ )
+	{
+		for ( uint32_t t = 0; t < vk.memoryProperties.memoryTypeCount; t++ )
+		{
+			if ( ( requirements.memoryTypeBits & ( 1u << t ) ) && ( vk.memoryProperties.memoryTypes[t].propertyFlags & wanted[i] ) == wanted[i] )
+			{
+				type = t;
+				readbackCoherent = ( wanted[i] & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ) != 0;
+				break;
+			}
+		}
+	}
+	if ( type == 0xFFFFFFFFu )
+	{
+		ri.Error( ERR_FATAL, "Vulkan: no memory for read backs" );
+	}
+	VkMemoryAllocateInfo allocate = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	allocate.allocationSize = requirements.size;
+	allocate.memoryTypeIndex = type;
+	VK_CheckResult( vkAllocateMemory( vk.device, &allocate, NULL, &readbackMemory ), "vkAllocateMemory" );
+	VK_CheckResult( vkBindBufferMemory( vk.device, readbackBuffer, readbackMemory, 0 ), "vkBindBufferMemory" );
+	void *mapped;
+	VK_CheckResult( vkMapMemory( vk.device, readbackMemory, 0, requirements.size, 0, &mapped ), "vkMapMemory" );
+	readbackMapped = (byte *)mapped;
+	readbackSize = requirements.size;
+}
+
+void VK_ShutdownReadback( void )
+{
+	if ( readbackBuffer )
+	{
+		vkDeviceWaitIdle( vk.device );
+		vkUnmapMemory( vk.device, readbackMemory );
+		vkDestroyBuffer( vk.device, readbackBuffer, NULL );
+		vkFreeMemory( vk.device, readbackMemory, NULL );
+	}
+	readbackBuffer = VK_NULL_HANDLE;
+	readbackMemory = VK_NULL_HANDLE;
+	readbackMapped = NULL;
+	readbackSize = 0;
+}
+
+// what the GPU wrote is seen by the CPU
+static void ReadbackInvalidate( VkDeviceSize size )
+{
+	if ( !readbackCoherent )
+	{
+		VkMappedMemoryRange range = { VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
+		range.memory = readbackMemory;
+		range.size = VK_WHOLE_SIZE;
+		vkInvalidateMappedMemoryRanges( vk.device, 1, &range );
+	}
 }
 
 /*
@@ -316,21 +434,7 @@ void VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum t
 	VK_EndRenderPass();
 
 	const VkDeviceSize size = (VkDeviceSize)width * height * 4;
-	VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-	bufferInfo.size = size;
-	bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	VkBuffer buffer;
-	VK_CheckResult( vkCreateBuffer( vk.device, &bufferInfo, NULL, &buffer ), "vkCreateBuffer" );
-	VkMemoryRequirements requirements;
-	vkGetBufferMemoryRequirements( vk.device, buffer, &requirements );
-	VkMemoryAllocateInfo allocate = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-	allocate.allocationSize = requirements.size;
-	allocate.memoryTypeIndex = VK_FindMemoryType( requirements.memoryTypeBits,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-	VkDeviceMemory memory;
-	VK_CheckResult( vkAllocateMemory( vk.device, &allocate, NULL, &memory ), "vkAllocateMemory" );
-	VK_CheckResult( vkBindBufferMemory( vk.device, buffer, memory, 0 ), "vkBindBufferMemory" );
+	EnsureReadback( size );
 
 	VK_ImageBarrier( vk.cmd, vk.colorImage, VK_IMAGE_ASPECT_COLOR_BIT,
 		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -344,16 +448,16 @@ void VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum t
 	region.imageExtent.width = (uint32_t)width;
 	region.imageExtent.height = (uint32_t)height;
 	region.imageExtent.depth = 1;
-	vkCmdCopyImageToBuffer( vk.cmd, vk.colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region );
+	vkCmdCopyImageToBuffer( vk.cmd, vk.colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackBuffer, 1, &region );
 	VK_ImageBarrier( vk.cmd, vk.colorImage, VK_IMAGE_ASPECT_COLOR_BIT,
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 		VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT );
 	VK_SubmitFrame( true );
+	ReadbackInvalidate( size );
 
-	void *mapped = NULL;
-	VK_CheckResult( vkMapMemory( vk.device, memory, 0, size, 0, &mapped ), "vkMapMemory" );
-	const byte *source = (const byte *)mapped;
+	const double convertStart = VK_Now();
+	const byte *source = readbackMapped;
 	byte *out = (byte *)pixels;
 	const int outBytes = format == GL_RGBA ? 4 : 3;
 	// GL packs rows to GL_PACK_ALIGNMENT, which the renderer leaves at its default of 4
@@ -377,9 +481,7 @@ void VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum t
 			}
 		}
 	}
-	vkUnmapMemory( vk.device, memory );
-	vkDestroyBuffer( vk.device, buffer, NULL );
-	vkFreeMemory( vk.device, memory, NULL );
+	VK_Slow( "turning the screen read back into pixels", convertStart );
 }
 
 /*
@@ -399,21 +501,8 @@ float VK_ReadDepth( int x, int y )
 	VK_EnsureFrame();
 	VK_EndRenderPass();
 
-	VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-	bufferInfo.size = 16;
-	bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	VkBuffer buffer;
-	VK_CheckResult( vkCreateBuffer( vk.device, &bufferInfo, NULL, &buffer ), "vkCreateBuffer" );
-	VkMemoryRequirements requirements;
-	vkGetBufferMemoryRequirements( vk.device, buffer, &requirements );
-	VkMemoryAllocateInfo allocate = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-	allocate.allocationSize = requirements.size;
-	allocate.memoryTypeIndex = VK_FindMemoryType( requirements.memoryTypeBits,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-	VkDeviceMemory memory;
-	VK_CheckResult( vkAllocateMemory( vk.device, &allocate, NULL, &memory ), "vkAllocateMemory" );
-	VK_CheckResult( vkBindBufferMemory( vk.device, buffer, memory, 0 ), "vkBindBufferMemory" );
+	EnsureReadback( 16 );
+	VkBuffer buffer = readbackBuffer;
 
 	const VkImageAspectFlags aspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 	VK_ImageBarrier( vk.cmd, vk.depthImage, aspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -432,8 +521,8 @@ float VK_ReadDepth( int x, int y )
 		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
 	VK_SubmitFrame( true );
 
-	void *mapped = NULL;
-	VK_CheckResult( vkMapMemory( vk.device, memory, 0, 16, 0, &mapped ), "vkMapMemory" );
+	ReadbackInvalidate( 16 );
+	const void *mapped = readbackMapped;
 	float depth;
 	if ( vk.depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT )
 	{
@@ -444,8 +533,5 @@ float VK_ReadDepth( int x, int y )
 		// (24 bit depth comes out in the low bits of a 32 bit texel)
 		depth = (float)( *(const unsigned int *)mapped & 0xFFFFFFu ) / 16777215.0f;
 	}
-	vkUnmapMemory( vk.device, memory );
-	vkDestroyBuffer( vk.device, buffer, NULL );
-	vkFreeMemory( vk.device, memory, NULL );
 	return depth;
 }

@@ -424,7 +424,9 @@ void VK_Draw( const vkPipelineKey_t *key, const vkDynamicState_t *dynamic, const
 	VkPipeline pipeline;
 	if ( found == pipelines.end() )
 	{
+		const double createStart = VK_Now();
 		pipeline = CreatePipeline( key );
+		VK_Slow( "building a pipeline", createStart );
 		pipelines[*key] = pipeline;
 	}
 	else

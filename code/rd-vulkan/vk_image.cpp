@@ -153,7 +153,9 @@ void VK_FlushUploads( bool wait )
 	uploadRecording = false;
 	if ( wait )
 	{
+		const double waitStart = VK_Now();
 		VK_CheckResult( vkWaitForFences( vk.device, 1, &uploadFences[uploadIndex], VK_TRUE, UINT64_MAX ), "vkWaitForFences" );
+		VK_Slow( "waiting for texture uploads", waitStart );
 		uploadFenceSubmitted[uploadIndex] = false;
 		// (everything sent before was done before this: the queue works in order)
 		stagingOffset = 0;
