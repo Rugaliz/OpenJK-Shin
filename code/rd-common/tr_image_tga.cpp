@@ -55,9 +55,11 @@ typedef struct TGAHeader_s {
 //  returns false if found but had a format error, else true for either OK or not-found (there's a reason for this)
 //
 
-void LoadTGA ( const char *name, byte **pic, int *width, int *height)
+// The decoding itself, on a file that is in memory. Does not touch the engine (no zone memory, no printing), so the
+// worker threads of the image prefetch can run it; the memory for the pixels comes from alloc. Returns false when the
+// file is not one this loader can read, with the reason in sErrorString.
+static bool DecodeTGA ( byte *pTempLoadedBuffer, size_t iLength, byte *(*alloc)( size_t ), byte **pic, int *width, int *height, char *sErrorString )
 {
-	char sErrorString[1024];
 	bool bFormatErrors = false;
 
 	// these don't need to be declared or initialised until later, but the compiler whines that 'goto' skips them.
@@ -66,22 +68,16 @@ void LoadTGA ( const char *name, byte **pic, int *width, int *height)
 	byte *pOut	= NULL;
 	byte *pIn	= NULL;
 
-
 	*pic = NULL;
 
 #define TGA_FORMAT_ERROR(blah) {sprintf(sErrorString,blah); bFormatErrors = true; goto TGADone;}
-//#define TGA_FORMAT_ERROR(blah) Com_Error( ERR_DROP, blah );
-
-	//
-	// load the file
-	//
-	byte *pTempLoadedBuffer = 0;
-	ri.FS_ReadFile ( ( char * ) name, (void **)&pTempLoadedBuffer);
-	if (!pTempLoadedBuffer) {
-		return;
-	}
 
 	TGAHeader_t *pHeader = (TGAHeader_t *) pTempLoadedBuffer;
+
+	if (iLength < sizeof(TGAHeader_t)) {
+		TGA_FORMAT_ERROR("LoadTGA: the file is too short\n");
+	}
+
 
 	pHeader->wColourMapLength = LittleShort(pHeader->wColourMapLength);
 	pHeader->wImageWidth = LittleShort(pHeader->wImageWidth);
@@ -202,7 +198,7 @@ void LoadTGA ( const char *name, byte **pic, int *width, int *height)
 	if (height)
 		*height = pHeader->wImageHeight;
 
-	pRGBA	= (byte *) R_Malloc (pHeader->wImageWidth * pHeader->wImageHeight * 4, TAG_TEMP_WORKSPACE, qfalse);
+	pRGBA	= (byte *) alloc( (size_t)pHeader->wImageWidth * pHeader->wImageHeight * 4 );
 	*pic	= pRGBA;
 	pOut	= pRGBA;
 	pIn		= pTempLoadedBuffer + sizeof(*pHeader);
@@ -375,11 +371,48 @@ void LoadTGA ( const char *name, byte **pic, int *width, int *height)
 
 TGADone:
 
+	return !bFormatErrors;
+}
+
+static byte *TGA_ZoneAlloc ( size_t iSize )
+{
+	return (byte *) R_Malloc ((int)iSize, TAG_TEMP_WORKSPACE, qfalse);
+}
+
+void LoadTGA ( const char *name, byte **pic, int *width, int *height)
+{
+	char sErrorString[1024];
+
+	*pic = NULL;
+
+	//
+	// load the file
+	//
+	byte *pTempLoadedBuffer = 0;
+	long iLength = ri.FS_ReadFile ( ( char * ) name, (void **)&pTempLoadedBuffer);
+	if (!pTempLoadedBuffer) {
+		return;
+	}
+
+	const bool bOk = DecodeTGA ( pTempLoadedBuffer, iLength > 0 ? (size_t)iLength : 0, TGA_ZoneAlloc, pic, width, height, sErrorString );
+
 	ri.FS_FreeFile (pTempLoadedBuffer);
 
-	if (bFormatErrors)
+	if (!bOk)
 	{
 		Com_Error( ERR_DROP, "%s( File: \"%s\" )\n",sErrorString,name);
 	}
 }
 
+// The same on the memory of a file the caller has read (the image prefetch: a thread that is not the engine's).
+// The pixels are made with malloc. buffer is changed (the header is made native byte order).
+static byte *TGA_MallocAlloc ( size_t iSize )
+{
+	return (byte *) malloc (iSize);
+}
+
+bool R_DecodeTGAFromMemory ( byte *buffer, size_t length, byte **pic, int *width, int *height )
+{
+	char sErrorString[1024];
+	return DecodeTGA ( buffer, length, TGA_MallocAlloc, pic, width, height, sErrorString );
+}

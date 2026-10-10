@@ -27,6 +27,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 
 #include "tr_local.h"
+#include "jobs/jobs.h"
 #include "../rd-common/tr_common.h"
 #include <png.h>
 #include <map>
@@ -408,52 +409,76 @@ Uses temp mem, but then copies back to input, quartering the size of the texture
 Proper linear filter
 ================
 */
-static void R_MipMap2( unsigned *in, int inWidth, int inHeight ) {
-	int			i, j, k;
-	byte		*outpix;
-	int			inWidthMask, inHeightMask;
-	int			total;
-	int			outWidth, outHeight;
-	unsigned	*temp;
+// The filter of R_MipMap2 is the product of two 1 2 2 1 filters (36 in all), so it is done as two passes of four
+// taps instead of one of sixteen, and the rows of each pass are shared between the worker threads.
+typedef struct mipMapJob_s {
+	const byte	*in;
+	unsigned short	*horizontal;	// inHeight rows of outWidth pixels, 4 sums each
+	byte		*out;
+	int			inWidth, inHeight, outWidth, outHeight;
+} mipMapJob_t;
 
-	outWidth = inWidth >> 1;
-	outHeight = inHeight >> 1;
-	temp = (unsigned int *) R_Malloc( outWidth * outHeight * 4, TAG_TEMP_WORKSPACE, qfalse );
+static void R_MipMapHorizontal( int begin, int end, void *context ) {
+	const mipMapJob_t *job = (const mipMapJob_t *)context;
+	const int mask = job->inWidth - 1;
 
-	inWidthMask = inWidth - 1;
-	inHeightMask = inHeight - 1;
-
-	for ( i = 0 ; i < outHeight ; i++ ) {
-		for ( j = 0 ; j < outWidth ; j++ ) {
-			outpix = (byte *) ( temp + i * outWidth + j );
-			for ( k = 0 ; k < 4 ; k++ ) {
-				total =
-					1 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					1 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k] +
-
-					2 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k] +
-
-					2 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k] +
-
-					1 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					1 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k];
-				outpix[k] = total / 36;
+	for ( int y = begin ; y < end ; y++ ) {
+		const byte *row = job->in + (size_t)y * job->inWidth * 4;
+		unsigned short *out = job->horizontal + (size_t)y * job->outWidth * 4;
+		for ( int j = 0 ; j < job->outWidth ; j++, out += 4 ) {
+			const byte *a = row + ( ( j * 2 - 1 ) & mask ) * 4;
+			const byte *b = row + ( ( j * 2 ) & mask ) * 4;
+			const byte *c = row + ( ( j * 2 + 1 ) & mask ) * 4;
+			const byte *d = row + ( ( j * 2 + 2 ) & mask ) * 4;
+			for ( int k = 0 ; k < 4 ; k++ ) {
+				out[k] = (unsigned short)( a[k] + 2 * b[k] + 2 * c[k] + d[k] );
 			}
 		}
 	}
+}
 
-	memcpy( in, temp, outWidth * outHeight * 4 );
-	R_Free( temp );
+static void R_MipMapVertical( int begin, int end, void *context ) {
+	const mipMapJob_t *job = (const mipMapJob_t *)context;
+	const int mask = job->inHeight - 1;
+	const size_t stride = (size_t)job->outWidth * 4;
+
+	for ( int i = begin ; i < end ; i++ ) {
+		const unsigned short *a = job->horizontal + (size_t)( ( i * 2 - 1 ) & mask ) * stride;
+		const unsigned short *b = job->horizontal + (size_t)( ( i * 2 ) & mask ) * stride;
+		const unsigned short *c = job->horizontal + (size_t)( ( i * 2 + 1 ) & mask ) * stride;
+		const unsigned short *d = job->horizontal + (size_t)( ( i * 2 + 2 ) & mask ) * stride;
+		byte *out = job->out + (size_t)i * stride;
+		for ( size_t n = 0 ; n < stride ; n++ ) {
+			out[n] = (byte)( ( a[n] + 2 * b[n] + 2 * c[n] + d[n] ) / 36 );
+		}
+	}
+}
+
+static void R_MipMap2( unsigned *in, int inWidth, int inHeight ) {
+	const int outWidth = inWidth >> 1;
+	const int outHeight = inHeight >> 1;
+
+	if ( outWidth <= 0 || outHeight <= 0 ) {
+		return;
+	}
+
+	mipMapJob_t job;
+	job.in = (const byte *)in;
+	job.inWidth = inWidth;
+	job.inHeight = inHeight;
+	job.outWidth = outWidth;
+	job.outHeight = outHeight;
+	job.horizontal = (unsigned short *) R_Malloc( (size_t)outWidth * inHeight * 4 * sizeof( unsigned short ), TAG_TEMP_WORKSPACE, qfalse );
+	job.out = (byte *) R_Malloc( outWidth * outHeight * 4, TAG_TEMP_WORKSPACE, qfalse );
+
+	// (small levels are done by this thread alone, waking the workers costs more than they save)
+	const int rowsPerPiece = Q_max( 8192 / Q_max( inWidth, 1 ), 1 );
+	Jobs::ParallelFor( inHeight, rowsPerPiece, R_MipMapHorizontal, &job );
+	Jobs::ParallelFor( outHeight, rowsPerPiece, R_MipMapVertical, &job );
+
+	memcpy( in, job.out, outWidth * outHeight * 4 );
+	R_Free( job.out );
+	R_Free( job.horizontal );
 }
 
 /*
@@ -468,14 +493,57 @@ the filter wraps around the edges. Needs power of two sizes of at least 2x2.
 */
 #define MIP_LANCZOS_LOBES	3
 
+typedef struct lanczosJob_s {
+	byte		*in;
+	float		*temp;
+	const float	*weights;
+	int			inWidth, inHeight, outWidth, outHeight;
+} lanczosJob_t;
+
+static void R_MipMapLanczosHorizontal( int begin, int end, void *context ) {
+	const lanczosJob_t *job = (const lanczosJob_t *)context;
+	const int widthMask = job->inWidth - 1;
+
+	for ( int y = begin; y < end; y++ ) {
+		const byte *row = job->in + (size_t)y * job->inWidth * 4;
+		float *out = job->temp + (size_t)y * job->outWidth * 4;
+		for ( int x = 0; x < job->outWidth; x++, out += 4 ) {
+			for ( int c = 0; c < 4; c++ ) {
+				float total = 0.0f;
+				for ( int k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
+					total += job->weights[k] * ( row[( ( x * 2 - k ) & widthMask ) * 4 + c] + row[( ( x * 2 + 1 + k ) & widthMask ) * 4 + c] );
+				}
+				out[c] = total;
+			}
+		}
+	}
+}
+
+static void R_MipMapLanczosVertical( int begin, int end, void *context ) {
+	const lanczosJob_t *job = (const lanczosJob_t *)context;
+	const int heightMask = job->inHeight - 1;
+	const int outWidth = job->outWidth;
+
+	for ( int y = begin; y < end; y++ ) {
+		byte *out = job->in + (size_t)y * outWidth * 4;
+		for ( int x = 0; x < outWidth; x++, out += 4 ) {
+			for ( int c = 0; c < 4; c++ ) {
+				float total = 0.0f;
+				for ( int k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
+					total += job->weights[k] * ( job->temp[( ( ( y * 2 - k ) & heightMask ) * outWidth + x ) * 4 + c] + job->temp[( ( ( y * 2 + 1 + k ) & heightMask ) * outWidth + x ) * 4 + c] );
+				}
+				out[c] = (byte) Com_Clampi( 0, 255, (int) ( total + 0.5f ) );
+			}
+		}
+	}
+}
+
 static void R_MipMapLanczos( byte *in, int inWidth, int inHeight ) {
 	static float	weights[MIP_LANCZOS_LOBES];
 	static qboolean	weightsReady = qfalse;
 	const int		outWidth = inWidth >> 1;
 	const int		outHeight = inHeight >> 1;
-	const int		widthMask = inWidth - 1;
-	const int		heightMask = inHeight - 1;
-	int				x, y, k, c;
+	int				k;
 
 	if ( !weightsReady ) {
 		// the output pixel sits between two input pixels, the taps are at 0.5, 1.5, 2.5 input pixels away on
@@ -496,33 +564,14 @@ static void R_MipMapLanczos( byte *in, int inWidth, int inHeight ) {
 
 	// horizontal pass: inWidth x inHeight -> outWidth x inHeight
 	float *temp = (float *) R_Malloc( outWidth * inHeight * 4 * sizeof( float ), TAG_TEMP_WORKSPACE, qfalse );
-	for ( y = 0; y < inHeight; y++ ) {
-		const byte *row = in + y * inWidth * 4;
-		float *out = temp + y * outWidth * 4;
-		for ( x = 0; x < outWidth; x++, out += 4 ) {
-			for ( c = 0; c < 4; c++ ) {
-				float total = 0.0f;
-				for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
-					total += weights[k] * ( row[( ( x * 2 - k ) & widthMask ) * 4 + c] + row[( ( x * 2 + 1 + k ) & widthMask ) * 4 + c] );
-				}
-				out[c] = total;
-			}
-		}
-	}
+	lanczosJob_t job = { in, temp, weights, inWidth, inHeight, outWidth, outHeight };
 
+	// the rows of both passes are independent of each other, so they are shared between the worker threads
+	// (small levels are done by this thread alone, waking the workers costs more than they save)
+	const int rowsPerPiece = Q_max( 4096 / Q_max( inWidth, 1 ), 1 );
+	Jobs::ParallelFor( inHeight, rowsPerPiece, R_MipMapLanczosHorizontal, &job );
 	// vertical pass: outWidth x inHeight -> outWidth x outHeight, written back over the input
-	byte *out = in;
-	for ( y = 0; y < outHeight; y++ ) {
-		for ( x = 0; x < outWidth; x++, out += 4 ) {
-			for ( c = 0; c < 4; c++ ) {
-				float total = 0.0f;
-				for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
-					total += weights[k] * ( temp[( ( ( y * 2 - k ) & heightMask ) * outWidth + x ) * 4 + c] + temp[( ( ( y * 2 + 1 + k ) & heightMask ) * outWidth + x ) * 4 + c] );
-				}
-				out[c] = (byte) Com_Clampi( 0, 255, (int) ( total + 0.5f ) );
-			}
-		}
-	}
+	Jobs::ParallelFor( outHeight, rowsPerPiece, R_MipMapLanczosVertical, &job );
 
 	R_Free( temp );
 }

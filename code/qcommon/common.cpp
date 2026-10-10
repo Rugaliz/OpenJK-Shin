@@ -29,6 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "sstring.h"	// to get Gil's string class, because MS's doesn't compile properly in here
 #include "stringed_ingame.h"
 #include "game_version.h"
+#include "jobs/jobs.h"
 #include "../shared/sys/sys_local.h"
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -1152,6 +1153,8 @@ void Com_Init( char *commandLine ) {
 
 		com_affinity = Cvar_Get( "com_affinity", "0", CVAR_ARCHIVE_ND );
 		com_busyWait = Cvar_Get( "com_busyWait", "0", CVAR_ARCHIVE_ND );
+		// worker threads for loading (docs/parallel-work.md): -1 uses what the processor has, 0 turns them off
+		Jobs::SetThreads( Cvar_Get( "com_jobThreads", "-1", CVAR_ARCHIVE_ND )->integer );
 
 		com_bootlogo = Cvar_Get( "com_bootlogo", "1", CVAR_ARCHIVE_ND );
 

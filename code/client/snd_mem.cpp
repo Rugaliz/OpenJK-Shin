@@ -27,6 +27,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_local.h"
 #include <math.h>
 #include "cl_mp3.h"
+#include "jobs/jobs.h"
+#include <atomic>
 
 #include <string>
 
@@ -234,7 +236,45 @@ static inline int S_ResampleFetch( const byte *pData, int iInWidth, int iInCount
 
 // for the developer report in SND_RegisterAudio_LevelLoadEnd
 int s_resampleMsTotal;
+int s_loadMsTotal, s_loadCount, s_mp3MsTotal;
 int s_resampleCount;
+
+// the filtered resampling of ResampleSfx for output samples [begin, end), run by worker threads
+typedef struct resampleJob_s
+{
+	const resampleFilter_t	*pFilter;
+	const short				*pPadded;
+	int						iPaddedCount;
+	int						iPad;
+	double					dStepScale;
+	short					*pOut;
+	std::atomic<int>		maxVol;		// (the loudest sample, for the lip sync volume)
+} resampleJob_t;
+
+static void ResampleRange( int begin, int end, void *pContext )
+{
+	resampleJob_t *pJob = (resampleJob_t *)pContext;
+	int iMax = 0;
+
+	for ( int i = begin; i < end; i++ )
+	{
+		float f;
+		S_Resample_Interp( pJob->pPadded, 1, pJob->iPaddedCount, i * pJob->dStepScale + pJob->iPad, pJob->pFilter, &f );
+		if ( f > 32767.0f )			f = 32767.0f;
+		else if ( f < -32768.0f )	f = -32768.0f;
+		int iSample = (int)floorf( f + 0.5f );
+		pJob->pOut[i] = (short)iSample;
+		if ( iSample < 0 )
+			iSample = -iSample;
+		if ( iMax < ( iSample >> 8 ) )
+			iMax = iSample >> 8;
+	}
+
+	int iSeen = pJob->maxVol.load();
+	while ( iSeen < iMax && !pJob->maxVol.compare_exchange_weak( iSeen, iMax ) )
+	{
+	}
+}
 
 /*
 ================
@@ -283,6 +323,22 @@ void ResampleSfx (sfx_t *sfx, int iInRate, int iInWidth, byte *pData)
 			for ( int k = 0; k < iInCount + 2 * iPad; k++ )
 				pPadded[k] = (short)S_ResampleFetch( pData, iInWidth, iInCount, k - iPad );
 		}
+	}
+
+	if ( pPadded )
+	{
+		// the filtered path is a pure function of the padded copy, so the output is cut into pieces for the workers
+		resampleJob_t job;
+		job.pFilter = &filter;
+		job.pPadded = pPadded;
+		job.iPaddedCount = iInCount + 2 * iPad;
+		job.iPad = iPad;
+		job.dStepScale = dStepScale;
+		job.pOut = sfx->pSoundData;
+		job.maxVol.store( 0 );
+		Jobs::ParallelFor( iOutCount, 4096, ResampleRange, &job );
+		sfx->fVolRange = (float)job.maxVol.load();
+		iOutCount = 0;	// (done)
 	}
 
 	for (i=0 ; i<iOutCount ; i++)
@@ -904,7 +960,9 @@ static qboolean S_LoadSound_Actual( sfx_t *sfx )
 					byte *pbUnpackBuffer = (byte *) Z_Malloc( iRawPCMDataSize+10 +2304 /* <g> */, TAG_TEMP_WORKSPACE, qfalse );	// won't return if fails
 
 					{
+						const int iMp3Start = Sys_Milliseconds();
 						int iResultBytes = MP3_UnpackRawPCM( sLoadName, data, size, pbUnpackBuffer, qfalse );
+						s_mp3MsTotal += Sys_Milliseconds() - iMp3Start;
 
 						if (iResultBytes!= iRawPCMDataSize){
 							Com_Printf(S_COLOR_YELLOW"**** MP3 %s final unpack size %d different to previous value %d\n",sLoadName,iResultBytes,iRawPCMDataSize);
@@ -998,7 +1056,10 @@ qboolean S_LoadSound( sfx_t *sfx )
 {
 	gbInsideLoadSound = qtrue;	// !!!!!!!!!!!!!
 
+		const int iLoadStart = Sys_Milliseconds();
 		qboolean bReturn = S_LoadSound_Actual( sfx );
+		s_loadMsTotal += Sys_Milliseconds() - iLoadStart;
+		s_loadCount++;
 
 	gbInsideLoadSound = qfalse;	// !!!!!!!!!!!!!
 
