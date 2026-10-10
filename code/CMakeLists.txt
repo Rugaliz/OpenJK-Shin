@@ -54,7 +54,7 @@ if(BuildSPEngine OR BuildJK2SPEngine)
 		set(SPEngineLibraries ${SPEngineLibraries} ${OPENGL_LIBRARIES})
 	endif()
 
-	set(SPEngineLibraries ${SPEngineLibraries} SDL3::SDL3)
+	set(SPEngineLibraries ${SPEngineLibraries} SDL3::SDL3 Threads::Threads)
 
 	#    Source Files
 

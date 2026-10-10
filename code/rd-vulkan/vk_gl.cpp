@@ -1286,11 +1286,15 @@ void vkglReadPixels( GLint x, GLint y, GLsizei width, GLsizei height, GLenum for
 	if ( format == GL_DEPTH_COMPONENT && type == GL_FLOAT )
 	{
 		// (only single values are asked for: the flares looking whether something is in front of them)
+		const double start = VK_Now();
 		const float depth = VK_ReadDepth( x, y );
+		VK_Slow( "reading a depth value back", start );
 		for ( int i = 0; i < width * height; i++ ) ( (float *)pixels )[i] = depth;
 		return;
 	}
+	const double start = VK_Now();
 	VK_ReadPixels( x, y, width, height, format, type, pixels );
+	VK_Slow( "reading the screen back", start );
 }
 
 /*

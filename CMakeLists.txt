@@ -409,6 +409,9 @@ else()
   find_package(PNG REQUIRED)
 endif()
 
+# Worker threads for the parts of the engine that split into independent pieces (shared/jobs/jobs.h)
+find_package(Threads REQUIRED)
+
 # SDL3 (window, input, audio). Either the one installed on the system (version 3.2.0 or newer), or one that is
 # downloaded and built as part of this build (static, so there is nothing extra to ship).
 if(UseInternalSDL3)
