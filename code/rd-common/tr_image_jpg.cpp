@@ -34,6 +34,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
  * You may also wish to include "jerror.h".
  */
 
+#include <setjmp.h>
 #include <jpeglib.h>
 
 static void R_JPGErrorExit(j_common_ptr cinfo)
@@ -224,6 +225,88 @@ void LoadJPG( const char *filename, unsigned char **pic, int *width, int *height
 	*/
 
 	/* And we're done! */
+}
+
+// The same decoding on the memory of a file the caller has read, for the worker threads of the image prefetch: it
+// does not touch the engine (no zone memory, no printing), a damaged file is just reported by returning false. The
+// pixels are made with malloc.
+struct jpegMemoryError_t {
+	struct jpeg_error_mgr	pub;
+	jmp_buf					jump;
+};
+
+static void R_JPGMemoryErrorExit( j_common_ptr cinfo )
+{
+	longjmp( ( (jpegMemoryError_t *)cinfo->err )->jump, 1 );
+}
+
+static void R_JPGMemoryOutputMessage( j_common_ptr cinfo )
+{
+}
+
+bool R_DecodeJPGFromMemory( const byte *buffer, size_t length, byte **pic, int *width, int *height )
+{
+	struct jpeg_decompress_struct cinfo;
+	jpegMemoryError_t jerr;
+	byte *volatile out = NULL;
+
+	*pic = NULL;
+	memset( &cinfo, 0, sizeof( cinfo ) );
+	cinfo.err = jpeg_std_error( &jerr.pub );
+	jerr.pub.error_exit = R_JPGMemoryErrorExit;
+	jerr.pub.output_message = R_JPGMemoryOutputMessage;
+	if ( setjmp( jerr.jump ) )
+	{
+		jpeg_destroy_decompress( &cinfo );
+		free( out );
+		return false;
+	}
+
+	jpeg_create_decompress( &cinfo );
+	jpeg_mem_src( &cinfo, (unsigned char *)buffer, (unsigned long)length );
+	jpeg_read_header( &cinfo, TRUE );
+	cinfo.out_color_space = JCS_RGB;
+	jpeg_start_decompress( &cinfo );
+
+	const unsigned int pixelcount = cinfo.output_width * cinfo.output_height;
+	if ( !cinfo.output_width || !cinfo.output_height || ( ( pixelcount * 4 ) / cinfo.output_width ) / 4 != cinfo.output_height
+		|| pixelcount > 0x1FFFFFFF || cinfo.output_components != 3 )
+	{
+		jpeg_destroy_decompress( &cinfo );
+		return false;
+	}
+
+	const unsigned int memcount = pixelcount * 4;
+	const unsigned int rowStride = cinfo.output_width * cinfo.output_components;
+	out = (byte *)malloc( memcount );
+	if ( !out )
+	{
+		jpeg_destroy_decompress( &cinfo );
+		return false;
+	}
+	while ( cinfo.output_scanline < cinfo.output_height )
+	{
+		byte *row = out + (size_t)rowStride * cinfo.output_scanline;
+		jpeg_read_scanlines( &cinfo, &row, 1 );
+	}
+
+	// expand from RGB to RGBA, from the end so that it can be done in place
+	byte *buf = out;
+	unsigned int sindex = pixelcount * cinfo.output_components;
+	unsigned int dindex = memcount;
+	do {
+		buf[--dindex] = 255;
+		buf[--dindex] = buf[--sindex];
+		buf[--dindex] = buf[--sindex];
+		buf[--dindex] = buf[--sindex];
+	} while ( sindex );
+
+	*width = (int)cinfo.output_width;
+	*height = (int)cinfo.output_height;
+	*pic = out;
+	jpeg_finish_decompress( &cinfo );
+	jpeg_destroy_decompress( &cinfo );
+	return true;
 }
 
 #ifdef JK2_MODE

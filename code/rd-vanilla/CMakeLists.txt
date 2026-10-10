@@ -52,6 +52,8 @@ if(BuildSPRdVanilla OR BuildJK2SPRdVanilla OR BuildSPRdVulkan OR BuildJK2SPRdVul
 	source_group("ghoul2" FILES ${SPRDVanillaG2Files})
 	set(SPRDVanillaFiles ${SPRDVanillaFiles} ${SPRDVanillaG2Files})
 
+    list(APPEND SPRDVanillaRendererLibraries Threads::Threads)
+
     # Transparently use either bundled or system jpeg.
     list(APPEND SPRDVanillaRendererIncludeDirectories ${JPEG_INCLUDE_DIR})
     list(APPEND SPRDVanillaRendererLibraries          ${JPEG_LIBRARIES})
@@ -143,6 +145,7 @@ if(BuildSPRdVanilla OR BuildJK2SPRdVanilla OR BuildSPRdVulkan OR BuildJK2SPRdVul
 		"${SPDir}/rd-common/tr_font.cpp"
 		"${SPDir}/rd-common/tr_font.h"
 		"${SPDir}/rd-common/tr_image_load.cpp"
+		"${SPDir}/rd-common/tr_image_prefetch.cpp"
 		"${SPDir}/rd-common/tr_image_jpg.cpp"
 		"${SPDir}/rd-common/tr_image_tga.cpp"
 		"${SPDir}/rd-common/tr_image_png.cpp"

@@ -4388,7 +4388,12 @@ qboolean SND_RegisterAudio_LevelLoadEnd(qboolean bDeleteEverythingNotUsedThisLev
 
 	Com_DPrintf( "SND_RegisterAudio_LevelLoadEnd():\n");
 	{
-		extern int s_resampleMsTotal, s_resampleCount;
+		extern int s_resampleMsTotal, s_resampleCount, s_loadMsTotal, s_loadCount, s_mp3MsTotal;
+		if ( s_loadCount )
+		{
+			Com_DPrintf( "Sound: loaded %d sounds in %d ms (of which unpacking MP3s %d ms)\n", s_loadCount, s_loadMsTotal, s_mp3MsTotal );
+			s_loadMsTotal = s_loadCount = s_mp3MsTotal = 0;
+		}
 		if ( s_resampleCount )
 		{
 			Com_DPrintf( "Sound: resampled %d sounds in %d ms (s_quality %d)\n", s_resampleCount, s_resampleMsTotal, s_quality->integer );

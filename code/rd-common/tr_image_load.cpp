@@ -108,6 +108,12 @@ void R_LoadImage( const char *shortname, byte **pic, int *width, int *height ) {
 	*width = 0;
 	*height = 0;
 
+	// read and decoded ahead by the worker threads?
+	if ( R_ImagePrefetch_Take( shortname, pic, width, height ) )
+	{
+		return;
+	}
+
 	// Try loading the image with the original extension (if possible).
 	const char *extension = COM_GetExtension (shortname);
 	const ImageLoaderMap *imageLoader = FindImageLoader (extension);
@@ -116,6 +122,7 @@ void R_LoadImage( const char *shortname, byte **pic, int *width, int *height ) {
 		imageLoader->loader (shortname, pic, width, height);
 		if ( *pic )
 		{
+			R_ImagePrefetch_Note( shortname );
 			return;
 		}
 	}
@@ -136,6 +143,7 @@ void R_LoadImage( const char *shortname, byte **pic, int *width, int *height ) {
 		tryLoader->loader (name, pic, width, height);
 		if ( *pic )
 		{
+			R_ImagePrefetch_Note( name );
 			return;
 		}
 	}

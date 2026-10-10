@@ -59,6 +59,16 @@ qboolean R_ImageLoader_Add( const char *extension, ImageLoaderFn imageLoader );
 // Load an image from file.
 void R_LoadImage( const char *shortname, byte **pic, int *width, int *height );
 
+// Image prefetch (tr_image_prefetch.cpp): while a level loads, the images it needs are read ahead and decoded on
+// worker threads. The list of the images comes from the last time the level was loaded.
+void		R_ImagePrefetch_Begin( const char *mapName );
+void		R_ImagePrefetch_End( void );
+void		R_ImagePrefetch_Shutdown( void );
+qboolean	R_ImagePrefetch_Take( const char *shortname, byte **pic, int *width, int *height );	// zone memory, like R_LoadImage
+void		R_ImagePrefetch_Note( const char *fileName );	// this file was loaded
+bool		R_DecodeTGAFromMemory( byte *buffer, size_t length, byte **pic, int *width, int *height );
+bool		R_DecodeJPGFromMemory( const byte *buffer, size_t length, byte **pic, int *width, int *height );
+
 // Load raw image data from TGA image.
 void LoadTGA( const char *name, byte **pic, int *width, int *height );
 

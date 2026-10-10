@@ -27,6 +27,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 
 #include "tr_local.h"
+#include "jobs/jobs.h"
 #include "../rd-common/tr_common.h"
 #include "tr_stl.h"
 #include "../rd-common/tr_font.h"
@@ -1603,6 +1604,7 @@ void R_Register( void )
 	r_sampleShading = ri.Cvar_Get( "r_sampleShading", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 0 off, up to 1 = shade every sample (needs GL_ARB_sample_shading, slow)
 	ri.Cvar_CheckRange( r_sampleShading, 0, 1, qfalse );
 	r_glsl = ri.Cvar_Get( "r_glsl", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// use GLSL shader programs where the renderer has them (needs OpenGL 2.0)
+	Jobs::SetThreads( ri.Cvar_Get( "com_jobThreads", "-1", CVAR_ARCHIVE_ND )->integer );	// (the renderer has a pool of its own, see docs/parallel-work.md)
 	r_dlightGLSL = ri.Cvar_Get( "r_dlightGLSL", "0", CVAR_ARCHIVE_ND );	// 1 = dynamic lights as a shader pass that lights every pixel by distance and surface angle (needs r_glsl)
 	r_postDebug = ri.Cvar_Get( "r_postDebug", "0", 0 );	// 1 = run the post processing plumbing with no effect, the picture must not change
 	r_ssao = ri.Cvar_Get( "r_ssao", "0", CVAR_ARCHIVE_ND );	// 1 = ambient occlusion, darkens corners and where things meet (needs r_glsl)
@@ -1939,6 +1941,7 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
+		R_ImagePrefetch_Shutdown();
 #ifdef RD_VULKAN
 		VK_Shutdown();
 #endif

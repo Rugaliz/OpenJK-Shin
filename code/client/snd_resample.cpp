@@ -26,6 +26,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_resample.h"
 
 #include <math.h>
+#if defined( __SSE2__ ) || defined( _M_X64 ) || ( defined( _M_IX86_FP ) && _M_IX86_FP >= 2 )
+#include <emmintrin.h>
+#define RESAMPLE_SSE2
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -191,8 +195,23 @@ static void S_Resample_InterpTable( const short *pSrc, int nChan, int nFrames, d
 	}
 	else
 	{
+		int k = kFirst;
 		float f = 0.0f;
-		for ( int k = kFirst; k < kEnd; k++ )
+#ifdef RESAMPLE_SSE2
+		// four taps at a time (the result differs from the plain sum by rounding of the last digit of a float)
+		__m128 acc = _mm_setzero_ps();
+		const __m128i zero = _mm_setzero_si128();
+		for ( ; k + 4 <= kEnd; k += 4 )
+		{
+			const __m128i s16 = _mm_loadl_epi64( (const __m128i *)( pSrc + iBase + k ) );
+			const __m128i s32 = _mm_srai_epi32( _mm_unpacklo_epi16( zero, s16 ), 16 );	// sign extended
+			acc = _mm_add_ps( acc, _mm_mul_ps( _mm_loadu_ps( w + k ), _mm_cvtepi32_ps( s32 ) ) );
+		}
+		float lanes[4];
+		_mm_storeu_ps( lanes, acc );
+		f = ( lanes[0] + lanes[1] ) + ( lanes[2] + lanes[3] );
+#endif
+		for ( ; k < kEnd; k++ )
 			f += w[k] * pSrc[iBase + k];
 		fOut[0] = f;
 	}
