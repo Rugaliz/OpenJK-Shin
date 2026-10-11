@@ -727,6 +727,7 @@ void CL_InitKeyCommands( void );
 
 void CL_Init( void );
 void CL_Disconnect( void );
+void CL_SetLevelLoading( qboolean loading );
 void CL_Shutdown( void );
 void CL_Frame( int msec,float fractionMsec );
 qboolean CL_GameCommand( void );

@@ -252,6 +252,18 @@ Sends a disconnect message to the server
 This is also called on Com_Error and Com_Quit, so it shouldn't cause any errors
 =====================
 */
+/*
+=====================
+CL_SetLevelLoading
+
+com_levelLoading is 1 from the start of loading a level until its first snapshot. The loading screen is redrawn
+for every step of the load, so the renderers do not wait for the display (vsync) while it is set.
+=====================
+*/
+void CL_SetLevelLoading( qboolean loading ) {
+	Cvar_Set( "com_levelLoading", loading ? "1" : "0" );
+}
+
 void CL_Disconnect( void ) {
 	if ( !com_cl_running || !com_cl_running->integer ) {
 		return;

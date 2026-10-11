@@ -682,7 +682,9 @@ static VkPresentModeKHR VK_ChoosePresentMode( void )
 	// r_swapInterval 0: no waiting; 1: vsync (with r_adaptiveVsync a late frame tears instead of waiting a whole refresh)
 	cvar_t *swapInterval = ri.Cvar_Get( "r_swapInterval", "0", CVAR_ARCHIVE_ND );
 	cvar_t *adaptive = ri.Cvar_Get( "r_adaptiveVsync", "0", CVAR_ARCHIVE_ND );
-	if ( swapInterval->integer == 0 )
+	// the loading screen is redrawn for every step of loading a level, do not wait for the display then
+	cvar_t *levelLoading = ri.Cvar_Get( "com_levelLoading", "0", 0 );
+	if ( swapInterval->integer == 0 || levelLoading->integer )
 	{
 		return immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : ( mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR );
 	}
