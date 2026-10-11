@@ -893,6 +893,16 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 
 			if (!GLimp_StartDriverAndSetMode( glConfig, windowDesc, R_MODE_FALLBACK, qfalse, qfalse ))
 			{
+				if ( windowDesc->api == GRAPHICS_API_VULKAN )
+				{
+					// no window for Vulkan: the renderer sees a size of 0 and the engine loads the OpenGL renderer
+					Cvar_Set( "cl_rendererFailure", va( "no window for Vulkan could be opened (%s)", SDL_GetError() ) );
+					glConfig->vidWidth = 0;
+					window_t failed = {};
+					failed.api = windowDesc->api;
+					return failed;
+				}
+
 				// Nothing worked, give up
 				Com_Error( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
 			}

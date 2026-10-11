@@ -1242,14 +1242,22 @@ to 2000 units).  Saved configs only change if they still hold the old default.
 Version 3 turned on the more realistic saber combat option (precise collision,
 higher damage) by default; the cvar is g_saberRealisticCombat in JO and
 g_saberMoreRealistic in JA.
+
+Version 4 made the Vulkan renderer the default; a saved choice of the OpenGL renderer is the old default and cannot
+be told apart from a deliberate one, so it is changed to Vulkan once (cl_renderer rdjosp-vanilla / rdsp-vanilla goes
+back to OpenGL, and the game falls back to it by itself when Vulkan cannot be used).
 ===============
 */
-#define COM_CONFIG_VERSION	3
+#define COM_CONFIG_VERSION	4
 
 #ifdef JK2_MODE
 #define COM_SABER_REALISTIC_CVAR	"g_saberRealisticCombat"
+#define COM_OPENGL_RENDERER			"rdjosp-vanilla"
+#define COM_VULKAN_RENDERER			"rdjosp-vulkan"
 #else
 #define COM_SABER_REALISTIC_CVAR	"g_saberMoreRealistic"
+#define COM_OPENGL_RENDERER			"rdsp-vanilla"
+#define COM_VULKAN_RENDERER			"rdsp-vulkan"
 #endif
 
 static void Com_MigrateConfig( void ) {
@@ -1271,6 +1279,9 @@ static void Com_MigrateConfig( void ) {
 	}
 	if ( !strcmp( Cvar_VariableString( COM_SABER_REALISTIC_CVAR ), "0" ) ) {
 		Cvar_Set( COM_SABER_REALISTIC_CVAR, "1" );
+	}
+	if ( !Q_stricmp( Cvar_VariableString( "cl_renderer" ), COM_OPENGL_RENDERER ) ) {
+		Cvar_Set( "cl_renderer", COM_VULKAN_RENDERER );
 	}
 	Cvar_Set( "com_configVersion", va( "%d", COM_CONFIG_VERSION ) );
 }

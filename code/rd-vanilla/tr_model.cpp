@@ -983,7 +983,12 @@ void CM_SetupShaderProperties(void);
 void RE_BeginRegistration( glconfig_t *glconfigOut ) {
 	ri.Hunk_ClearToMark();
 
-	R_Init();
+	if ( !R_Init() )
+	{
+		// the renderer could not start (glConfig.vidWidth is 0): the engine loads another one
+		*glconfigOut = glConfig;
+		return;
+	}
 
 	*glconfigOut = glConfig;
 

@@ -37,6 +37,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define	RETRANSMIT_TIMEOUT	3000	// time between connection packet retransmits
 
 cvar_t	*cl_renderer;
+char	cl_rendererWarning[256];			// set when the Vulkan renderer could not be used (see CL_InitRef)
+static qboolean	cl_rendererForceFallback;
 
 cvar_t	*cl_nodelta;
 cvar_t	*cl_debugMove;
@@ -947,6 +949,22 @@ void CL_InitRenderer( void ) {
 	// this sets up the renderer and calls R_Init
 	re.BeginRegistration( &cls.glconfig );
 
+	if ( cls.glconfig.vidWidth == 0 && !cl_rendererForceFallback ) {
+		// the renderer could not start (Vulkan without a usable device): load the OpenGL one in its place
+		const char *why = Cvar_VariableString( "cl_rendererFailure" );
+		Com_Printf( "The renderer could not start (%s): falling back to OpenGL\n", why[0] ? why : "unknown reason" );
+		Com_sprintf( cl_rendererWarning, sizeof( cl_rendererWarning ),
+			"%s", why[0] ? why : "unknown reason" );
+		cl_rendererForceFallback = qtrue;
+		CL_ShutdownRef( qfalse );
+		CL_InitRef();
+		re.BeginRegistration( &cls.glconfig );
+		cl_rendererForceFallback = qfalse;
+	}
+	if ( cls.glconfig.vidWidth == 0 ) {
+		Com_Error( ERR_FATAL, "The renderer could not start" );
+	}
+
 	// load character sets
 	cls.charSetShader = re.RegisterShaderNoMip("gfx/2d/charsgrid_med");
 	cls.consoleFont = re.RegisterFont( "ocr_a" );
@@ -1088,12 +1106,17 @@ static CMiniHeap *GetG2VertSpaceServer( void ) {
 	return G2VertSpaceServer;
 }
 
-// NOTENOTE: If you change the output name of rd-vanilla, change this define too!
+// NOTENOTE: If you change the output name of rd-vanilla or rd-vulkan, change these defines too!
+// The Vulkan renderer is the default; the OpenGL one (vanilla) is what the game falls back to when Vulkan is not
+// available, and says so on the screen (cl_rendererWarning).
 #ifdef JK2_MODE
-#define DEFAULT_RENDER_LIBRARY	"rdjosp-vanilla"
+#define DEFAULT_RENDER_LIBRARY	"rdjosp-vulkan"
+#define FALLBACK_RENDER_LIBRARY	"rdjosp-vanilla"
 #else
-#define DEFAULT_RENDER_LIBRARY	"rdsp-vanilla"
+#define DEFAULT_RENDER_LIBRARY	"rdsp-vulkan"
+#define FALLBACK_RENDER_LIBRARY	"rdsp-vanilla"
 #endif
+
 
 void CL_InitRef( void ) {
 	refexport_t	*ret;
@@ -1103,20 +1126,40 @@ void CL_InitRef( void ) {
 
 	Com_Printf( "----- Initializing Renderer ----\n" );
     cl_renderer = Cvar_Get( "cl_renderer", DEFAULT_RENDER_LIBRARY, CVAR_ARCHIVE|CVAR_LATCH );
+	Cvar_Get( "cl_rendererFailure", "", 0 );	// (a renderer that cannot start says why here)
 
-	Com_sprintf( dllName, sizeof( dllName ), "%s_" ARCH_STRING DLL_EXT, cl_renderer->string );
-
-	if( !(rendererLib = Sys_LoadDll( dllName, qfalse )) && strcmp( cl_renderer->string, cl_renderer->resetString ) )
-	{
-		Com_Printf( "failed: trying to load fallback renderer\n" );
-		Cvar_ForceReset( "cl_renderer" );
-
-		Com_sprintf( dllName, sizeof( dllName ), DEFAULT_RENDER_LIBRARY "_" ARCH_STRING DLL_EXT );
-		rendererLib = Sys_LoadDll( dllName, qfalse );
+	// The renderer asked for, then the default one, then the OpenGL one. The saved choice is left alone when it
+	// cannot be used, so the next start tries it again.
+	const char *candidates[3] = { cl_renderer->string, DEFAULT_RENDER_LIBRARY, FALLBACK_RENDER_LIBRARY };
+	if ( cl_rendererForceFallback ) {
+		candidates[0] = FALLBACK_RENDER_LIBRARY;
+		candidates[1] = NULL;
+		candidates[2] = NULL;
+	}
+	const char *loaded = NULL;
+	for ( int i = 0; i < 3 && !rendererLib; i++ ) {
+		if ( !candidates[i] || ( i > 0 && !Q_stricmp( candidates[i], candidates[i - 1] ) ) ) {
+			continue;
+		}
+		Com_sprintf( dllName, sizeof( dllName ), "%s_" ARCH_STRING DLL_EXT, candidates[i] );
+		if ( ( rendererLib = Sys_LoadDll( dllName, qfalse ) ) != NULL ) {
+			loaded = candidates[i];
+		} else {
+			Com_Printf( "failed to load renderer \"%s\"\n", candidates[i] );
+		}
 	}
 
 	if ( !rendererLib ) {
 		Com_Error( ERR_FATAL, "Failed to load renderer\n" );
+	}
+
+	// anything but the OpenGL renderer when it was not asked for is a fallback the player should know about
+	if ( !cl_rendererForceFallback ) {
+		cl_rendererWarning[0] = '\0';
+		if ( Q_stricmp( loaded, cl_renderer->string ) && !Q_stricmp( loaded, FALLBACK_RENDER_LIBRARY ) ) {
+			Com_sprintf( cl_rendererWarning, sizeof( cl_rendererWarning ),
+				"the Vulkan renderer module \"%s\" could not be loaded", cl_renderer->string );
+		}
 	}
 
 	memset( &rit, 0, sizeof( rit ) );
