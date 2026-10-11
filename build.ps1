@@ -45,7 +45,11 @@
     Only build, do not copy the result to the output folder.
 
 .PARAMETER Clean
-    Delete the build folder first.
+    Delete the build folder first (everything is compiled again).
+
+.PARAMETER ClearCache
+    Forget the settings CMake saved in the build folder (CMakeCache.txt) but keep the compiled files. Use it when an
+    option you changed or a new default is not picked up.
 
 .PARAMETER Check
     Only check that everything needed is installed, then stop.
@@ -87,6 +91,7 @@ param(
     [switch]$NoRend2,
     [switch]$NoInstall,
     [switch]$Clean,
+    [switch]$ClearCache,
     [switch]$Check,
     [string[]]$CMakeArgs = @()
 )
@@ -320,6 +325,16 @@ if ($Clean -and (Test-Path $BuildDir)) {
     Remove-Item -Recurse -Force $BuildDir
 }
 
+if ($ClearCache) {
+    $cacheFile = Join-Path $BuildDir 'CMakeCache.txt'
+    if (Test-Path $cacheFile) {
+        Write-Info "forgetting the saved CMake settings of $BuildDir (the compiled files are kept)"
+        Remove-Item -Force $cacheFile
+    } else {
+        Write-Info "no saved CMake settings in $BuildDir, nothing to clear"
+    }
+}
+
 $generator = $script:vsGenerator
 $cacheFile = Join-Path $BuildDir 'CMakeCache.txt'
 if (Test-Path $cacheFile) {
@@ -342,12 +357,14 @@ $configureArgs = @(
     "-DBuildJK2SPEngine=$(OnOff $buildJO)",
     "-DBuildJK2SPGame=$(OnOff $buildJO)",
     "-DBuildJK2SPRdVanilla=$(OnOff $buildJO)",
+    "-DBuildJK2SPRdVulkan=$(OnOff $buildJO)",
     "-DBuildJK2MPEngine=$(OnOff $buildJOMP)",
     "-DBuildJK2MPDed=$(OnOff $buildJOMP)",
     "-DBuildJK2MPRdVanilla=$(OnOff $buildJOMP)",
     "-DBuildSPEngine=$(OnOff $buildJASP)",
     "-DBuildSPGame=$(OnOff $buildJASP)",
     "-DBuildSPRdVanilla=$(OnOff $buildJASP)",
+    "-DBuildSPRdVulkan=$(OnOff $buildJASP)",
     "-DBuildMPEngine=$(OnOff $buildJAMP)",
     "-DBuildMPDed=$(OnOff $buildJAMP)",
     "-DBuildMPGame=$(OnOff $buildJAMP)",
