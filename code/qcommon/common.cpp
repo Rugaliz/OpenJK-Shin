@@ -1236,9 +1236,19 @@ hold a high refresh rate display at 125 fps with tearing. Reset them once.
 Version 2 raised the defaults of r_lodscale (models drop to their coarse levels
 of detail twice as far away) and r_shadowRange (character shadows are drawn up
 to 2000 units).  Saved configs only change if they still hold the old default.
+
+Version 3 turned on the more realistic saber combat option (precise collision,
+higher damage) by default; the cvar is g_saberRealisticCombat in JO and
+g_saberMoreRealistic in JA.
 ===============
 */
-#define COM_CONFIG_VERSION	2
+#define COM_CONFIG_VERSION	3
+
+#ifdef JK2_MODE
+#define COM_SABER_REALISTIC_CVAR	"g_saberRealisticCombat"
+#else
+#define COM_SABER_REALISTIC_CVAR	"g_saberMoreRealistic"
+#endif
 
 static void Com_MigrateConfig( void ) {
 	cvar_t *version = Cvar_Get( "com_configVersion", "0", CVAR_ARCHIVE_ND );
@@ -1256,6 +1266,9 @@ static void Com_MigrateConfig( void ) {
 	}
 	if ( !strcmp( Cvar_VariableString( "r_shadowRange" ), "1000" ) ) {
 		Cvar_Set( "r_shadowRange", "2000" );
+	}
+	if ( !strcmp( Cvar_VariableString( COM_SABER_REALISTIC_CVAR ), "0" ) ) {
+		Cvar_Set( COM_SABER_REALISTIC_CVAR, "1" );
 	}
 	Cvar_Set( "com_configVersion", va( "%d", COM_CONFIG_VERSION ) );
 }
