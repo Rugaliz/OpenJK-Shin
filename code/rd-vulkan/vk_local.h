@@ -25,5 +25,5 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 // Creates the Vulkan instance, device and swapchain for the window made by ri.WIN_Init and fills in the parts of
 // glConfig the renderer reads (strings, limits, which optional features exist).
-void VK_Init( glconfig_t *glConfig );
+bool VK_Init( glconfig_t *glConfig );
 void VK_Shutdown( void );

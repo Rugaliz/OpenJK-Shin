@@ -46,12 +46,12 @@ option(BuildMPRend2 "Whether to create projects for the EXPERIMENTAL MP rend2 re
 option(BuildSPEngine "Whether to create projects for the SP engine (openjk_sp.exe)" ON)
 option(BuildSPGame "Whether to create projects for the SP gamecode (jagamex86.dll)" ON)
 option(BuildSPRdVanilla "Whether to create projects for the SP default renderer (rdsp-vanilla_x86.dll)" ON)
-option(BuildSPRdVulkan "Whether to create projects for the EXPERIMENTAL SP Vulkan renderer (rdsp-vulkan_x86.dll), needs the Vulkan headers" ON)
+option(BuildSPRdVulkan "Whether to create projects for the SP Vulkan renderer (rdsp-vulkan_x86.dll), needs the Vulkan headers" ON)
 
 option(BuildJK2SPEngine "Whether to create projects for the jk2 SP engine (openjo_sp.exe)" OFF)
 option(BuildJK2SPGame "Whether to create projects for the jk2 sp gamecode mod (jk2gamex86.dll)" OFF)
 option(BuildJK2SPRdVanilla "Whether to create projects for the jk2 sp renderer (rdjosp-vanilla_x86.dll)" OFF)
-option(BuildJK2SPRdVulkan "Whether to create projects for the EXPERIMENTAL jk2 sp Vulkan renderer (rdjosp-vulkan_x86.dll), needs the Vulkan headers" OFF)
+option(BuildJK2SPRdVulkan "Whether to create projects for the jk2 sp Vulkan renderer (rdjosp-vulkan_x86.dll), needs the Vulkan headers" ON)
 
 option(BuildJK2MPEngine "Whether to create projects for the jk2 MP client (openjo.exe)" OFF)
 option(BuildJK2MPDed "Whether to create projects for the jk2 MP dedicated server (openjoded.exe)" OFF)

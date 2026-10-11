@@ -2,8 +2,8 @@
 
 Goal: a Vulkan renderer for the single player games (Jedi Outcast and Jedi Academy) that looks the same as the OpenGL
 one, as a **separate renderer module** (`rdsp-vulkan` for Jedi Academy, `rdjosp-vulkan` for Jedi Outcast). The OpenGL
-renderer stays the default and stays supported (including on Windows). Pick the Vulkan one with
-`+set cl_renderer rdsp-vulkan` (the engine already loads whichever module `cl_renderer` names).
+renderer stays supported (including on Windows) and is what the game falls back to when Vulkan cannot be used. The
+Vulkan renderer is the default; `cl_renderer` names the module the engine loads.
 
 ## How it is built
 
@@ -47,8 +47,15 @@ Shaders are GLSL compiled to SPIR-V at build time with `glslc`; the generated SP
 ## Using it
 
 Build as usual (the module is built when the Vulkan headers are found; `-DBuildSPRdVulkan=OFF` / `-DBuildJK2SPRdVulkan=OFF`
-skip it), then start the game with `+set cl_renderer rdsp-vulkan` (Jedi Academy) or `+set cl_renderer rdjosp-vulkan`
-(Jedi Outcast). `cl_renderer` is saved, `cl_renderer rdsp-vanilla` (`rdjosp-vanilla`) goes back to OpenGL.
+skip it). It is the default renderer (`cl_renderer rdsp-vulkan` for Jedi Academy, `rdjosp-vulkan` for Jedi Outcast).
+`cl_renderer` is saved; `+set cl_renderer rdsp-vanilla` (`rdjosp-vanilla`) goes back to OpenGL. Configs saved by older
+versions that still name the OpenGL renderer are changed to the Vulkan one once (`com_configVersion` 4).
+
+**When Vulkan cannot be used** (the module is missing, there is no Vulkan driver, no device can show the window), the
+game loads the OpenGL renderer for that session and says so: a red warning with the reason is drawn at the top of the
+screen in the menus and on loading screens, and for the first 30 seconds of playing (`cl_rendererWarning`; the reason
+is also in the log and in `cl_rendererFailure`). The saved `cl_renderer` is left alone, so the next start tries Vulkan
+again. Choosing the OpenGL renderer yourself shows no warning.
 
 | Setting | Default | What it does |
 |---|---|---|

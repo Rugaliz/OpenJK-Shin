@@ -406,6 +406,45 @@ void UI_DrawConnect( const char *servername, const char * updateInfoString );
 
 /*
 ==================
+SCR_DrawRendererWarning
+
+When the Vulkan renderer could not be used and the OpenGL one is running in its place, say so at the top of the
+screen: always in the menus and on loading screens, and for the first 30 seconds of playing.
+==================
+*/
+static void SCR_DrawRendererWarning( void ) {
+	static int	startTime;
+
+	if ( !cl_rendererWarning[0] ) {
+		startTime = 0;
+		return;
+	}
+	if ( !startTime ) {
+		startTime = Sys_Milliseconds();
+	}
+	if ( cls.state == CA_ACTIVE && !( Key_GetCatcher() & KEYCATCH_UI ) && Sys_Milliseconds() - startTime > 30000 ) {
+		return;
+	}
+
+	// (the 640 x 480 virtual screen, like the menus)
+	const float	scale = 0.8f;
+	const int	lineHeight = re.Font_HeightPixels( cls.consoleFont, scale ) + 2;
+	const char	*lines[2] = { "WARNING: Vulkan is not available, using the OpenGL fallback renderer (slower loading, fewer effects)", cl_rendererWarning };
+	vec4_t		black = { 0.0f, 0.0f, 0.0f, 0.75f };
+	vec4_t		red = { 1.0f, 0.3f, 0.3f, 1.0f };
+	vec4_t		white = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+	re.SetColor( black );
+	re.DrawStretchPic( 0, 0, SCREEN_WIDTH, 2 * lineHeight + 6, 0, 0, 1, 1, cls.whiteShader );
+	re.SetColor( NULL );
+	for ( int i = 0; i < 2; i++ ) {
+		const int width = re.Font_StrLenPixels( lines[i], cls.consoleFont, scale );
+		re.Font_DrawString( ( SCREEN_WIDTH - width ) / 2, 3 + i * lineHeight, lines[i], i ? white : red, cls.consoleFont, -1, scale );
+	}
+}
+
+/*
+==================
 SCR_DrawScreenField
 
 This will be called twice if rendering in stereo mode
@@ -464,6 +503,8 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
 	// console draws next
 	Con_DrawConsole ();
+
+	SCR_DrawRendererWarning();
 
 	// debug graph can be drawn on top of anything
 	if ( cl_debuggraph->integer || cl_timegraph->integer ) {

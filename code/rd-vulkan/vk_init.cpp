@@ -71,6 +71,25 @@ uint32_t VK_FindMemoryType( uint32_t typeBits, VkMemoryPropertyFlags properties 
 	return 0;
 }
 
+/*
+=================
+VK_Fail
+
+The first steps of starting (instance, window surface, device) can fail on a machine without a usable Vulkan driver.
+They report it to VK_Init instead of stopping the game, so the engine can fall back to the OpenGL renderer.
+=================
+*/
+static char vkFailure[256];
+
+static bool VK_Fail( const char *format, ... )
+{
+	va_list args;
+	va_start( args, format );
+	Q_vsnprintf( vkFailure, sizeof( vkFailure ), format, args );
+	va_end( args );
+	return false;
+}
+
 static VKAPI_ATTR VkBool32 VKAPI_CALL VK_DebugCallback( VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 	VkDebugUtilsMessageTypeFlagsEXT, const VkDebugUtilsMessengerCallbackDataEXT *data, void * )
 {
@@ -114,13 +133,13 @@ static bool VK_HasInstanceExtension( const char *name )
 	return found;
 }
 
-static void VK_CreateInstance( void )
+static bool VK_CreateInstance( void )
 {
 	unsigned int sdlExtensionCount = 0;
 	const char *const *sdlExtensions = ri.VK_GetInstanceExtensions( &sdlExtensionCount );
 	if ( !sdlExtensions )
 	{
-		ri.Error( ERR_FATAL, "Vulkan: the window system offers no Vulkan surface extensions" );
+		return VK_Fail( "the window system offers no Vulkan surface extensions" );
 	}
 
 	const char *extensions[16];
@@ -156,7 +175,12 @@ static void VK_CreateInstance( void )
 	info.ppEnabledLayerNames = layers;
 	info.enabledExtensionCount = extensionCount;
 	info.ppEnabledExtensionNames = extensions;
-	VK_CheckResult( vkCreateInstance( &info, NULL, &vk.instance ), "vkCreateInstance" );
+	const VkResult created = vkCreateInstance( &info, NULL, &vk.instance );
+	if ( created != VK_SUCCESS )
+	{
+		vk.instance = VK_NULL_HANDLE;
+		return VK_Fail( "vkCreateInstance failed (VkResult %d), there is no usable Vulkan driver", (int)created );
+	}
 
 	if ( validation )
 	{
@@ -176,8 +200,9 @@ static void VK_CreateInstance( void )
 
 	if ( !ri.VK_CreateSurface( vk.instance, &vk.surface ) )
 	{
-		ri.Error( ERR_FATAL, "Vulkan: could not create the window surface" );
+		return VK_Fail( "could not create the window surface" );
 	}
+	return true;
 }
 
 static bool VK_DeviceHasExtension( VkPhysicalDevice device, const char *name )
@@ -219,13 +244,13 @@ static int VK_FindQueueFamily( VkPhysicalDevice device )
 	return found;
 }
 
-static void VK_CreateDevice( void )
+static bool VK_CreateDevice( void )
 {
 	uint32_t count = 0;
 	vkEnumeratePhysicalDevices( vk.instance, &count, NULL );
 	if ( !count )
 	{
-		ri.Error( ERR_FATAL, "Vulkan: no Vulkan device found" );
+		return VK_Fail( "no Vulkan device found" );
 	}
 	VkPhysicalDevice *devices = (VkPhysicalDevice *)R_Malloc( count * sizeof( VkPhysicalDevice ), TAG_TEMP_WORKSPACE, qfalse );
 	vkEnumeratePhysicalDevices( vk.instance, &count, devices );
@@ -255,7 +280,8 @@ static void VK_CreateDevice( void )
 	}
 	if ( best < 0 )
 	{
-		ri.Error( ERR_FATAL, "Vulkan: no device can present to the window" );
+		R_Free( devices );
+		return VK_Fail( "no Vulkan device can present to the window" );
 	}
 
 	vk.physicalDevice = devices[best];
@@ -285,8 +311,14 @@ static void VK_CreateDevice( void )
 	info.enabledExtensionCount = 1;
 	info.ppEnabledExtensionNames = extensions;
 	info.pEnabledFeatures = &enabled;
-	VK_CheckResult( vkCreateDevice( vk.physicalDevice, &info, NULL, &vk.device ), "vkCreateDevice" );
+	const VkResult created = vkCreateDevice( vk.physicalDevice, &info, NULL, &vk.device );
+	if ( created != VK_SUCCESS )
+	{
+		vk.device = VK_NULL_HANDLE;
+		return VK_Fail( "vkCreateDevice failed (VkResult %d)", (int)created );
+	}
 	vkGetDeviceQueue( vk.device, vk.queueFamily, 0, &vk.queue );
+	return true;
 }
 
 static VkFormat VK_FindDepthFormat( void )
@@ -802,12 +834,39 @@ static void VK_CreateFrames( void )
 
 /*
 =================
-VK_Init
+VK_AbortInit
 
-Called by InitOpenGL once the window exists.
+Gives back what the first steps of VK_Init made, when one of them failed.
 =================
 */
-void VK_Init( glconfig_t *glConfig )
+static void VK_AbortInit( void )
+{
+	if ( vk.surface )
+	{
+		vkDestroySurfaceKHR( vk.instance, vk.surface, NULL );
+	}
+	if ( vk.messenger )
+	{
+		PFN_vkDestroyDebugUtilsMessengerEXT destroy =
+			(PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr( vk.instance, "vkDestroyDebugUtilsMessengerEXT" );
+		if ( destroy ) destroy( vk.instance, vk.messenger, NULL );
+	}
+	if ( vk.instance )
+	{
+		vkDestroyInstance( vk.instance, NULL );
+	}
+	memset( &vk, 0, sizeof( vk ) );
+}
+
+/*
+=================
+VK_Init
+
+Called by InitOpenGL once the window exists. Returns false (with the reason in cl_rendererFailure) when Vulkan
+cannot be used on this machine; the engine then loads the OpenGL renderer instead.
+=================
+*/
+bool VK_Init( glconfig_t *glConfig )
 {
 	Com_Printf( "Initializing Vulkan\n" );
 
@@ -820,8 +879,13 @@ void VK_Init( glconfig_t *glConfig )
 	vk.height = glConfig->vidHeight;
 	vk.clearDepth = 1.0f;
 
-	VK_CreateInstance();
-	VK_CreateDevice();
+	if ( !VK_CreateInstance() || !VK_CreateDevice() )
+	{
+		Com_Printf( "Vulkan is not usable: %s\n", vkFailure );
+		ri.Cvar_Set( "cl_rendererFailure", vkFailure );
+		VK_AbortInit();
+		return false;
+	}
 	{
 		cvar_t *multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 		vk.samples = VK_ChooseSamples( multisample->integer );
@@ -881,6 +945,7 @@ void VK_Init( glconfig_t *glConfig )
 
 	// the renderer ends a frame with ri.WIN_Present: the Vulkan module presents itself, the window does not
 	ri.WIN_Present = VK_PresentFrame;
+	return true;
 }
 
 void VK_Shutdown( void )

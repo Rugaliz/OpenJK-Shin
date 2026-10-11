@@ -733,7 +733,7 @@ static void GLimp_InitExtensions( void )
 ** setting variables, checking GL constants, and reporting the gfx system config
 ** to the user.
 */
-static void InitOpenGL( void )
+static qboolean InitOpenGL( void )
 {
 	//
 	// initialize OS specific portions of the renderer
@@ -758,8 +758,17 @@ static void InitOpenGL( void )
 		window = ri.WIN_Init(&windowDesc, &glConfig);
 
 #ifdef RD_VULKAN
+		if ( glConfig.vidWidth == 0 )
+		{
+			return qfalse;	// (no window for Vulkan: the engine loads the OpenGL renderer)
+		}
 		// Vulkan device, swapchain and the capabilities the renderer asks glConfig about
-		VK_Init( &glConfig );
+		if ( !VK_Init( &glConfig ) )
+		{
+			// (no usable Vulkan: the engine sees a size of 0 and loads the OpenGL renderer)
+			glConfig.vidWidth = 0;
+			return qfalse;
+		}
 #else
 		// get our config strings
 		glConfig.vendor_string = (const char *)qglGetString (GL_VENDOR);
@@ -786,6 +795,7 @@ static void InitOpenGL( void )
 		// set default state
 		GL_SetDefaultState();
 	}
+	return qtrue;
 }
 
 /*
@@ -1801,7 +1811,7 @@ R_Init
 ===============
 */
 extern void R_InitWorldEffects();
-void R_Init( void ) {
+qboolean R_Init( void ) {
 	int	err;
 	int i;
 
@@ -1860,7 +1870,10 @@ void R_Init( void ) {
 		byteAlias_t *ba = (byteAlias_t *)&color;
 		RE_SetLightStyle( i, ba->i );
 	}
-	InitOpenGL();
+	if ( !InitOpenGL() )
+	{
+		return qfalse;
+	}
 
 	R_InitImages();
 	R_InitShaders();
@@ -1878,6 +1891,7 @@ void R_Init( void ) {
 	GfxInfo_f();
 
 	//ri.Printf( PRINT_ALL, "----- finished R_Init -----\n" );
+	return qtrue;
 }
 
 /*
@@ -1890,7 +1904,7 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 	for ( size_t i = 0; i < numCommands; i++ )
 		ri.Cmd_RemoveCommand( commands[i].cmd );
 
-	if ( r_DynamicGlow && r_DynamicGlow->integer )
+	if ( tr.registered && r_DynamicGlow && r_DynamicGlow->integer )
 	{
 		// Release the Glow Vertex Shader.
 		if ( tr.glowVShader )

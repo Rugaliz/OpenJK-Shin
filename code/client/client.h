@@ -433,6 +433,7 @@ qboolean CL_GameCommand( void );
 void CL_CGameRendering( stereoFrame_t stereo );
 void CL_SetCGameTime( void );
 void CL_FirstSnapshot( void );
+extern	char	cl_rendererWarning[256];	// set when the Vulkan renderer could not be used, drawn on the screen
 
 
 //
