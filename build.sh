@@ -50,6 +50,7 @@ USE_INTERNAL_LIBS=0
 USE_INTERNAL_SDL3=""       # empty = decide from what is installed
 BUILD_REND2=1
 DO_CLEAN=0
+DO_CLEAR_CACHE=0
 DO_INSTALL=1
 CHECK_ONLY=0
 ASSUME_YES=0
@@ -76,7 +77,9 @@ ${C_BOLD}How to build${C_OFF}
   -b, --build-dir DIR   Where to build (default: ./build)
   -o, --output DIR      Where to copy the result (default: ./dist)
       --no-install      Only build, do not copy the result to the output folder
-      --clean           Delete the build folder first
+      --clean           Delete the build folder first (everything is compiled again)
+      --clear-cache     Forget the settings CMake saved in the build folder (CMakeCache.txt) but keep the compiled
+                        files. Use it when an option you changed or a new default is not picked up
 
 ${C_BOLD}Libraries${C_OFF}
       --internal-libs   Build zlib, libpng, libjpeg and SDL3 from the copies in this repository / downloaded
@@ -114,6 +117,7 @@ while [[ $# -gt 0 ]]; do
 		--output=*)       OUTPUT_DIR="${1#*=}"; shift ;;
 		--no-install)     DO_INSTALL=0; shift ;;
 		--clean)          DO_CLEAN=1; shift ;;
+		--clear-cache)    DO_CLEAR_CACHE=1; shift ;;
 		--internal-libs)  USE_INTERNAL_LIBS=1; USE_INTERNAL_SDL3=1; shift ;;
 		--internal-sdl3)  USE_INTERNAL_SDL3=1; shift ;;
 		--system-sdl3)    USE_INTERNAL_SDL3=0; shift ;;
@@ -185,6 +189,7 @@ pkg() {
 		arch:sdl3)   echo sdl3 ;;            arch:zlib)   echo zlib ;;
 		arch:png)    echo libpng ;;          arch:jpeg)   echo libjpeg-turbo ;;
 		arch:gl)     echo libglvnd ;;        arch:git)    echo git ;;
+		arch:vulkan) echo "vulkan-headers vulkan-icd-loader" ;;
 		arch:x11)    echo "libx11 libxext libxcursor libxi libxrandr libxkbcommon wayland" ;;
 
 		debian:cmake) echo cmake ;;          debian:ninja) echo ninja-build ;;
@@ -192,6 +197,7 @@ pkg() {
 		debian:sdl3)  echo libsdl3-dev ;;    debian:zlib)  echo zlib1g-dev ;;
 		debian:png)   echo libpng-dev ;;     debian:jpeg)  echo libjpeg-dev ;;
 		debian:gl)    echo libgl-dev ;;      debian:git)   echo git ;;
+		debian:vulkan) echo libvulkan-dev ;;
 		debian:x11)   echo "libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev libwayland-dev" ;;
 
 		fedora:cmake) echo cmake ;;          fedora:ninja) echo ninja-build ;;
@@ -199,6 +205,7 @@ pkg() {
 		fedora:sdl3)  echo SDL3-devel ;;     fedora:zlib)  echo zlib-devel ;;
 		fedora:png)   echo libpng-devel ;;   fedora:jpeg)  echo libjpeg-turbo-devel ;;
 		fedora:gl)    echo mesa-libGL-devel ;; fedora:git) echo git ;;
+		fedora:vulkan) echo "vulkan-headers vulkan-loader-devel" ;;
 		fedora:x11)   echo "libX11-devel libXext-devel libXcursor-devel libXi-devel libXrandr-devel libxkbcommon-devel wayland-devel" ;;
 
 		suse:cmake)   echo cmake ;;          suse:ninja)   echo ninja ;;
@@ -206,6 +213,7 @@ pkg() {
 		suse:sdl3)    echo SDL3-devel ;;     suse:zlib)    echo zlib-devel ;;
 		suse:png)     echo libpng16-devel ;; suse:jpeg)    echo libjpeg8-devel ;;
 		suse:gl)      echo Mesa-libGL-devel ;; suse:git)   echo git ;;
+		suse:vulkan)  echo vulkan-devel ;;
 		suse:x11)     echo "libX11-devel libXext-devel libXcursor-devel libXi-devel libXrandr-devel libxkbcommon-devel wayland-devel" ;;
 
 		alpine:cmake) echo cmake ;;          alpine:ninja) echo samurai ;;
@@ -213,6 +221,7 @@ pkg() {
 		alpine:sdl3)  echo sdl3-dev ;;       alpine:zlib)  echo zlib-dev ;;
 		alpine:png)   echo libpng-dev ;;     alpine:jpeg)  echo libjpeg-turbo-dev ;;
 		alpine:gl)    echo mesa-dev ;;       alpine:git)   echo git ;;
+		alpine:vulkan) echo "vulkan-headers vulkan-loader-dev" ;;
 		alpine:x11)   echo "libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxkbcommon-dev wayland-dev" ;;
 
 		macos:cmake)  echo cmake ;;          macos:ninja)  echo ninja ;;
@@ -338,6 +347,17 @@ check_dependencies() {
 		report_required 0 "OpenGL headers" gl "GL/gl.h not found"
 	fi
 
+	# The Vulkan renderer is the default one of the single player games; without the headers it is not built and the
+	# game uses the OpenGL renderer (and says so on the screen)
+	if (( BUILD_JO || BUILD_JA_SP )); then
+		if header_ok vulkan/vulkan.h && lib_ok -lvulkan; then
+			ok "Vulkan headers and loader (Vulkan renderer)"
+		else
+			warn "Vulkan headers/loader not found: the Vulkan renderer is not built and the game will use OpenGL"
+			local p; p="$(pkg vulkan)"; [[ -n "$p" ]] && MISSING_PACKAGES+=("$p")
+		fi
+	fi
+
 	# SDL3 (3.2.0 or newer): installed, or downloaded and built by CMake
 	local sdl_ver=""
 	sdl_ver="$(pkg_version sdl3)"
@@ -413,6 +433,15 @@ if [[ $DO_CLEAN -eq 1 && -d "$BUILD_DIR" ]]; then
 	rm -rf "$BUILD_DIR"
 fi
 
+if [[ $DO_CLEAR_CACHE -eq 1 ]]; then
+	if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+		info "forgetting the saved CMake settings of $BUILD_DIR (the compiled files are kept)"
+		rm -f "$BUILD_DIR/CMakeCache.txt"
+	else
+		info "no saved CMake settings in $BUILD_DIR, nothing to clear"
+	fi
+fi
+
 # A build folder stays tied to the generator it was created with
 if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
 	existing="$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt")"
@@ -428,12 +457,14 @@ CMAKE_ARGS=(
 	-DBuildJK2SPEngine="$(onoff $BUILD_JO)"
 	-DBuildJK2SPGame="$(onoff $BUILD_JO)"
 	-DBuildJK2SPRdVanilla="$(onoff $BUILD_JO)"
+	-DBuildJK2SPRdVulkan="$(onoff $BUILD_JO)"
 	-DBuildJK2MPEngine="$(onoff $BUILD_JO_MP)"
 	-DBuildJK2MPDed="$(onoff $BUILD_JO_MP)"
 	-DBuildJK2MPRdVanilla="$(onoff $BUILD_JO_MP)"
 	-DBuildSPEngine="$(onoff $BUILD_JA_SP)"
 	-DBuildSPGame="$(onoff $BUILD_JA_SP)"
 	-DBuildSPRdVanilla="$(onoff $BUILD_JA_SP)"
+	-DBuildSPRdVulkan="$(onoff $BUILD_JA_SP)"
 	-DBuildMPEngine="$(onoff $BUILD_JA_MP)"
 	-DBuildMPDed="$(onoff $BUILD_JA_MP)"
 	-DBuildMPGame="$(onoff $BUILD_JA_MP)"
@@ -459,6 +490,14 @@ if ! cmake --build "$BUILD_DIR" --parallel "$JOBS"; then
 	die "the build failed (see the messages above)"
 fi
 ok "built in $((SECONDS - START_TIME)) s"
+
+# (the Vulkan renderer is only built when CMake finds the Vulkan headers)
+if [[ $BUILD_JO -eq 1 ]] && ! find "$BUILD_DIR" -name 'rdjosp-vulkan_*' 2>/dev/null | grep -q .; then
+	warn "the Jedi Outcast Vulkan renderer (rdjosp-vulkan) was not built: the game will use OpenGL. Install the Vulkan headers and loader, then run again with --clear-cache"
+fi
+if [[ $BUILD_JA_SP -eq 1 ]] && ! find "$BUILD_DIR" -name 'rdsp-vulkan_*' 2>/dev/null | grep -q .; then
+	warn "the Jedi Academy Vulkan renderer (rdsp-vulkan) was not built: the game will use OpenGL. Install the Vulkan headers and loader, then run again with --clear-cache"
+fi
 
 if [[ $DO_INSTALL -eq 1 ]]; then
 	step "Copying the result to $OUTPUT_DIR"
