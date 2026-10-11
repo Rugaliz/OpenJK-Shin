@@ -200,6 +200,7 @@ void SV_SpawnServer( const char *server, ForceReload_e eForceReload, qboolean bA
 	int			checksum;
 
 	re.RegisterMedia_LevelLoadBegin( server, eForceReload, bAllowScreenDissolve );
+	CL_SetLevelLoading( qtrue );
 
 
 	Cvar_SetValue( "cl_paused", 0 );

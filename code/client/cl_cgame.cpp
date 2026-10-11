@@ -1586,6 +1586,7 @@ CL_FirstSnapshot
 void CL_FirstSnapshot( void ) {
 
 	re.RegisterMedia_LevelLoadEnd();
+	CL_SetLevelLoading( qfalse );
 
 	cls.state = CA_ACTIVE;
 

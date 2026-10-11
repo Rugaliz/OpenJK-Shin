@@ -51,6 +51,7 @@ cvar_t	*r_customwidth;
 cvar_t	*r_customheight;
 cvar_t	*r_swapInterval;
 cvar_t	*r_adaptiveVsync;
+static cvar_t	*com_levelLoading;
 cvar_t	*r_stereo;
 cvar_t	*r_mode;
 cvar_t	*r_displayRefresh;
@@ -199,6 +200,13 @@ instead of waiting for the next refresh (which would halve the frame rate).
 */
 static void GLimp_ApplySwapInterval( void )
 {
+	// while a level loads the loading screen is redrawn for every step; do not wait for the display each time
+	if ( com_levelLoading->integer )
+	{
+		SDL_GL_SetSwapInterval( 0 );
+		return;
+	}
+
 	if ( r_swapInterval->integer == 1 && r_adaptiveVsync->integer && SDL_GL_SetSwapInterval( -1 ) )
 	{
 		Com_Printf( "Vertical sync: adaptive\n" );
@@ -217,9 +225,10 @@ void WIN_Present( window_t *window )
 	{
 		SDL_GL_SwapWindow(screen);
 
-		if ( r_swapInterval->modified )
+		if ( r_swapInterval->modified || com_levelLoading->modified )
 		{
 			r_swapInterval->modified = qfalse;
+			com_levelLoading->modified = qfalse;
 			GLimp_ApplySwapInterval();
 		}
 	}
@@ -856,6 +865,7 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 #else
 	r_adaptiveVsync		= Cvar_Get( "r_adaptiveVsync",		"0",		CVAR_ARCHIVE_ND );
 #endif
+	com_levelLoading	= Cvar_Get( "com_levelLoading",		"0",		0 );
 	r_stereo			= Cvar_Get( "r_stereo",				"0",		CVAR_ARCHIVE_ND|CVAR_LATCH );
 #ifdef _JK2EXE
 	r_mode				= Cvar_Get( "r_mode",				"-2",		CVAR_ARCHIVE|CVAR_LATCH );

@@ -1056,6 +1056,7 @@ static void Com_CatchError ( int code )
 {
 	if ( code == ERR_DISCONNECT ) {
 		SV_Shutdown( "Server disconnected" );
+		CL_SetLevelLoading( qfalse );
 		CL_Disconnect( );
 		CL_FlushMemory(  );
 		com_errorEntered = qfalse;
@@ -1067,6 +1068,7 @@ static void Com_CatchError ( int code )
 					"ERROR: %s\n"
 					"********************\n", com_errorMessage);
 		SV_Shutdown (va("Server crashed: %s\n",  com_errorMessage));
+		CL_SetLevelLoading( qfalse );
 		CL_Disconnect( );
 		CL_FlushMemory( );
 		com_errorEntered = qfalse;

@@ -35,6 +35,17 @@ before, 1.45 s with the lists in place. Jedi Academy `yavin1b`: 1.7 s and 1.27 s
 inflating the files out of the pk3 archives, decoding the MP3 voice and music (the decoder keeps global state and
 cannot run on two threads), loading models, and the game code starting the level's entities.
 
+## The loading screen does not wait for the display
+
+The loading screen is redrawn for every step of loading a level (about 40 times). With vsync on, every redraw waited
+for the next refresh of the display, which took 0.7 s of a 3.7 s load of `yavin_temple` (OpenGL renderer, 60 Hz).
+`com_levelLoading` is 1 from the start of loading a level until its first snapshot, and both renderers switch vsync
+off for that time (OpenGL: swap interval 0, Vulkan: the immediate present mode) and back on afterwards. Nothing in the
+level is drawn while this is on, so nothing can tear. Where the rest of the time goes with the OpenGL renderer: about
+half of it is the Mesa driver turning the textures of the level into video memory (473 pictures); the same level
+loads in 0.9 s with the Vulkan renderer. Uploading with `glTexStorage2D`, with pixel buffer objects, with sized
+internal formats or as BGRA was tried and made no difference.
+
 ## Reading the screen back (saves and loading screens)
 
 Opening the menu in a level, saving, and the dissolve at the end of a loading screen read the whole screen back. With
