@@ -121,8 +121,8 @@ void VK_EnsureFrame( void )
 	}
 
 	// vsync settings changed
-	cvar_t *swapInterval = ri.Cvar_Get( "r_swapInterval", "0", CVAR_ARCHIVE_ND );
-	cvar_t *adaptive = ri.Cvar_Get( "r_adaptiveVsync", "0", CVAR_ARCHIVE_ND );
+	cvar_t *swapInterval = ri.Cvar_Get( "r_swapInterval", "1", CVAR_ARCHIVE_ND );
+	cvar_t *adaptive = ri.Cvar_Get( "r_adaptiveVsync", "1", CVAR_ARCHIVE_ND );
 	cvar_t *levelLoading = ri.Cvar_Get( "com_levelLoading", "0", 0 );
 	if ( swapInterval->modified || adaptive->modified || levelLoading->modified )
 	{
