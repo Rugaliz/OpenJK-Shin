@@ -43,7 +43,9 @@ console variable is in brackets (you can type those in the console, opened with 
   tearing (the line across the picture when the screen and the game are out of step). If a frame comes late, the game
   shows it a little torn instead of dropping to half the frame rate, where the graphics driver allows it. You can
   still set your own limit (`com_maxfps`), for example just under the refresh rate on a G-Sync or FreeSync monitor.
-- **The frame limit is exact**: 144 gives 144 frames per second (it used to give 166).
+- **The frame limit is exact**: 144 gives 144 frames per second (it used to give 166). In multiplayer too, where the
+  default stays at 125 frames per second with vsync off: on most servers how high you jump and how fast you run depend
+  on the frame rate, and 125 is what players are used to (exactly 8 msec a frame, as before).
 - Old settings files that held the game at 125 frames per second with tearing are corrected once, the first time you
   play.
 - **The same game at any frame rate**: footsteps, the bobbing of the view, leaning and a few other things used to run
