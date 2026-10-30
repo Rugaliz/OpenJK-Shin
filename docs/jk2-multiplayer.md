@@ -44,6 +44,9 @@ fau, Daggolin and others), which this was written against, and the Jedi Outcast 
 Works: the dedicated server loads the retail 1.04 game module, runs maps with bots; the client connects, loads the
 menus and the cgame module and the level, and plays.
 
-Not done yet: Jedi Outcast 1.02 and 1.03 (protocol 15), the widescreen layout of the 2D parts (they are stretched on
-wide screens as the 4:3 original was), the rend2 renderer for Jedi Outcast, support for native (non-QVM) modules,
-and the JIT for the bytecode.
+On a wide screen the renderer keeps the 2D parts (menus, HUD) in shape in a centred 4:3 area (`r_wideUI`), and moves
+the models drawn in menus and the HUD with them. The game's own modules can't be changed, so unlike single player the
+HUD stays in that centred area and the menu cursor doesn't reach the sides.
+
+Not done yet: Jedi Outcast 1.02 and 1.03 (protocol 15), the rend2 renderer for Jedi Outcast, support for native
+(non-QVM) modules, and the JIT for the bytecode.

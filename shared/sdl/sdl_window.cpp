@@ -844,12 +844,8 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 	r_allowSoftwareGL	= Cvar_Get( "r_allowSoftwareGL",	"0",		CVAR_ARCHIVE_ND|CVAR_LATCH );
 
 	// Window cvars
-#ifdef _JK2EXE
-	// Singleplayer: out of the box, run fullscreen at the desktop resolution so no setup is needed on modern displays
+	// Out of the box, run fullscreen at the desktop resolution so no setup is needed on modern displays
 	r_fullscreen		= Cvar_Get( "r_fullscreen",			"1",		CVAR_ARCHIVE|CVAR_LATCH );
-#else
-	r_fullscreen		= Cvar_Get( "r_fullscreen",			"0",		CVAR_ARCHIVE|CVAR_LATCH );
-#endif
 	r_noborder			= Cvar_Get( "r_noborder",			"0",		CVAR_ARCHIVE|CVAR_LATCH );
 	r_centerWindow		= Cvar_Get( "r_centerWindow",		"0",		CVAR_ARCHIVE|CVAR_LATCH );
 	r_customwidth		= Cvar_Get( "r_customwidth",		"1600",		CVAR_ARCHIVE|CVAR_LATCH );
@@ -867,11 +863,7 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 #endif
 	com_levelLoading	= Cvar_Get( "com_levelLoading",		"0",		0 );
 	r_stereo			= Cvar_Get( "r_stereo",				"0",		CVAR_ARCHIVE_ND|CVAR_LATCH );
-#ifdef _JK2EXE
 	r_mode				= Cvar_Get( "r_mode",				"-2",		CVAR_ARCHIVE|CVAR_LATCH );
-#else
-	r_mode				= Cvar_Get( "r_mode",				"4",		CVAR_ARCHIVE|CVAR_LATCH );
-#endif
 	r_displayRefresh	= Cvar_Get( "r_displayRefresh",		"0",		CVAR_LATCH );
 	Cvar_CheckRange( r_displayRefresh, 0, 240, qtrue );
 

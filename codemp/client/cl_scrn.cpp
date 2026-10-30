@@ -469,6 +469,11 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
 	// the menu draws next
 	if ( Key_GetCatcher( ) & KEYCATCH_UI && cls.uiStarted ) {
+		// on a wide screen a full screen menu may not cover the sides (the renderer keeps its 640x480 area in shape),
+		// which must not keep what was drawn there before
+		if ( uiFullscreen ) {
+			SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, colorBlack );
+		}
 		UIVM_Refresh( cls.realtime );
 	}
 
