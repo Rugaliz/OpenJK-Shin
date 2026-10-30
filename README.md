@@ -16,8 +16,8 @@ that nobody needs any more. Fixes that suit upstream are sent back to it as pull
 
 | Game | Single player | Multiplayer |
 | - | - | - |
-| Jedi Academy | Works, with all the features below | Works, with the sound improvements below; the other new features are single player only for now |
-| Jedi Outcast | Works, with all the features below | Works (1.04), with the sound improvements below, see [Jedi Outcast multiplayer](#jedi-outcast-multiplayer) |
+| Jedi Academy | Works, with all the features below | Works, with the features below not marked "single player" |
+| Jedi Outcast | Works, with all the features below | Works (1.04), with the features below not marked "single player", see [Jedi Outcast multiplayer](#jedi-outcast-multiplayer) |
 
 Shin is developed and tested on Linux. Windows is kept supported by the build system and the platform code, but is not
 yet tested by the author. macOS code paths still compile but nothing is packaged for it.
@@ -30,11 +30,12 @@ console variable is in brackets (you can type those in the console, opened with 
 ### Screen
 - **The game starts at your screen's own resolution**, filling the screen without switching display modes
   (a borderless window). Ultrawide and any other screen shape work.
-- **Setup > Video > Video Mode** lists the resolutions your screen really supports, plus "Desktop resolution".
+- **Setup > Video > Video Mode** lists the resolutions your screen really supports, plus "Desktop resolution"
+  (single player).
 - **Widescreen done properly**: on a wide screen you see more to the sides (instead of less above and below), the menus
-  and the HUD keep their shape instead of being stretched, and videos get black bars instead of being stretched. The
-  mouse pointer in the menus reaches the whole screen, and the HUD sits in the corners of the screen (health and
-  armour on the left, force and ammo on the right).
+  and the HUD keep their shape instead of being stretched, and videos get black bars instead of being stretched. In
+  single player the mouse pointer in the menus reaches the whole screen, and the HUD sits in the corners of the screen
+  (health and armour on the left, force and ammo on the right).
 
 ### Smooth at any frame rate (single player)
 - **The frame rate follows your monitor**: vsync is on, so a 144 Hz monitor gets 144 frames per second with no
@@ -188,8 +189,8 @@ Upstream's [debugging guide](https://github.com/JACoders/OpenJK/wiki/Debugging) 
 
 `openjo` (client) and `openjoded` (dedicated server) play the multiplayer of Jedi Outcast 1.04 with the game's own
 game modules from your copy of the game, so it plays like the original. It is the Jedi Academy multiplayer engine
-built for Jedi Outcast (`./build.sh --only jo-mp`); how, and what is not done yet (Outcast 1.02 and 1.03, a widescreen
-layout, rend2), is in [docs/jk2-multiplayer.md](docs/jk2-multiplayer.md). It would not exist without
+built for Jedi Outcast (`./build.sh --only jo-mp`); how, and what is not done yet (Outcast 1.02 and 1.03, rend2), is
+in [docs/jk2-multiplayer.md](docs/jk2-multiplayer.md). It would not exist without
 [JK2MV](https://jk2mv.org), the multi-version Outcast engine, which it was written against, and which is still the
 way to play on servers of the other versions of the game.
 

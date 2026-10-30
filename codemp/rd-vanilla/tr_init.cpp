@@ -176,6 +176,7 @@ int		max_polys;
 int		max_polyverts;
 
 cvar_t	*r_modelpoolmegs;
+cvar_t	*r_wideUI;
 
 /*
 Ghoul2 Insert Start
@@ -1698,6 +1699,7 @@ Ghoul2 Insert Start
 Ghoul2 Insert End
 */
 	r_modelpoolmegs = ri.Cvar_Get("r_modelpoolmegs", "20", CVAR_ARCHIVE, "" );
+	r_wideUI = ri.Cvar_Get("r_wideUI", "1", CVAR_ARCHIVE|CVAR_LATCH, "Keep menus and HUD in shape on wide screens instead of stretching them" );
 	if (ri.Sys_LowPhysicalMemory() )
 		ri.Cvar_Set("r_modelpoolmegs", "0");
 

@@ -1179,6 +1179,26 @@ RENDER BACK END FUNCTIONS
 
 /*
 ================
+R_Get2DVirtualWidth
+
+All 2D drawing (menus, HUD, console, cinematics) is authored for a 640x480 screen. On displays wider than 4:3 we keep
+that area at its proper proportions instead of stretching it: the virtual screen stays 480 units high and becomes
+wider in proportion to the display, and the 640x480 area is centred within it (see R_Get2DBias).
+================
+*/
+float R_Get2DVirtualWidth( void ) {
+	if ( r_wideUI && r_wideUI->integer && glConfig.vidWidth * SCREEN_HEIGHT > glConfig.vidHeight * SCREEN_WIDTH ) {
+		return (float)SCREEN_HEIGHT * glConfig.vidWidth / glConfig.vidHeight;
+	}
+	return SCREEN_WIDTH;
+}
+
+float R_Get2DBias( void ) {
+	return ( R_Get2DVirtualWidth() - SCREEN_WIDTH ) * 0.5f;
+}
+
+/*
+================
 RB_SetGL2D
 
 ================
@@ -1191,7 +1211,7 @@ void	RB_SetGL2D (void) {
 	qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 	qglMatrixMode(GL_PROJECTION);
     qglLoadIdentity ();
-	qglOrtho (0, 640, 480, 0, 0, 1);
+	qglOrtho (0, R_Get2DVirtualWidth(), SCREEN_HEIGHT, 0, 0, 1);
 	qglMatrixMode(GL_MODELVIEW);
     qglLoadIdentity ();
 
@@ -1271,6 +1291,19 @@ void RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *
 	RB_SetGL2D();
 
 	qglColor3f( tr.identityLight, tr.identityLight, tr.identityLight );
+
+	// On widescreen displays keep the video's proportions: centre it, and black out the bars on either side
+	// if it fills the whole 640x480 area.
+	const float bias = R_Get2DBias();
+	if ( bias > 0.0f )
+	{
+		if ( x <= 0 && y <= 0 && x + w >= SCREEN_WIDTH && y + h >= SCREEN_HEIGHT )
+		{
+			qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+			qglClear( GL_COLOR_BUFFER_BIT );
+		}
+		x += bias;
+	}
 
 	qglBegin (GL_QUADS);
 	qglTexCoord2f ( 0.5f / cols,  0.5f / rows );
@@ -1372,28 +1405,45 @@ const void *RB_StretchPic ( const void *data ) {
 	baDest = (byteAlias_t *)&tess.vertexColors[numVerts + 2]; baDest->ui = baSource->ui;
 	baDest = (byteAlias_t *)&tess.vertexColors[numVerts + 3]; baDest->ui = baSource->ui;
 
-	tess.xyz[ numVerts ][0] = cmd->x;
+	// On widescreen displays centre the 640x480 area, except for quads spanning its full width
+	// (backgrounds, fades, screen flashes, bars), which are stretched to cover the whole screen.
+	float x = cmd->x;
+	float w = cmd->w;
+	const float bias = R_Get2DBias();
+	if ( bias > 0.0f )
+	{
+		if ( x <= 0.0f && x + w >= SCREEN_WIDTH )
+		{
+			w += 2.0f * bias;
+		}
+		else
+		{
+			x += bias;
+		}
+	}
+
+	tess.xyz[ numVerts ][0] = x;
 	tess.xyz[ numVerts ][1] = cmd->y;
 	tess.xyz[ numVerts ][2] = 0;
 
 	tess.texCoords[ numVerts ][0][0] = cmd->s1;
 	tess.texCoords[ numVerts ][0][1] = cmd->t1;
 
-	tess.xyz[ numVerts + 1 ][0] = cmd->x + cmd->w;
+	tess.xyz[ numVerts + 1 ][0] = x + w;
 	tess.xyz[ numVerts + 1 ][1] = cmd->y;
 	tess.xyz[ numVerts + 1 ][2] = 0;
 
 	tess.texCoords[ numVerts + 1 ][0][0] = cmd->s2;
 	tess.texCoords[ numVerts + 1 ][0][1] = cmd->t1;
 
-	tess.xyz[ numVerts + 2 ][0] = cmd->x + cmd->w;
+	tess.xyz[ numVerts + 2 ][0] = x + w;
 	tess.xyz[ numVerts + 2 ][1] = cmd->y + cmd->h;
 	tess.xyz[ numVerts + 2 ][2] = 0;
 
 	tess.texCoords[ numVerts + 2 ][0][0] = cmd->s2;
 	tess.texCoords[ numVerts + 2 ][0][1] = cmd->t2;
 
-	tess.xyz[ numVerts + 3 ][0] = cmd->x;
+	tess.xyz[ numVerts + 3 ][0] = x;
 	tess.xyz[ numVerts + 3 ][1] = cmd->y + cmd->h;
 	tess.xyz[ numVerts + 3 ][2] = 0;
 
@@ -1445,7 +1495,7 @@ const void *RB_RotatePic ( const void *data )
 		matrix3_t m = {
 			{ c, s, 0.0f },
 			{ -s, c, 0.0f },
-			{ cmd->x + cmd->w, cmd->y, 1.0f }
+			{ cmd->x + cmd->w + R_Get2DBias(), cmd->y, 1.0f }
 		};
 
 		tess.numVertexes += 4;
@@ -1544,7 +1594,7 @@ const void *RB_RotatePic2 ( const void *data )
 			matrix3_t m = {
 				{ c, s, 0.0f },
 				{ -s, c, 0.0f },
-				{ cmd->x, cmd->y, 1.0f }
+				{ cmd->x + R_Get2DBias(), cmd->y, 1.0f }
 			};
 
 			tess.numVertexes += 4;

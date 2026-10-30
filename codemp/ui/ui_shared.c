@@ -6737,8 +6737,13 @@ void Menu_Paint(menuDef_t *menu, qboolean forcePaint) {
 	// draw the background if necessary
 	if (menu->fullScreen) {
 		// implies a background shader
-		// FIXME: make sure we have a default shader if fullscreen is set with no background
-		DC->drawHandlePic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, menu->window.background );
+		if (menu->window.background) {
+			DC->drawHandlePic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, menu->window.background );
+		} else {
+			// no background shader given: the menu's background colour (the default shader would show its white border,
+			// for instance at the sides of a wide screen, where the menu's own pictures don't cover it)
+			DC->fillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, menu->window.backColor );
+		}
 	} else if (menu->window.background) {
 		// this allows a background shader without being full screen
 		//UI_DrawHandlePic(menu->window.rect.x, menu->window.rect.y, menu->window.rect.w, menu->window.rect.h, menu->backgroundShader);
