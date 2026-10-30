@@ -3348,6 +3348,16 @@ void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 #else
 			CRenderSurface RS(ghoul2[i].mSurfaceRoot, ghoul2[i].mSlist, cust_shader, fogNum, personalModel, ghoul2[i].mBoneCache, ent->e.renderfx, skin, (model_t *)ghoul2[i].currentModel, whichLod, ghoul2[i].mBltlist);
 #endif
+#ifdef JK2_MODE
+			// The Jedi Outcast cgame module finds the floor under a character (shadowPlane) for every kind of shadow,
+			// but asks for it to be used (RF_SHADOW_PLANE) only for the projected ones (cg_shadows 3), so its
+			// characters had no stencil shadows: use the floor it found for those too
+			if ( r_shadows->integer == 2 && ent->e.shadowPlane != 0.0f && !( ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) ) )
+			{
+				ent->e.renderfx |= RF_SHADOW_PLANE;
+				RS.renderfx |= RF_SHADOW_PLANE;
+			}
+#endif
 			if (!personalModel && (RS.renderfx & RF_SHADOW_PLANE) && !bInShadowRange(ent->e.origin))
 			{
 				RS.renderfx |= RF_NOSHADOW;

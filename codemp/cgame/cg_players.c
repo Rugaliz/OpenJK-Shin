@@ -4646,6 +4646,7 @@ Returns the Z component of the surface being shadowed
 ===============
 */
 #define	SHADOW_DISTANCE		128
+#define	SHADOW_STENCIL_DISTANCE	512
 static qboolean CG_PlayerShadow( centity_t *cent, float *shadowPlane ) {
 	vec3_t		end, mins = {-15, -15, 0}, maxs = {15, 15, 2};
 	trace_t		trace;
@@ -4690,13 +4691,16 @@ static qboolean CG_PlayerShadow( centity_t *cent, float *shadowPlane ) {
 	VectorCopy( cent->lerpOrigin, end );
 	if (cg_shadows.integer == 2)
 	{ //stencil
-		end[2] -= 4096.0f;
+		// (stencil shadows are not faded with height, so let them reach further, but no further than the floor that
+		// is really under the character: the volume reaches down to it)
+		end[2] -= SHADOW_STENCIL_DISTANCE;
 
 		trap->CM_Trace( &trace, cent->lerpOrigin, end, mins, maxs, 0, MASK_PLAYERSOLID, 0 );
 
+		// no shadow if there is no floor in reach (it used to be put 25 below the feet, in the air)
 		if ( trace.fraction == 1.0 || trace.startsolid || trace.allsolid )
 		{
-			trace.endpos[2] = cent->lerpOrigin[2]-25.0f;
+			return qfalse;
 		}
 	}
 	else

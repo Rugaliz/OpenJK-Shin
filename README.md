@@ -68,9 +68,11 @@ console variable is in brackets (you can type those in the console, opened with 
   shape of what it falls on.
 
 ### Shadows and draw distance
-- **"Volumetric" shadows work properly** (single player; Setup > More Video > Shadows): characters are no longer darkened by their
-  own shadow, the shadows have soft edges, fall away from the light, are lighter where there is little direct light,
-  and no longer show through walls or stretch far down below the character. See [docs/shadows.md](docs/shadows.md).
+- **"Volumetric" shadows work properly** (Setup > More Video > Shadows in single player, `cg_shadows 2` in
+  multiplayer): characters are no longer darkened by their own shadow, the shadows have soft edges, fall away from
+  the light, are lighter where there is little direct light, and no longer show through walls or stretch far down
+  below the character. Jedi Outcast multiplayer characters get them at all for the first time. See
+  [docs/shadows.md](docs/shadows.md).
 - **Grass and bushes are drawn about three times further away**, and characters keep their detailed look twice as
   far away.
 
