@@ -49,22 +49,23 @@ console variable is in brackets (you can type those in the console, opened with 
   faster or slower with the frame rate. They don't any more.
 - **Smoother movement**: running had a slight wobble twenty times a second. It's gone.
 
-### Picture quality (single player)
-- **Smooth edges**: Setup > Video > **Anti-Aliasing** (Off, 2x, 4x, 8x) takes the jagged "staircase" off the edges of
-  everything. The quality presets set it for you. If your graphics card can't do the level you picked, it uses the
-  highest it can. With it on, leaves, fences and grates get smooth edges too.
-- **Sharper textures at an angle**: Setup > More Video > **Anisotropic Filtering** lets you choose from Off to 16x
-  (higher keeps floors and walls sharp when you look along them).
+### Picture quality
+- **Smooth edges** (single player): Setup > Video > **Anti-Aliasing** (Off, 2x, 4x, 8x) takes the jagged "staircase"
+  off the edges of everything. The quality presets set it for you. If your graphics card can't do the level you picked,
+  it uses the highest it can. With it on, leaves, fences and grates get smooth edges too (in multiplayer too, with
+  `r_ext_multisample 4` in the console).
+- **Sharper textures at an angle** (single player): Setup > More Video > **Anisotropic Filtering** lets you choose
+  from Off to 16x (higher keeps floors and walls sharp when you look along them).
 - Textures stay sharper in the distance, because their smaller versions are made with a better filter.
 - See [docs/antialiasing.md](docs/antialiasing.md).
-- **Optional screen effects** (off by default, with a row for each in Setup > More Video, see
+- **Optional screen effects** (single player; off by default, with a row for each in Setup > More Video, see
   [docs/post-processing.md](docs/post-processing.md)): `r_ssao 1` adds soft shading in corners and where things meet,
   `r_bloom 1` a soft glow around the brightest lights, `r_smaa 1` a high quality edge smoothing that does not blur the
   textures (unlike FXAA), and `r_dlightGLSL 1` makes the light of lightsabers, blaster bolts and explosions follow the
   shape of what it falls on.
 
-### Shadows and draw distance (single player)
-- **"Volumetric" shadows work properly** (Setup > More Video > Shadows): characters are no longer darkened by their
+### Shadows and draw distance
+- **"Volumetric" shadows work properly** (single player; Setup > More Video > Shadows): characters are no longer darkened by their
   own shadow, the shadows have soft edges, fall away from the light, are lighter where there is little direct light,
   and no longer show through walls or stretch far down below the character. See [docs/shadows.md](docs/shadows.md).
 - **Grass and bushes are drawn about three times further away**, and characters keep their detailed look twice as

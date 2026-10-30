@@ -931,6 +931,9 @@ typedef struct glstate_s {
 	int			texEnv[2];
 	int			faceCulling;
 	uint32_t	glStateBits;
+	int			msaaSamples;			// samples per pixel of the frame buffer (0 or 1 when there is no multisampling)
+	qboolean	alphaToCoverage;		// alpha tested surfaces use alpha to coverage rather than the alpha test
+	qboolean	alphaToCoverageOn;		// GL_SAMPLE_ALPHA_TO_COVERAGE is currently enabled
 } glstate_t;
 
 
@@ -1174,6 +1177,7 @@ extern	cvar_t	*r_autoMapDisable;
 
 extern cvar_t	*r_dlightStyle;
 extern cvar_t	*r_surfaceSprites;
+extern cvar_t	*r_surfaceSpriteRange;
 extern cvar_t	*r_surfaceWeather;
 
 extern cvar_t	*r_windSpeed;
@@ -1202,6 +1206,8 @@ extern cvar_t	*r_ext_multitexture;
 extern cvar_t	*r_ext_compiled_vertex_array;
 extern cvar_t	*r_ext_texture_env_add;
 extern cvar_t	*r_ext_texture_filter_anisotropic;
+extern cvar_t	*r_alphaToCoverage;
+extern cvar_t	*r_sampleShading;
 
 extern cvar_t	*r_environmentMapping;
 
