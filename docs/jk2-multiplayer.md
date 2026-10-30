@@ -46,7 +46,9 @@ menus and the cgame module and the level, and plays.
 
 On a wide screen the renderer keeps the 2D parts (menus, HUD) in shape in a centred 4:3 area (`r_wideUI`), and moves
 the models drawn in menus and the HUD with them. The game's own modules can't be changed, so unlike single player the
-HUD stays in that centred area and the menu cursor doesn't reach the sides.
+HUD stays in that centred area and the menu cursor doesn't reach the sides. The field of view is widened by the engine
+instead of the cgame module (`cg_fovAspectAdjust`, default 1, in `CL_RenderVMScene`): the angle the module gives is
+taken as meant for 4:3, and the view keeps that height and gets wider ("Hor+").
 
 Not done yet: Jedi Outcast 1.02 and 1.03 (protocol 15), the rend2 renderer for Jedi Outcast, support for native
 (non-QVM) modules, and the JIT for the bytecode.
