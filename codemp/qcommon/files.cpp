@@ -3426,6 +3426,41 @@ void FS_UpdateGamedir(void)
 
 /*
 ================
+FS_HomePathIsWritable
+
+Creates the folder if it is missing and checks that a file can be written in it. Used to pick the default fs_homepath:
+a user folder that cannot be written (blocked Documents folder, read-only profile) must not crash the game later.
+================
+*/
+static qboolean FS_HomePathIsWritable( const char *dir ) {
+	char	path[MAX_OSPATH];
+	char	probe[MAX_OSPATH];
+
+	Q_strncpyz( path, dir, sizeof( path ) );
+	FS_ReplaceSeparators( path );
+
+	// create every level, the last one included (errors show when the file is written)
+	for ( char *ofs = strchr( path, PATH_SEP ); ofs && *( ofs + 1 ); ofs = strchr( ofs + 1, PATH_SEP ) ) {
+		*ofs = 0;
+		if ( path[0] ) {	// a leading separator is the root
+			Sys_Mkdir( path );
+		}
+		*ofs = PATH_SEP;
+	}
+	Sys_Mkdir( path );
+
+	Com_sprintf( probe, sizeof( probe ), "%s%cwrite_test.tmp", path, PATH_SEP );
+	FILE *f = fopen( probe, "wb" );
+	if ( !f ) {
+		return qfalse;
+	}
+	fclose( f );
+	remove( probe );
+	return qtrue;
+}
+
+/*
+================
 FS_ReorderPurePaks
 NOTE TTimo: the reordering that happens here is not reflected in the cvars (\cvarlist *pak*)
   this can lead to misleading situations, see https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=540
@@ -3567,6 +3602,9 @@ void FS_Startup( const char *gameName ) {
 	fs_basegame = Cvar_Get ("fs_basegame", "", CVAR_INIT );
 	homePath = Sys_DefaultHomePath();
 	if (!homePath || !homePath[0]) {
+		homePath = fs_basepath->string;
+	} else if ( !FS_HomePathIsWritable( homePath ) && fs_basepath->string[0] ) {
+		Com_Printf( S_COLOR_YELLOW "WARNING: cannot write to \"%s\", saving settings and savegames in \"%s\" instead\n", homePath, fs_basepath->string );
 		homePath = fs_basepath->string;
 	}
 	fs_homepath = Cvar_Get ("fs_homepath", homePath, CVAR_INIT|CVAR_PROTECTED, "(Read/Write) Location for user generated files" );
