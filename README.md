@@ -36,7 +36,7 @@ console variable is in brackets (you can type those in the console, opened with 
   and the HUD keep their shape instead of being stretched, and videos get black bars instead of being stretched. The
   mouse pointer in the menus reaches the whole screen, and the HUD sits in the corners of the screen (health and armour
   on the left, force and ammo on the right). Jedi Outcast multiplayer keeps its HUD and pointer in the middle (the
-  game's own modules), and its view widens only once its Hor+ field of view is done.
+  game's own modules); its view is widened by the engine (`cg_fovAspectAdjust`).
 
 ### Smooth at any frame rate (single player)
 - **The frame rate follows your monitor**: vsync is on, so a 144 Hz monitor gets 144 frames per second with no

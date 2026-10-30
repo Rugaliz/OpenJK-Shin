@@ -774,6 +774,36 @@ static void CL_AxisToAngles( const vec3_t axis[3], vec3_t angles ) {
 // and the field of view comes with the scene of the world
 static refdef_t fxRefdef;
 
+static cvar_t *cg_fovAspectAdjust;
+
+/*
+====================
+CL_FovAspectAdjust
+
+The game's cgame module makes the field of view (cg_fov) the horizontal one whatever the shape of the screen, so a
+wide screen sees less above and below than a 4:3 one ("Vert-"). With cg_fovAspectAdjust (the cvar of the Jedi Academy
+modules, here kept by the engine) the angle it gives is taken as meant for a 4:3 view, as the game was made for, and
+the view is widened to the shape it really has ("Hor+"): the same up and down, more to the sides.
+====================
+*/
+static void CL_FovAspectAdjust( refdef_t *fd ) {
+	if ( !cg_fovAspectAdjust || !cg_fovAspectAdjust->integer || ( fd->rdflags & RDF_NOWORLDMODEL ) ) {
+		return;
+	}
+	if ( fd->width <= 0 || fd->height <= 0 || fd->width * 3 <= fd->height * 4 || fd->fov_x <= 0.0f || fd->fov_x >= 180.0f ) {
+		return;
+	}
+
+	const float tanX = tanf( DEG2RAD( fd->fov_x * 0.5f ) );
+	// the module works fov_y out from fov_x and the size, except under water, where it wobbles the two in turn: keep
+	// that as a ratio to what it would be
+	const float wobble = tanf( DEG2RAD( fd->fov_y * 0.5f ) ) / ( tanX * fd->height / fd->width );
+	const float tanY = tanX * 0.75f * wobble;	// the 4:3 view's
+
+	fd->fov_y = RAD2DEG( atanf( tanY ) ) * 2.0f;
+	fd->fov_x = RAD2DEG( atanf( tanX * 0.75f * fd->width / fd->height ) ) * 2.0f;
+}
+
 void CL_RenderVMScene( const vmRefdef_t *vmFd ) {
 	refdef_t fd;
 
@@ -791,6 +821,8 @@ void CL_RenderVMScene( const vmRefdef_t *vmFd ) {
 	fd.rdflags = vmFd->rdflags;
 	Com_Memcpy( fd.areamask, vmFd->areamask, sizeof( fd.areamask ) );
 	Com_Memcpy( fd.text, vmFd->text, sizeof( fd.text ) );
+
+	CL_FovAspectAdjust( &fd );
 
 	if ( !( fd.rdflags & RDF_NOWORLDMODEL ) ) {
 		fxRefdef.fov_x = fd.fov_x;
@@ -1414,6 +1446,8 @@ void CL_InitCGame( void ) {
 	vmInterpret_t		interpret;
 
 	t1 = Sys_Milliseconds();
+
+	cg_fovAspectAdjust = Cvar_Get( "cg_fovAspectAdjust", "1", CVAR_ARCHIVE, "Keep the field of view's height of a 4:3 screen, and see more to the sides on a wider one" );
 
 	// put away the console
 	Con_Close();
