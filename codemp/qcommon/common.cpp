@@ -1499,6 +1499,25 @@ int Com_TimeVal(int minMsec)
 
 /*
 =================
+Com_FrameMsecForRate
+
+The time a frame is given to reach the rate fps, in whole milliseconds (the clock the game runs on). 1000 / fps alone
+drops the fraction, so 144 gave 6 msec frames and 166 fps. What isn't a whole millisecond is carried over to the next
+frames instead: 144 alternates 7 and 6 msec, 144 frames a second. A rate that divides 1000 has no fraction, so the
+125 fps that movement in multiplayer is tuned for stays exactly 8 msec every frame.
+=================
+*/
+static int Com_FrameMsecForRate( int fps ) {
+	static double carry = 0.0;
+
+	carry += 1000.0 / fps;
+	const int msec = (int)carry;
+	carry -= msec;
+	return msec;
+}
+
+/*
+=================
 Com_Frame
 =================
 */
@@ -1537,11 +1556,11 @@ void Com_Frame( void ) {
 			else
 			{
 				if(com_minimized->integer && com_maxfpsMinimized->integer > 0)
-					minMsec = 1000 / com_maxfpsMinimized->integer;
+					minMsec = Com_FrameMsecForRate( com_maxfpsMinimized->integer );
 				else if(com_unfocused->integer && com_maxfpsUnfocused->integer > 0)
-					minMsec = 1000 / com_maxfpsUnfocused->integer;
+					minMsec = Com_FrameMsecForRate( com_maxfpsUnfocused->integer );
 				else if(com_maxfps->integer > 0)
-					minMsec = 1000 / com_maxfps->integer;
+					minMsec = Com_FrameMsecForRate( com_maxfps->integer );
 				else
 					minMsec = 1;
 
