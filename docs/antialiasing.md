@@ -2,7 +2,9 @@
 
 All of this is in the renderer that Jedi Outcast and Jedi Academy single player share (`code/rd-vanilla`), and plain
 OpenGL 1.x plus a few extensions that every driver has had for years. The multiplayer renderer (`codemp/rd-vanilla`,
-both games) has the same cvars below; the menu rows are single player only for now. The Lanczos filter itself is
+both games) has the same cvars below. Jedi Academy multiplayer has the menu rows too (`codemp/ui`: the Anti-Aliasing
+row is added under Video Sync, in the main and the in-game menu, and the Anisotropic Filter slider becomes the same
+list); Jedi Outcast multiplayer runs the game's own menus, so there they are console settings. The Lanczos filter itself is
 shared by both renderers (`shared/renderer/tr_mip_lanczos.h`).
 
 ## Menu

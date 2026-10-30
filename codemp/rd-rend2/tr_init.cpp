@@ -2169,12 +2169,17 @@ void C_LevelLoadEnd( void )
 	ri.S_RestartMusic();
 }
 
+// rend2 stretches the 2D drawing over a wide screen as the original did, so there is nothing to pin to the edges
+static void RE_Set2DAnchor( int anchor ) {
+}
+
 /*
 @@@@@@@@@@@@@@@@@@@@@
 GetRefAPI
 
 @@@@@@@@@@@@@@@@@@@@@
 */
+
 extern "C" {
 Q_EXPORT refexport_t* QDECL GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	static refexport_t	re;
@@ -2368,6 +2373,7 @@ Q_EXPORT refexport_t* QDECL GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	*/
 
 	re.ext.Font_StrLenPixels = RE_Font_StrLenPixelsNew;
+	re.ext.Set2DAnchor = RE_Set2DAnchor;
 
 	return &re;
 }

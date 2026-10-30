@@ -31,11 +31,12 @@ console variable is in brackets (you can type those in the console, opened with 
 - **The game starts at your screen's own resolution**, filling the screen without switching display modes
   (a borderless window). Ultrawide and any other screen shape work.
 - **Setup > Video > Video Mode** lists the resolutions your screen really supports, plus "Desktop resolution"
-  (single player).
+  (not in Jedi Outcast multiplayer, which runs the game's own menus).
 - **Widescreen done properly**: on a wide screen you see more to the sides (instead of less above and below), the menus
-  and the HUD keep their shape instead of being stretched, and videos get black bars instead of being stretched. In
-  single player the mouse pointer in the menus reaches the whole screen, and the HUD sits in the corners of the screen
-  (health and armour on the left, force and ammo on the right).
+  and the HUD keep their shape instead of being stretched, and videos get black bars instead of being stretched. The
+  mouse pointer in the menus reaches the whole screen, and the HUD sits in the corners of the screen (health and armour
+  on the left, force and ammo on the right). Jedi Outcast multiplayer keeps its HUD and pointer in the middle (the
+  game's own modules), and its view widens only once its Hor+ field of view is done.
 
 ### Smooth at any frame rate (single player)
 - **The frame rate follows your monitor**: vsync is on, so a 144 Hz monitor gets 144 frames per second with no
@@ -50,12 +51,12 @@ console variable is in brackets (you can type those in the console, opened with 
 - **Smoother movement**: running had a slight wobble twenty times a second. It's gone.
 
 ### Picture quality
-- **Smooth edges** (single player): Setup > Video > **Anti-Aliasing** (Off, 2x, 4x, 8x) takes the jagged "staircase"
-  off the edges of everything. The quality presets set it for you. If your graphics card can't do the level you picked,
-  it uses the highest it can. With it on, leaves, fences and grates get smooth edges too (in multiplayer too, with
-  `r_ext_multisample 4` in the console).
-- **Sharper textures at an angle** (single player): Setup > More Video > **Anisotropic Filtering** lets you choose
-  from Off to 16x (higher keeps floors and walls sharp when you look along them).
+- **Smooth edges**: Setup > Video > **Anti-Aliasing** (Off, 2x, 4x, 8x) takes the jagged "staircase" off the edges of
+  everything. The quality presets set it for you. If your graphics card can't do the level you picked, it uses the
+  highest it can. With it on, leaves, fences and grates get smooth edges too. (Jedi Outcast multiplayer: `r_ext_multisample 4`
+  in the console.)
+- **Sharper textures at an angle**: Setup > More Video > **Anisotropic Filtering** lets you choose from Off to 16x
+  (higher keeps floors and walls sharp when you look along them; Jedi Outcast multiplayer keeps its own row).
 - Textures stay sharper in the distance, because their smaller versions are made with a better filter.
 - See [docs/antialiasing.md](docs/antialiasing.md).
 - **Optional screen effects** (single player; off by default, with a row for each in Setup > More Video, see
@@ -72,12 +73,12 @@ console variable is in brackets (you can type those in the console, opened with 
   far away.
 
 ### Mouse
-- **The sensitivity slider suits today's mice** (single player): it goes from 0.05 to 30 (it used to start at 2, which
-  was already too fast for a modern mouse), and it is finer at the slow end where you need it. The default is slower
-  (1.5, in multiplayer too).
-- **Setup > Controls > Mouse/Joystick > Mouse DPI** (single player; in multiplayer `in_mouseDPI` in the console): tell
-  the game the DPI of your mouse (it is on the box or in the mouse's own software) and a sensitivity feels the same on
-  any mouse. Old settings keep working. See [docs/mouse.md](docs/mouse.md).
+- **The sensitivity slider suits today's mice**: it goes from 0.05 to 30 (it used to start at 2, which was already
+  too fast for a modern mouse), and it is finer at the slow end where you need it. The default is slower (1.5).
+- **Setup > Controls > Mouse/Joystick > Mouse DPI**: tell the game the DPI of your mouse (it is on the box or in the
+  mouse's own software) and a sensitivity feels the same on any mouse. Old settings keep working. See
+  [docs/mouse.md](docs/mouse.md). (Jedi Outcast multiplayer runs the game's own menus: there it is `in_mouseDPI` in
+  the console.)
 
 ### Sound
 

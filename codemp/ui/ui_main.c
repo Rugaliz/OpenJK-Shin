@@ -4743,11 +4743,11 @@ static void UI_Update(const char *name) {
 			trap->Cvar_SetValue( "ui_r_colorbits", 32 );
 			trap->Cvar_SetValue( "ui_r_depthbits", 24 );
 			trap->Cvar_SetValue( "ui_r_picmip", 0 );
-			trap->Cvar_SetValue( "ui_r_mode", 4 );
 			trap->Cvar_SetValue( "ui_r_texturebits", 32 );
 			trap->Cvar_SetValue( "ui_r_fastSky", 0 );
 			trap->Cvar_SetValue( "ui_r_inGameVideo", 1 );
 		//	trap->Cvar_SetValue( "ui_cg_shadows", 2 );//stencil
+			trap->Cvar_SetValue( "ui_r_ext_multisample", 4 );
 			trap->Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 			break;
 
@@ -4758,11 +4758,11 @@ static void UI_Update(const char *name) {
 			trap->Cvar_SetValue( "ui_r_colorbits", 0 );
 			trap->Cvar_SetValue( "ui_r_depthbits", 24 );
 			trap->Cvar_SetValue( "ui_r_picmip", 1 );
-			trap->Cvar_SetValue( "ui_r_mode", 3 );
 			trap->Cvar_SetValue( "ui_r_texturebits", 0 );
 			trap->Cvar_SetValue( "ui_r_fastSky", 0 );
 			trap->Cvar_SetValue( "ui_r_inGameVideo", 1 );
 		//	trap->Cvar_SetValue( "ui_cg_shadows", 2 );
+			trap->Cvar_SetValue( "ui_r_ext_multisample", 2 );
 			trap->Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 			break;
 
@@ -4774,11 +4774,11 @@ static void UI_Update(const char *name) {
 			trap->Cvar_SetValue( "ui_r_colorbits", 0 );
 			trap->Cvar_SetValue( "ui_r_depthbits", 0 );
 			trap->Cvar_SetValue( "ui_r_picmip", 2 );
-			trap->Cvar_SetValue( "ui_r_mode", 3 );
 			trap->Cvar_SetValue( "ui_r_texturebits", 0 );
 			trap->Cvar_SetValue( "ui_r_fastSky", 1 );
 			trap->Cvar_SetValue( "ui_r_inGameVideo", 0 );
 		//	trap->Cvar_SetValue( "ui_cg_shadows", 1 );
+			trap->Cvar_SetValue( "ui_r_ext_multisample", 0 );
 			trap->Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
 			break;
 
@@ -4789,12 +4789,12 @@ static void UI_Update(const char *name) {
 			trap->Cvar_SetValue( "ui_r_lodbias", 2 );
 			trap->Cvar_SetValue( "ui_r_colorbits", 16 );
 			trap->Cvar_SetValue( "ui_r_depthbits", 16 );
-			trap->Cvar_SetValue( "ui_r_mode", 3 );
 			trap->Cvar_SetValue( "ui_r_picmip", 3 );
 			trap->Cvar_SetValue( "ui_r_texturebits", 16 );
 			trap->Cvar_SetValue( "ui_r_fastSky", 1 );
 			trap->Cvar_SetValue( "ui_r_inGameVideo", 0 );
 		//	trap->Cvar_SetValue( "ui_cg_shadows", 0 );
+			trap->Cvar_SetValue( "ui_r_ext_multisample", 0 );
 			trap->Cvar_Set( "ui_r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
 			break;
 		}
@@ -4878,7 +4878,19 @@ you to discard your changes if you did something you didnt want
 */
 void UI_UpdateVideoSetup ( void )
 {
-	trap->Cvar_Set ( "r_mode", UI_Cvar_VariableString ( "ui_r_mode" ) );
+	// the resolution is selected through ui_r_resolution: "desktop" or "WIDTHxHEIGHT"
+	const char *resolution = UI_Cvar_VariableString ( "ui_r_resolution" );
+	int width, height;
+	if ( sscanf ( resolution, "%dx%d", &width, &height ) == 2 && width > 0 && height > 0 )
+	{
+		trap->Cvar_Set ( "r_customwidth", va ( "%d", width ) );
+		trap->Cvar_Set ( "r_customheight", va ( "%d", height ) );
+		trap->Cvar_Set ( "r_mode", "-1" );
+	}
+	else
+	{
+		trap->Cvar_Set ( "r_mode", "-2" );
+	}
 	trap->Cvar_Set ( "r_fullscreen", UI_Cvar_VariableString ( "ui_r_fullscreen" ) );
 	trap->Cvar_Set ( "r_colorbits", UI_Cvar_VariableString ( "ui_r_colorbits" ) );
 	trap->Cvar_Set ( "r_lodbias", UI_Cvar_VariableString ( "ui_r_lodbias" ) );
@@ -4887,6 +4899,7 @@ void UI_UpdateVideoSetup ( void )
 	trap->Cvar_Set ( "r_texturemode", UI_Cvar_VariableString ( "ui_r_texturemode" ) );
 	trap->Cvar_Set ( "r_detailtextures", UI_Cvar_VariableString ( "ui_r_detailtextures" ) );
 	trap->Cvar_Set ( "r_ext_compress_textures", UI_Cvar_VariableString ( "ui_r_ext_compress_textures" ) );
+	trap->Cvar_Set ( "r_ext_multisample", UI_Cvar_VariableString ( "ui_r_ext_multisample" ) );
 	trap->Cvar_Set ( "r_depthbits", UI_Cvar_VariableString ( "ui_r_depthbits" ) );
 	trap->Cvar_Set ( "r_subdivisions", UI_Cvar_VariableString ( "ui_r_subdivisions" ) );
 	trap->Cvar_Set ( "r_fastSky", UI_Cvar_VariableString ( "ui_r_fastSky" ) );
@@ -4912,6 +4925,8 @@ void UI_GetVideoSetup ( void )
 
 	// Make sure the cvars are registered as read only.
 	trap->Cvar_Register ( NULL, "ui_r_mode",					"0", CVAR_ROM|CVAR_INTERNAL );
+	trap->Cvar_Register ( NULL, "ui_r_resolution",			"desktop", CVAR_ROM|CVAR_INTERNAL );
+	trap->Cvar_Register ( NULL, "ui_r_ext_multisample",		"0", CVAR_ROM|CVAR_INTERNAL );
 	trap->Cvar_Register ( NULL, "ui_r_fullscreen",			"0", CVAR_ROM|CVAR_INTERNAL );
 	trap->Cvar_Register ( NULL, "ui_r_colorbits",				"0", CVAR_ROM|CVAR_INTERNAL );
 	trap->Cvar_Register ( NULL, "ui_r_lodbias",				"0", CVAR_ROM|CVAR_INTERNAL );
@@ -4930,6 +4945,16 @@ void UI_GetVideoSetup ( void )
 
 	// Copy over the real video cvars into their temporary counterparts
 	trap->Cvar_Set ( "ui_r_mode",						UI_Cvar_VariableString ( "r_mode" ) );
+	if ( trap->Cvar_VariableValue ( "r_mode" ) == -2 )
+	{
+		trap->Cvar_Set ( "ui_r_resolution", "desktop" );
+	}
+	else
+	{
+		// r_mode may be a fixed mode or a custom size, either way the real size is what the renderer is using
+		trap->Cvar_Set ( "ui_r_resolution", va ( "%dx%d", uiInfo.uiDC.glconfig.vidWidth, uiInfo.uiDC.glconfig.vidHeight ) );
+	}
+	trap->Cvar_Set ( "ui_r_ext_multisample",			UI_Cvar_VariableString ( "r_ext_multisample" ) );
 	trap->Cvar_Set ( "ui_r_colorbits",				UI_Cvar_VariableString ( "r_colorbits" ) );
 	trap->Cvar_Set ( "ui_r_fullscreen",				UI_Cvar_VariableString ( "r_fullscreen" ) );
 	trap->Cvar_Set ( "ui_r_lodbias",					UI_Cvar_VariableString ( "r_lodbias" ) );
@@ -9858,10 +9883,14 @@ void UI_Init( qboolean inGameLoad ) {
 	if ( uiInfo.uiDC.glconfig.vidWidth * 480 > uiInfo.uiDC.glconfig.vidHeight * 640 ) {
 		// wide screen
 		uiInfo.uiDC.bias = 0.5 * ( uiInfo.uiDC.glconfig.vidWidth - ( uiInfo.uiDC.glconfig.vidHeight * (640.0/480.0) ) );
+		// the renderer keeps the 640x480 area in shape and centred (r_wideUI), the rest of the screen is this much
+		// more on each side, in the same units
+		uiInfo.uiDC.margin = trap->Cvar_VariableValue( "r_wideUI" ) ? uiInfo.uiDC.bias / uiInfo.uiDC.yscale : 0;
 	}
 	else {
 		// no wide screen
 		uiInfo.uiDC.bias = 0;
+		uiInfo.uiDC.margin = 0;
 	}
 
 	//UI_Load();
@@ -10180,11 +10209,14 @@ UI_MouseEvent
 void UI_MouseEvent( int dx, int dy )
 {
 	// update mouse screen position
+	// (on a wide screen the cursor goes over the whole screen, not just the centred 640x480 area)
+	const int margin = (int)uiInfo.uiDC.margin;
+
 	uiInfo.uiDC.cursorx += dx;
-	if (uiInfo.uiDC.cursorx < 0)
-		uiInfo.uiDC.cursorx = 0;
-	else if (uiInfo.uiDC.cursorx > SCREEN_WIDTH)
-		uiInfo.uiDC.cursorx = SCREEN_WIDTH;
+	if (uiInfo.uiDC.cursorx < -margin)
+		uiInfo.uiDC.cursorx = -margin;
+	else if (uiInfo.uiDC.cursorx > SCREEN_WIDTH + margin)
+		uiInfo.uiDC.cursorx = SCREEN_WIDTH + margin;
 
 	uiInfo.uiDC.cursory += dy;
 	if (uiInfo.uiDC.cursory < 0)

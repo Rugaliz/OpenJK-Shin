@@ -1335,9 +1335,13 @@ void CG_DrawHUD(centity_t	*cent)
 
 		if (cg.predictedPlayerState.pm_type != PM_SPECTATOR)
 		{
+			trap->ext.R_Set2DAnchor( ANCHOR_LEFT );
+
 			CG_DrawProportionalString( x+16, y+40, va( "%i", cg.snap->ps.stats[STAT_HEALTH] ), UI_SMALLFONT|UI_DROPSHADOW, colorTable[CT_HUD_RED] );
 
 			CG_DrawProportionalString( x+18+14, y+40+14, va( "%i", cg.snap->ps.stats[STAT_ARMOR] ), UI_SMALLFONT|UI_DROPSHADOW, colorTable[CT_HUD_GREEN] );
+
+			trap->ext.R_Set2DAnchor( ANCHOR_RIGHT );
 
 			CG_DrawSimpleForcePower( cent );
 
@@ -1345,6 +1349,8 @@ void CG_DrawHUD(centity_t	*cent)
 				CG_DrawSimpleSaberStyle( cent );
 			else
 				CG_DrawSimpleAmmo( cent );
+
+			trap->ext.R_Set2DAnchor( ANCHOR_CENTRE );
 
 			//TODO Add score line
 		}
@@ -1354,7 +1360,8 @@ void CG_DrawHUD(centity_t	*cent)
 
 	if (cg.predictedPlayerState.pm_type != PM_SPECTATOR)
 	{
-		// Draw the left HUD
+		// Draw the left HUD (stuck to the left edge of the screen)
+		trap->ext.R_Set2DAnchor( ANCHOR_LEFT );
 		menuHUD = Menus_FindByName("lefthud");
 		Menu_Paint( menuHUD, qtrue );
 
@@ -1397,6 +1404,7 @@ void CG_DrawHUD(centity_t	*cent)
 		{
 			//trap->Error( ERR_DROP, "CG_ChatBox_ArrayInsert: unable to locate HUD menu file ");
 		}
+		trap->ext.R_Set2DAnchor( ANCHOR_CENTRE );
 
 		//scoreStr = va("Score: %i", cgs.clientinfo[cg.snap->ps.clientNum].score);
 		if ( cgs.gametype == GT_DUEL )
@@ -1437,6 +1445,8 @@ void CG_DrawHUD(centity_t	*cent)
 			scoreStr = va("%s: %i", CG_GetStringEdString("MP_INGAME", "SCORE"), cg.snap->ps.persistant[PERS_SCORE]);
 		}
 
+		// Draw the right HUD (stuck to the right edge of the screen)
+		trap->ext.R_Set2DAnchor( ANCHOR_RIGHT );
 		menuHUD = Menus_FindByName("righthud");
 		Menu_Paint( menuHUD, qtrue );
 
@@ -1500,6 +1510,7 @@ void CG_DrawHUD(centity_t	*cent)
 		{
 			//trap->Error( ERR_DROP, "CG_ChatBox_ArrayInsert: unable to locate HUD menu file ");
 		}
+		trap->ext.R_Set2DAnchor( ANCHOR_CENTRE );
 	}
 }
 
@@ -4075,6 +4086,9 @@ static void CG_DrawUpperRight( void ) {
 
 	trap->R_SetColor( colorTable[CT_WHITE] );
 
+	// (stuck to the right edge of the screen)
+	trap->ext.R_Set2DAnchor( ANCHOR_RIGHT );
+
 	if ( cgs.gametype >= GT_TEAM && cg_drawTeamOverlay.integer == 1 ) {
 		y = CG_DrawTeamOverlay( y, qtrue, qtrue );
 	}
@@ -4100,6 +4114,8 @@ static void CG_DrawUpperRight( void ) {
 	y = CG_DrawMiniScoreboard ( y );
 
 	CG_DrawPowerupIcons(y);
+
+	trap->ext.R_Set2DAnchor( ANCHOR_CENTRE );
 }
 
 /*

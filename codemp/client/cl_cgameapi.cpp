@@ -1911,6 +1911,7 @@ void CL_BindCGame( void ) {
 		cgi.G2API_GetSurfaceName				= CL_G2API_GetSurfaceName;
 
 		cgi.ext.R_Font_StrLenPixels				= re->ext.Font_StrLenPixels;
+		cgi.ext.R_Set2DAnchor					= re->ext.Set2DAnchor;
 
 		GetCGameAPI = (GetCGameAPI_t)cgvm->GetModuleAPI;
 		ret = GetCGameAPI( CGAME_API_VERSION, &cgi );
