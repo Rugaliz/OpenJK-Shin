@@ -85,9 +85,8 @@ The items marked (single player) are only in the single player games; the rest a
 - **More sounds at once**: up to 128 sounds play together instead of 32, so in a big fight sounds are no longer cut
   off. (In a test with 31 bots fighting in multiplayer, the old limit cut off about 25 sounds every second.)
 - **Clearer sound**: the old low quality sound effects are converted carefully so they no longer sound harsh or
-  gritty, and when many loud sounds play at once they are gently held back instead of distorting. In single player
-  the game also plays at your sound card's own quality (usually 48 kHz) instead of converting everything down and up
-  again.
+  gritty, and when many loud sounds play at once they are gently held back instead of distorting. The game also plays
+  at your sound card's own quality (usually 48 kHz) instead of converting everything down and up again.
 - **Headphone 3D** (single player; Setup > Sound > Headphone 3D, off by default): with headphones you hear sounds
   from behind, above and below, not only from the left and the right. On speakers leave it off.
   See [docs/hrtf.md](docs/hrtf.md).
@@ -95,7 +94,7 @@ The items marked (single player) are only in the single player games; the rest a
   big hangar differently from a small corridor, sounds behind a wall are muffled, and everything is muffled under
   water. It is worked out as you play, so it works in every level, mods included. Dialogue in cutscenes stays clear,
   without echo. See [docs/reverb.md](docs/reverb.md).
-- **Sounds come sooner** (single player): about half the delay there was between something happening and hearing it.
+- **Sounds come sooner**: about half the delay there was between something happening and hearing it.
 - **No crackling or stutter**: the crackling when music and a video play together (like the opening logos) is gone.
   When the game freezes for a moment (saving, loading a weapon, a slow disk), the sound carries on smoothly instead of
   repeating the last moment or cutting out.
@@ -107,7 +106,8 @@ The items marked (single player) are only in the single player games; the rest a
   (`s_mixaheadAuto`).
 - Broken sound files in mods no longer crash the game.
 - The old "sound quality" menu entry is gone from single player because the game always uses the best quality now
-  (`s_khz` is still there to force a rate).
+  (`s_khz` is still there to force a rate). In multiplayer the entry is still in the menu but every choice gives the
+  best quality.
 
 ### Playing
 - **Escape skips cutscenes**, both videos and the ones the game plays itself. Handy for a second playthrough.

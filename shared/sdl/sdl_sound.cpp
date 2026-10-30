@@ -111,7 +111,6 @@ static void SNDDMA_PrintAudiospec(const char *str, const SDL_AudioSpec *spec, in
 	Com_Printf( "  Channels: %d\n", (int) spec->channels );
 }
 
-#ifdef _JK2EXE
 /*
 ===============
 SNDDMA_GetDeviceFrequency
@@ -155,16 +154,15 @@ static int SNDDMA_ChooseFrequency(void)
 		return 44100;
 	return freq;
 }
-#endif
 
 static int SNDDMA_ExpandSampleFrequencyKHzToHz(int khz)
 {
 	switch (khz)
 	{
-#ifdef _JK2EXE
 		// 0 is the default of the cvar, 44 what the stock default.cfg sets it to ("very high" in the sound menu):
 		//	both mean the output device's own rate, which is at least as good as 44.1kHz. 11 and 22 are what the
-		//	"low" and "high" of that menu (no longer there) saved, a low rate is asked for with its exact rate in Hz.
+		//	"low" and "high" of that menu (no longer there in single player) saved, a low rate is asked for with its
+		//	exact rate in Hz.
 		case 0:
 		case 11:
 		case 22:
@@ -173,14 +171,6 @@ static int SNDDMA_ExpandSampleFrequencyKHzToHz(int khz)
 			if (khz >= 8000 && khz <= 192000)
 				return khz;		// an exact rate in Hz
 			return 44100;
-#else
-		default:
-		case 44: return 44100;
-#endif
-#ifndef _JK2EXE
-		case 22: return 22050;
-		case 11: return 11025;
-#endif
 	}
 }
 
