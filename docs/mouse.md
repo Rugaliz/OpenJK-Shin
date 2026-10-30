@@ -18,9 +18,9 @@ Games can't ask a mouse for its DPI (SDL, the OS and USB don't report it), so it
 
 Multiplayer (both games) has `in_mouseDPI` and the default of 1.5 too, in the engine (`codemp/client/cl_input.cpp`).
 There the mouse counts themselves are scaled as they come in, so the scale also applies to the multiplayer
-acceleration styles (`cl_mouseAccelStyle`) and to the fixed sensitivities vehicles set. The menu rows are single
-player only for now; Jedi Outcast multiplayer keeps its own menus (the game's modules), so there the DPI is set in the
-console.
+acceleration styles (`cl_mouseAccelStyle`) and to the fixed sensitivities vehicles set. Jedi Academy multiplayer has
+the menu rows too (`codemp/ui/ui_shared.c`: a new row under Sensitivity in the main menu, the force feedback row in the
+in-game one); Jedi Outcast multiplayer keeps its own menus (the game's modules), so there the DPI is set in the console.
 
 Not changed: there is no mouse acceleration (`cl_mouseAccel` 0) and the mouse is read raw (relative mode), so what
 remains is the numbers above.

@@ -73,6 +73,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define STAT_MINUS			10	// num frame for '-' stats digit
 
 #define	ICON_SIZE			48
+
+// what the 2D drawing that follows sticks to on a wide screen (trap->ext.R_Set2DAnchor)
+#define ANCHOR_LEFT			-1		// the left edge of the screen
+#define ANCHOR_CENTRE		0		// the centred 640x480 area
+#define ANCHOR_RIGHT		1		// the right edge of the screen
 #define	TEXT_ICON_SPACE		4
 
 // very large characters

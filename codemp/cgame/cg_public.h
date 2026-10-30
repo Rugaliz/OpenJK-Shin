@@ -716,6 +716,7 @@ typedef struct cgameImport_s {
 
 	struct {
 		float			(*R_Font_StrLenPixels)					( const char *text, const int iFontIndex, const float scale );
+		void			(*R_Set2DAnchor)						( int anchor );	// where 2D drawing sticks to on a wide screen: -1 left edge, 0 centre (default), 1 right edge
 	} ext;
 } cgameImport_t;
 

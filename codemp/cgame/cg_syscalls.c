@@ -224,6 +224,9 @@ int trap_R_Font_StrLenPixels(const char *text, const int iFontIndex, const float
 	float width = (float)Q_syscall( CG_R_FONT_STRLENPIXELS, text, iFontIndex, PASSFLOAT(1.0f));
 	return width * scale;
 }
+// an engine with the old interface has no wide screen 2D anchoring, so there is nothing to do
+static void trap_R_Set2DAnchor( int anchor ) {
+}
 float trap_R_Font_StrLenPixelsFloat(const char *text, const int iFontIndex, const float scale) {
 	//HACK! RE_Font_StrLenPixels works better with 1.0f scale
 	float width = (float)Q_syscall( CG_R_FONT_STRLENPIXELS, text, iFontIndex, PASSFLOAT(1.0f));
@@ -944,4 +947,5 @@ static void TranslateSyscalls( void ) {
 	trap->G2API_GetSurfaceName				= trap_G2API_GetSurfaceName;
 
 	trap->ext.R_Font_StrLenPixels			= trap_R_Font_StrLenPixelsFloat;
+	trap->ext.R_Set2DAnchor					= trap_R_Set2DAnchor;
 }

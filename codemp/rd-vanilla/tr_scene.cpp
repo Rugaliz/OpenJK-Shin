@@ -428,7 +428,7 @@ void RE_RenderScene( const refdef_t *fd ) {
 		const float scale = (float)glConfig.vidHeight * SCREEN_WIDTH / ( (float)glConfig.vidWidth * SCREEN_HEIGHT );
 		const float biasPixels = R_Get2DBias() * glConfig.vidHeight / SCREEN_HEIGHT;
 
-		tr.refdef.x = (int)( fd->x * scale + biasPixels + 0.5f );
+		tr.refdef.x = (int)( fd->x * scale + biasPixels + R_Get2DAnchorShiftPixels() + 0.5f );
 		tr.refdef.width = (int)( fd->width * scale + 0.5f );
 	}
 

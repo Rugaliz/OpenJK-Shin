@@ -862,9 +862,33 @@ void Menu_UpdatePosition(menuDef_t *menu) {
 	}
 }
 
+/*
+=================
+Menu_WindowContainsPoint
+
+A menu that covers the whole 640 wide area covers the whole screen when that is wider (its background is stretched
+to it), so the sides count as inside it
+=================
+*/
+qboolean Rect_ContainsPoint(rectDef_t *rect, float x, float y);
+
+static qboolean Menu_WindowContainsPoint( const menuDef_t *menu, float x, float y ) {
+	rectDef_t rect = menu->window.rect;
+
+	if ( rect.x <= 0 && rect.x + rect.w >= SCREEN_WIDTH ) {
+		rect.x -= DC->margin;
+		rect.w += 2 * DC->margin;
+	}
+	return Rect_ContainsPoint( &rect, x, y );
+}
+
+static void Menu_AddShinRows( menuDef_t *menu );
+
 void Menu_PostParse(menuDef_t *menu) {
 	if ( menu == NULL )
 		return;
+
+	Menu_AddShinRows( menu );
 
 	if ( menu->fullScreen ) {
 		menu->window.rect.x = 0;
@@ -2654,8 +2678,41 @@ int Item_ListBox_ThumbDrawPosition(itemDef_t *item)
 	}
 }
 
+/*
+=================
+Slider scale
+
+The sensitivity of the mouse is wanted over a very wide range (the mice of today need a fraction of what the
+ones of 2002 did, the pro configs go up to 20), so its slider moves by ratios (logarithmic) instead of by amounts.
+=================
+*/
+static qboolean Item_Slider_IsLogarithmic( const itemDef_t *item, const editFieldDef_t *editDef )
+{
+	return (qboolean)( item->cvar && !Q_stricmp( item->cvar, "sensitivity" ) && editDef->minVal > 0.0f && editDef->maxVal > editDef->minVal );
+}
+
+// where the value is on the slider, 0 to 1
+static float Item_Slider_ValueToFraction( const itemDef_t *item, const editFieldDef_t *editDef, float value )
+{
+	if ( Item_Slider_IsLogarithmic( item, editDef ) )
+	{
+		return logf( value / editDef->minVal ) / logf( editDef->maxVal / editDef->minVal );
+	}
+	return ( value - editDef->minVal ) / ( editDef->maxVal - editDef->minVal );
+}
+
+// the value for a place on the slider, 0 to 1
+static float Item_Slider_FractionToValue( const itemDef_t *item, const editFieldDef_t *editDef, float fraction )
+{
+	if ( Item_Slider_IsLogarithmic( item, editDef ) )
+	{
+		return editDef->minVal * powf( editDef->maxVal / editDef->minVal, fraction );
+	}
+	return editDef->minVal + fraction * ( editDef->maxVal - editDef->minVal );
+}
+
 float Item_Slider_ThumbPosition(itemDef_t *item) {
-	float value, range, x;
+	float value, x;
 	editFieldDef_t *editDef = item->typeData.edit;
 
 	if (item->text) {
@@ -2676,10 +2733,7 @@ float Item_Slider_ThumbPosition(itemDef_t *item) {
 		value = editDef->maxVal;
 	}
 
-	range = editDef->maxVal - editDef->minVal;
-	value -= editDef->minVal;
-	value /= range;
-	//value /= (editDef->maxVal - editDef->minVal);
+	value = Item_Slider_ValueToFraction(item, editDef, value);
 	value *= SLIDER_WIDTH;
 	x += value;
 	// vm fuckage
@@ -3825,8 +3879,7 @@ static void Scroll_Slider_ThumbFunc(void *p) {
 	}
 	value = cursorx - x;
 	value /= SLIDER_WIDTH;
-	value *= (editDef->maxVal - editDef->minVal);
-	value += editDef->minVal;
+	value = Item_Slider_FractionToValue(si->item, editDef, value);
 	DC->setCVar(si->item->cvar, va("%f", value));
 }
 
@@ -3935,10 +3988,7 @@ qboolean Item_Slider_HandleKey(itemDef_t *item, int key, qboolean down) {
 				if (Rect_ContainsPoint(&testRect, DC->cursorx, DC->cursory)) {
 					work = DC->cursorx - x;
 					value = work / width;
-					value *= (editDef->maxVal - editDef->minVal);
-					// vm fuckage
-					// value = (((float)(DC->cursorx - x)/ SLIDER_WIDTH) * (editDef->maxVal - editDef->minVal));
-					value += editDef->minVal;
+					value = Item_Slider_FractionToValue(item, editDef, value);
 					DC->setCVar(item->cvar, va("%f", value));
 					return qtrue;
 				}
@@ -4233,7 +4283,7 @@ void Menu_HandleKey(menuDef_t *menu, int key, qboolean down) {
 		return;
 	}
 		// see if the mouse is within the window bounds and if so is this a mouse click
-	if (down && !(menu->window.flags & WINDOW_POPUP) && !Rect_ContainsPoint(&menu->window.rect, DC->cursorx, DC->cursory))
+	if (down && !(menu->window.flags & WINDOW_POPUP) && !Menu_WindowContainsPoint(menu, DC->cursorx, DC->cursory))
 	{
 		static qboolean inHandleKey = qfalse;
 		if (!inHandleKey && ( key == A_MOUSE1 || key == A_MOUSE2 || key == A_MOUSE3 ) ) {
@@ -8061,6 +8111,12 @@ qboolean ItemParse_cvarFloat( itemDef_t *item, int handle ) {
 		PC_Float_Parse(handle, &editPtr->defVal) &&
 		PC_Float_Parse(handle, &editPtr->minVal) &&
 		PC_Float_Parse(handle, &editPtr->maxVal)) {
+		if (!Q_stricmp(item->cvar, "sensitivity")) {
+			// the stock range (2 to 30) is for the mice of 2002, today's need far less (the slider is logarithmic)
+			editPtr->defVal = 1.5f;
+			editPtr->minVal = 0.05f;
+			editPtr->maxVal = 30.0f;
+		}
 		return qtrue;
 	}
 	return qfalse;
@@ -8467,6 +8523,8 @@ Item_ApplyHacks
 Hacks to fix issues with Team Arena menu scripts
 ===============
 */
+static void Item_MakeMouseDPIRow( itemDef_t *item );
+
 static void Item_ApplyHacks( itemDef_t *item ) {
 #if !defined(_WIN32) || ( defined(_WIN32) && defined(idx64) )
 	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "s_UseOpenAL" ) ) {
@@ -8538,6 +8596,292 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 			multiPtr->count++;
 			Com_Printf( "Extended sound quality field to contain very high setting.\n");
 		}
+	}
+
+	if ( item->type == ITEM_TYPE_MULTI && item->window.name && !Q_stricmp( item->window.name, "video_mode") && item->cvar && !Q_stricmp( item->cvar, "ui_r_mode" ) ) {
+		// The stock menu only offers a fixed list of 4:3 modes, which can't represent the desktop resolution or any
+		// widescreen mode. Replace it with the desktop resolution plus every mode the display reports, and select by
+		// value ("desktop" or "WIDTHxHEIGHT") through ui_r_resolution instead. UI_UpdateVideoSetup translates the
+		// selection back to r_mode/r_customwidth/r_customheight.
+		multiDef_t *multiPtr = item->typeData.multi;
+		char availableModes[1024];
+		const char *p;
+		int modeWidth[MAX_MULTI_CVARS], modeHeight[MAX_MULTI_CVARS];
+		int numModes = 0, first = 0;
+		int i, j;
+
+		DC->getCVarString( "r_availableModes", availableModes, sizeof( availableModes ) );
+		for ( p = availableModes; *p && numModes < MAX_MULTI_CVARS; )
+		{
+			int w, h, len = 0;
+			if ( sscanf( p, "%dx%d%n", &w, &h, &len ) >= 2 && len > 0 )
+			{
+				p += len;
+				if ( w >= 640 && h >= 480 )	// (smaller is too small for the menus to be usable)
+				{
+					for ( i = 0; i < numModes; i++ )
+					{
+						if ( modeWidth[i] == w && modeHeight[i] == h )
+							break;
+					}
+					if ( i == numModes )
+					{
+						modeWidth[numModes] = w;
+						modeHeight[numModes] = h;
+						numModes++;
+					}
+				}
+			}
+			else
+			{
+				// skip the unparseable token
+				while ( *p && *p != ' ' )
+					p++;
+			}
+			while ( *p == ' ' )
+				p++;
+		}
+
+		if ( !numModes )
+		{
+			// no mode list available, offer some common resolutions
+			static const int fallbackModes[][2] = {
+				{ 800, 600 }, { 1024, 768 }, { 1280, 720 }, { 1280, 1024 }, { 1366, 768 }, { 1600, 900 },
+				{ 1920, 1080 }, { 2560, 1080 }, { 2560, 1440 }, { 3440, 1440 }, { 3840, 2160 }
+			};
+			for ( i = 0; i < (int)ARRAY_LEN( fallbackModes ); i++ )
+			{
+				modeWidth[i] = fallbackModes[i][0];
+				modeHeight[i] = fallbackModes[i][1];
+			}
+			numModes = ARRAY_LEN( fallbackModes );
+		}
+
+		// sort by pixel count, then width
+		for ( i = 1; i < numModes; i++ )
+		{
+			int w = modeWidth[i], h = modeHeight[i];
+			for ( j = i - 1; j >= 0 && (modeWidth[j] * modeHeight[j] > w * h || (modeWidth[j] * modeHeight[j] == w * h && modeWidth[j] > w)); j-- )
+			{
+				modeWidth[j + 1] = modeWidth[j];
+				modeHeight[j + 1] = modeHeight[j];
+			}
+			modeWidth[j + 1] = w;
+			modeHeight[j + 1] = h;
+		}
+
+		// if there are too many to fit, drop the smallest ones
+		if ( numModes > MAX_MULTI_CVARS - 1 )
+			first = numModes - ( MAX_MULTI_CVARS - 1 );
+
+		memset( multiPtr, 0, sizeof( *multiPtr ) );
+		multiPtr->strDef = qtrue;
+		multiPtr->cvarList[0] = String_Alloc( "Desktop resolution" );
+		multiPtr->cvarStr[0] = String_Alloc( "desktop" );
+		multiPtr->count = 1;
+		for ( i = first; i < numModes; i++ )
+		{
+			multiPtr->cvarList[multiPtr->count] = String_Alloc( va( "%d x %d", modeWidth[i], modeHeight[i] ) );
+			multiPtr->cvarStr[multiPtr->count] = String_Alloc( va( "%dx%d", modeWidth[i], modeHeight[i] ) );
+			multiPtr->count++;
+		}
+		item->cvar = String_Alloc( "ui_r_resolution" );
+		Com_Printf( "Replaced video mode field with %d display resolutions.\n", multiPtr->count );
+	}
+
+	if ( ( item->type == ITEM_TYPE_MULTI || item->type == ITEM_TYPE_SLIDER ) && item->window.name && !Q_stricmp( item->window.name, "video_mode") && item->cvar && !Q_stricmp( item->cvar, "r_ext_texture_filter_anisotropic" ) ) {
+		// The stock row is a slider over any number. Offer the levels the graphics card supports instead.
+		multiDef_t *multiPtr;
+		int level;
+
+		if ( item->type != ITEM_TYPE_MULTI )
+		{
+			item->type = ITEM_TYPE_MULTI;
+			item->typeData.data = NULL;
+			Item_ValidateTypeData( item );
+		}
+		multiPtr = item->typeData.multi;
+		memset( multiPtr, 0, sizeof( *multiPtr ) );
+		multiPtr->cvarList[0] = String_Alloc( "Off" );
+		multiPtr->cvarValue[0] = 0;
+		multiPtr->count = 1;
+		for ( level = 2; level <= 16 && level <= DC->glconfig.maxTextureFilterAnisotropy; level *= 2 )
+		{
+			multiPtr->cvarList[multiPtr->count] = String_Alloc( va( "%dx", level ) );
+			multiPtr->cvarValue[multiPtr->count] = (float)level;
+			multiPtr->count++;
+		}
+		item->descText = String_Alloc( "Keeps textures sharp on floors and walls seen at a slant. Higher is sharper." );
+		Com_Printf( "Replaced anisotropic filter field with %d levels.\n", multiPtr->count );
+	}
+
+	// The mouse page of the in-game menu has a row for force feedback (not shown), which the game has no use for. Use
+	// it to tell the game the DPI of the mouse, so that the sensitivity means the same on any mouse (see in_mouseDPI).
+	// (The main menu has no such row, Menu_AddShinRows adds one.)
+	if ( item->type == ITEM_TYPE_YESNO && item->cvar && !Q_stricmp( item->cvar, "use_ff" ) ) {
+		Item_MakeMouseDPIRow( item );
+		if ( item->window.group && !Q_stricmp( item->window.group, "joycontrols_obsolete" ) )
+			item->window.group = String_Alloc( "joycontrols" );
+	}
+}
+
+/*
+===============
+Item_MakeMouseDPIRow
+
+Turns a row into the one that tells the game the DPI of the mouse (in_mouseDPI)
+===============
+*/
+static void Item_MakeMouseDPIRow( itemDef_t *item )
+{
+	static const int dpiValues[] = { 400, 800, 1000, 1200, 1600, 2000, 2400, 3200, 4000, 5000, 6000, 8000, 12000, 16000 };
+	multiDef_t *multiPtr;
+	int i;
+
+	item->type = ITEM_TYPE_MULTI;
+	item->typeData.data = NULL;
+	Item_ValidateTypeData( item );
+	multiPtr = item->typeData.multi;
+	memset( multiPtr, 0, sizeof( *multiPtr ) );
+	for ( i = 0; i < (int)ARRAY_LEN( dpiValues ); i++ )
+	{
+		multiPtr->cvarList[i] = String_Alloc( va( "%d DPI", dpiValues[i] ) );
+		multiPtr->cvarValue[i] = (float)dpiValues[i];
+	}
+	multiPtr->count = ARRAY_LEN( dpiValues );
+
+	item->cvar = String_Alloc( "in_mouseDPI" );
+	item->text = String_Alloc( "Mouse DPI:" );
+	item->descText = String_Alloc( "The DPI of your mouse (see its box or software). Sensitivity is for a 400 DPI mouse, higher DPI needs a higher sensitivity." );
+	item->action = String_Alloc( "\"play\" \"sound/interface/button1.wav\" ; " );
+	Com_Printf( "Made a mouse DPI field.\n" );
+}
+
+/*
+===============
+Menu_CloneRow
+
+Adds a copy of a row of a menu, moved down by dy, with a copy of the highlight its mouseEnter shows (moved the same
+way, named newHighlight). Returns NULL if there is no room.
+===============
+*/
+static itemDef_t *Menu_CloneRow( menuDef_t *menu, const itemDef_t *src, float dy, const char *newHighlight )
+{
+	itemDef_t *row;
+	const char *show;
+	int i;
+
+	if ( menu->itemCount >= MAX_MENUITEMS - 1 )
+		return NULL;
+
+	row = (itemDef_t *)UI_Alloc( sizeof( itemDef_t ) );
+	memcpy( row, src, sizeof( itemDef_t ) );
+	row->typeData.data = NULL;
+	Item_ValidateTypeData( row );
+	if ( row->typeData.data && src->typeData.data && src->type == ITEM_TYPE_MULTI )
+		memcpy( row->typeData.multi, src->typeData.multi, sizeof( multiDef_t ) );
+	row->window.rectClient.y += dy;
+	row->window.flags &= ~( WINDOW_MOUSEOVER | WINDOW_HASFOCUS );
+	menu->items[menu->itemCount++] = row;
+
+	// the highlight bar of a row is an item of its own, at the place of the row
+	show = src->mouseEnter ? strstr( src->mouseEnter, "highlight" ) : NULL;
+	if ( show )
+	{
+		char name[64];
+		int len = 0;
+		while ( show[len] && show[len] != '"' && show[len] != ' ' && show[len] != ';' && len < (int)sizeof( name ) - 1 )
+		{
+			name[len] = show[len];
+			len++;
+		}
+		name[len] = '\0';
+
+		for ( i = 0; i < menu->itemCount; i++ )
+		{
+			itemDef_t *bar = menu->items[i];
+			if ( bar->window.name && !Q_stricmp( bar->window.name, name ) && menu->itemCount < MAX_MENUITEMS )
+			{
+				itemDef_t *newBar = (itemDef_t *)UI_Alloc( sizeof( itemDef_t ) );
+				memcpy( newBar, bar, sizeof( itemDef_t ) );
+				newBar->typeData.data = NULL;
+				Item_ValidateTypeData( newBar );
+				newBar->window.name = String_Alloc( newHighlight );
+				newBar->window.rectClient.y += dy;
+				menu->items[menu->itemCount++] = newBar;
+				row->mouseEnter = String_Alloc( va( "\"show\" \"%s\" ; ", newHighlight ) );
+				row->mouseExit = String_Alloc( va( "\"hide\" \"%s\" ; ", newHighlight ) );
+				break;
+			}
+		}
+	}
+	return row;
+}
+
+/*
+===============
+Menu_AddShinRows
+
+Rows the stock menus have no place for:
+- Setup > Video: Anti-Aliasing, below Video Sync (ui_r_ext_multisample, applied with the other video settings)
+- Setup > Controls > Mouse (main menu): Mouse DPI, in the gap under Sensitivity
+===============
+*/
+static void Menu_AddShinRows( menuDef_t *menu )
+{
+	itemDef_t *videoSync = NULL, *sensitivity = NULL, *smoothMouse = NULL;
+	qboolean haveDPI = qfalse;
+	int i;
+
+	for ( i = 0; i < menu->itemCount; i++ )
+	{
+		itemDef_t *item = menu->items[i];
+		if ( !item->cvar || !item->window.group )
+			continue;
+		if ( !Q_stricmp( item->cvar, "r_swapInterval" ) && !Q_stricmp( item->window.group, "video" ) && item->type == ITEM_TYPE_MULTI )
+			videoSync = item;
+		else if ( !Q_stricmp( item->cvar, "sensitivity" ) && !Q_stricmp( item->window.group, "joycontrols" ) )
+			sensitivity = item;
+		else if ( !Q_stricmp( item->cvar, "m_filter" ) && !Q_stricmp( item->window.group, "joycontrols" ) )
+			smoothMouse = item;
+		else if ( !Q_stricmp( item->cvar, "in_mouseDPI" ) )
+			haveDPI = qtrue;
+	}
+
+	if ( videoSync )
+	{
+		itemDef_t *row = Menu_CloneRow( menu, videoSync, videoSync->window.rectClient.h, "highlight_antialiasing" );
+		if ( row )
+		{
+			multiDef_t *multiPtr = row->typeData.multi;
+			int samples;
+
+			memset( multiPtr, 0, sizeof( *multiPtr ) );
+			multiPtr->cvarList[0] = String_Alloc( "Off" );
+			multiPtr->cvarValue[0] = 0;
+			multiPtr->count = 1;
+			for ( samples = 2; samples <= 8; samples *= 2 )
+			{
+				multiPtr->cvarList[multiPtr->count] = String_Alloc( va( "%dx", samples ) );
+				multiPtr->cvarValue[multiPtr->count] = (float)samples;
+				multiPtr->count++;
+			}
+			row->window.name = String_Alloc( "antialiasing" );
+			row->cvar = String_Alloc( "ui_r_ext_multisample" );
+			row->text = String_Alloc( "Anti-Aliasing:" );
+			row->descText = String_Alloc( "Smooths the jagged edges of everything. Higher is smoother and slower. Needs Apply Changes." );
+			row->action = String_Alloc( "\"play\" \"sound/interface/button1.wav\" ; \"uiScript\" \"glCustom\" ; \"setcvar\" \"ui_r_modified\" \"1\" ; \"show\" \"applyChanges\" ; " );
+			Com_Printf( "Added an antialiasing field to %s.\n", menu->window.name );
+		}
+	}
+
+	if ( sensitivity && smoothMouse && !haveDPI )
+	{
+		// the row goes in the gap under the slider for the sensitivity, which is a row high
+		const float dy = sensitivity->window.rectClient.y + sensitivity->window.rectClient.h - smoothMouse->window.rectClient.y;
+		itemDef_t *row = Menu_CloneRow( menu, smoothMouse, dy, "highlight_mousedpi" );
+		if ( row )
+			Item_MakeMouseDPIRow( row );
 	}
 }
 
@@ -9401,7 +9745,7 @@ void *Display_CaptureItem(int x, int y) {
 	for (i = 0; i < menuCount; i++) {
 		// turn off focus each item
 		// menu->items[i].window.flags &= ~WINDOW_HASFOCUS;
-		if (Rect_ContainsPoint(&Menus[i].window.rect, x, y)) {
+		if (Menu_WindowContainsPoint(&Menus[i], x, y)) {
 			return &Menus[i];
 		}
 	}
@@ -9501,7 +9845,7 @@ void Display_CacheAll() {
 
 static qboolean Menu_OverActiveItem(menuDef_t *menu, float x, float y) {
  	if (menu && menu->window.flags & (WINDOW_VISIBLE | WINDOW_FORCED)) {
-		if (Rect_ContainsPoint(&menu->window.rect, x, y)) {
+		if (Menu_WindowContainsPoint(menu, x, y)) {
 			int i;
 			for (i = 0; i < menu->itemCount; i++) {
 				// turn off focus each item
