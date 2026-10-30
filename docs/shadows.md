@@ -4,7 +4,8 @@
 
 The stencil shadows ("volumetric" in the menus of some versions) of the original game are a shadow volume per
 surface of every character, extruded down to the floor under it, and everything inside a volume is darkened by a flat
-50%. They had several problems that have nothing to do with modern drivers, and are fixed in the single player games:
+50%. They had several problems that have nothing to do with modern drivers, and are fixed in all four games (the
+code is shared by the single player and the multiplayer renderers, `shared/renderer/tr_shadow_volumes.h`):
 
 * **Characters darkened themselves.** The volume of the torso also contains the legs, and so on, so characters looked
   half black. Pixels that show a character are now left out of the darkening (`r_shadowSelf 1` brings the old
@@ -23,10 +24,24 @@ surface of every character, extruded down to the floor under it, and everything 
   (0 = hard edges), `r_shadowSamples` is the number of volumes (1 to 16, 8 by default). Cost: the volumes are small,
   eight of them are not measurable on a modern graphics card.
 * **Shadows of characters with no floor under them** (the trace down failed, or the character is cloaked) extended to
-  height 0 of the map. The shadow now only exists when there is a floor within 512 units.
+  height 0 of the map. The shadow now only exists when there is a floor within 512 units (single player and Jedi
+  Academy multiplayer, whose cgame instead made up a floor 25 units under the feet when there was none in 4096).
+  The renderer also drops the shadow of any caster whose floor is more than 1024 units under it, for cgame modules
+  that can't be changed.
+* **Shadows of items and other models with no floor** (the MD3 models: pickups, weapons on the ground) were extended
+  to height 0 of the map too, as no cgame gives them a floor: through every floor in between on a map above 0, and
+  none at all on a map below 0. They now reach 128 units under the model, where the floor under a pickup is.
+* **Your own shadow in first person** (Jedi Academy draws your body only for its shadow then) kept the shadows of
+  others off whatever was in front of that invisible body. It is no longer counted as a visible character.
+* **Jedi Outcast multiplayer** had no stencil shadows of characters at all: its cgame module finds the floor under a
+  character but asks for it to be used only for the projected shadows (`cg_shadows 3`). The renderer of Jedi Outcast
+  multiplayer uses the floor it found for the stencil shadows too.
 * **Drawing.** The thousands of tiny immediate-mode strips are replaced by one batch of triangles per sample, and the
   shadows are rendered once at the end of the frame instead of per surface.
 * `r_shadowRange` (how far from you shadows are drawn) is 2000 instead of 1000.
+
+Cost in multiplayer: with 15 bots fighting, uncapped, about 440 frames per second without and 335 to 546 with them
+(the scene moves), so well under a millisecond a frame.
 
 Not done: shadows do not fall on walls or higher steps than the floor under the character (the volume ends at the
 floor), and characters do not shadow each other (they are excluded from the darkening). Both would come from shadow
