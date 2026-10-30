@@ -71,12 +71,13 @@ console variable is in brackets (you can type those in the console, opened with 
 - **Grass and bushes are drawn about three times further away**, and characters keep their detailed look twice as
   far away.
 
-### Mouse (single player)
-- **The sensitivity slider suits today's mice**: it goes from 0.05 to 30 (it used to start at 2, which was already
-  too fast for a modern mouse), and it is finer at the slow end where you need it. The default is slower (1.5).
-- **Setup > Controls > Mouse/Joystick > Mouse DPI**: tell the game the DPI of your mouse (it is on the box or in the
-  mouse's own software) and a sensitivity feels the same on any mouse. Old settings keep working. See
-  [docs/mouse.md](docs/mouse.md).
+### Mouse
+- **The sensitivity slider suits today's mice** (single player): it goes from 0.05 to 30 (it used to start at 2, which
+  was already too fast for a modern mouse), and it is finer at the slow end where you need it. The default is slower
+  (1.5, in multiplayer too).
+- **Setup > Controls > Mouse/Joystick > Mouse DPI** (single player; in multiplayer `in_mouseDPI` in the console): tell
+  the game the DPI of your mouse (it is on the box or in the mouse's own software) and a sensitivity feels the same on
+  any mouse. Old settings keep working. See [docs/mouse.md](docs/mouse.md).
 
 ### Sound
 

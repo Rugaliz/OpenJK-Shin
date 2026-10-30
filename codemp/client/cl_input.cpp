@@ -1061,6 +1061,10 @@ void CL_MouseMove( usercmd_t *cmd ) {
 	if ( mx == 0.0f && my == 0.0f )
 		return;
 
+	// the sensitivity (and the acceleration) is for a 400 dpi mouse, which is what the game was made for
+	mx *= 400.0f / in_mouseDPI->value;
+	my *= 400.0f / in_mouseDPI->value;
+
 	if ( cl_mouseAccel->value != 0.0f )
 	{
 		if ( cl_mouseAccelStyle->integer == 0 )
