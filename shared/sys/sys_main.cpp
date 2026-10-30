@@ -203,15 +203,29 @@ static void Sys_ErrorDialog( const char *error )
 
 	time( &rawtime );
 	strftime( timeStr, sizeof( timeStr ), "%Y-%m-%d_%H-%M-%S", localtime( &rawtime ) ); // or gmtime
+	// the home folder first, then the game folder, then the temporary folder: the log must land somewhere
 	const char *homePath = Sys_DefaultHomePath();
-	const char *logPath = ( homePath && homePath[0] ) ? homePath : Sys_DefaultInstallPath();
-	Com_sprintf( crashLogPath, sizeof( crashLogPath ),
-					"%s%ccrashlog-%s.txt",
-					logPath, PATH_SEP, timeStr );
+	const char *tempPath = getenv( "TEMP" );
+	if ( !tempPath || !tempPath[0] ) tempPath = getenv( "TMPDIR" );
+	if ( !tempPath || !tempPath[0] ) tempPath = getenv( "TMP" );
+	const char *logPaths[] = { homePath, Sys_DefaultInstallPath(), tempPath };
 
-	Sys_Mkdir( logPath );
+	FILE *fp = NULL;
+	crashLogPath[0] = '\0';
+	for ( size_t i = 0; i < ARRAY_LEN( logPaths ) && !fp; i++ )
+	{
+		const char *logPath = logPaths[i];
+		if ( !logPath || !logPath[0] )
+			continue;
 
-	FILE *fp = fopen( crashLogPath, "w" );
+		Com_sprintf( crashLogPath, sizeof( crashLogPath ),
+						"%s%ccrashlog-%s.txt",
+						logPath, PATH_SEP, timeStr );
+
+		Sys_Mkdir( logPath );
+		fp = fopen( crashLogPath, "w" );
+	}
+
 	if ( fp )
 	{
 		ConsoleLogWriteOut( fp );

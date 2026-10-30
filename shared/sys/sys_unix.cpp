@@ -440,7 +440,13 @@ qboolean Sys_Mkdir( const char *path )
 	int result = mkdir( path, 0750 );
 
 	if( result != 0 )
-		return (qboolean)(errno == EEXIST);
+	{
+		if( errno == EEXIST )
+			return qtrue;
+
+		Com_Printf( "Sys_Mkdir: cannot create \"%s\": %s\n", path, strerror( errno ) );
+		return qfalse;
+	}
 
 	return qtrue;
 }

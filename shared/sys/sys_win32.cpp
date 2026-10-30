@@ -266,8 +266,18 @@ Sys_Mkdir
 qboolean Sys_Mkdir( const char *path ) {
 	if( !CreateDirectory( path, NULL ) )
 	{
-		if( GetLastError( ) != ERROR_ALREADY_EXISTS )
-			return qfalse;
+		const DWORD error = GetLastError( );
+		if( error == ERROR_ALREADY_EXISTS )
+			return qtrue;
+
+		// Windows answers "access denied" instead of "already exists" for some folders that are already there
+		// (protected parents, redirected or synchronised folders), so look at the folder itself
+		const DWORD attributes = GetFileAttributes( path );
+		if( attributes != INVALID_FILE_ATTRIBUTES && ( attributes & FILE_ATTRIBUTE_DIRECTORY ) )
+			return qtrue;
+
+		Com_Printf( "Sys_Mkdir: cannot create \"%s\": %s (Windows error %lu)\n", path, GetErrorString( error ), (unsigned long)error );
+		return qfalse;
 	}
 	return qtrue;
 }
