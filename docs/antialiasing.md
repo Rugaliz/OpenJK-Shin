@@ -1,7 +1,9 @@
 # Antialiasing and texture filtering
 
 All of this is in the renderer that Jedi Outcast and Jedi Academy single player share (`code/rd-vanilla`), and plain
-OpenGL 1.x plus a few extensions that every driver has had for years.
+OpenGL 1.x plus a few extensions that every driver has had for years. The multiplayer renderer (`codemp/rd-vanilla`,
+both games) has the same cvars below; the menu rows are single player only for now. The Lanczos filter itself is
+shared by both renderers (`shared/renderer/tr_mip_lanczos.h`).
 
 ## Menu
 
@@ -19,6 +21,6 @@ OpenGL 1.x plus a few extensions that every driver has had for years.
 | `r_alphaToCoverage` | 1 | With MSAA on, the edges of cut out surfaces (leaves, fences, grates: shaders with `alphaFunc GE128`) are smoothed by turning their alpha into coverage of the samples instead of testing it. The other alpha tests are left as they are. |
 | `r_sampleShading` | 0 | 0 to 1: how much of the samples of a pixel are shaded separately (`GL_ARB_sample_shading`). 1 also smooths textures and cut outs, and is slow. Latched, needs MSAA. |
 | `r_ext_texture_filter_anisotropic` | 16 | Anisotropic filtering level, was there before. |
-| `r_simpleMipMaps` | 2 | How the smaller sizes of the textures are made: 0 the blur of the original Quake 3 filter, 1 average of 2x2 pixels (what the game used), 2 Lanczos (3 lobes windowed sinc, `R_MipMapLanczos` in tr_image.cpp). Latched. Costs about a third of a second more per level load. |
+| `r_simpleMipMaps` | 2 | How the smaller sizes of the textures are made: 0 the blur of the original Quake 3 filter, 1 average of 2x2 pixels (what the game used), 2 Lanczos (3 lobes windowed sinc, `R_MipMapLanczos` in shared/renderer/tr_mip_lanczos.h). Latched. Costs about a third of a second more per level load. |
 
 `gfxinfo` shows what is in use ("multisampling: 4x, alpha to coverage").

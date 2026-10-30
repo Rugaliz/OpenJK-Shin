@@ -28,6 +28,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 #include "jobs/jobs.h"
+#include "renderer/tr_mip_lanczos.h"
 #include "../rd-common/tr_common.h"
 #include <png.h>
 #include <map>
@@ -483,101 +484,6 @@ static void R_MipMap2( unsigned *in, int inWidth, int inHeight ) {
 
 /*
 ================
-R_MipMapLanczos
-
-Halves the size of the texture in place with a windowed sinc (Lanczos, 3 lobes) filter, one dimension at a time.
-The box filter of the original averages 2x2 pixels, which smears the detail of every mip level; this keeps it
-sharp, so that textures seen at a grazing angle stay clear under anisotropic filtering. The textures repeat, so
-the filter wraps around the edges. Needs power of two sizes of at least 2x2.
-================
-*/
-#define MIP_LANCZOS_LOBES	3
-
-typedef struct lanczosJob_s {
-	byte		*in;
-	float		*temp;
-	const float	*weights;
-	int			inWidth, inHeight, outWidth, outHeight;
-} lanczosJob_t;
-
-static void R_MipMapLanczosHorizontal( int begin, int end, void *context ) {
-	const lanczosJob_t *job = (const lanczosJob_t *)context;
-	const int widthMask = job->inWidth - 1;
-
-	for ( int y = begin; y < end; y++ ) {
-		const byte *row = job->in + (size_t)y * job->inWidth * 4;
-		float *out = job->temp + (size_t)y * job->outWidth * 4;
-		for ( int x = 0; x < job->outWidth; x++, out += 4 ) {
-			for ( int c = 0; c < 4; c++ ) {
-				float total = 0.0f;
-				for ( int k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
-					total += job->weights[k] * ( row[( ( x * 2 - k ) & widthMask ) * 4 + c] + row[( ( x * 2 + 1 + k ) & widthMask ) * 4 + c] );
-				}
-				out[c] = total;
-			}
-		}
-	}
-}
-
-static void R_MipMapLanczosVertical( int begin, int end, void *context ) {
-	const lanczosJob_t *job = (const lanczosJob_t *)context;
-	const int heightMask = job->inHeight - 1;
-	const int outWidth = job->outWidth;
-
-	for ( int y = begin; y < end; y++ ) {
-		byte *out = job->in + (size_t)y * outWidth * 4;
-		for ( int x = 0; x < outWidth; x++, out += 4 ) {
-			for ( int c = 0; c < 4; c++ ) {
-				float total = 0.0f;
-				for ( int k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
-					total += job->weights[k] * ( job->temp[( ( ( y * 2 - k ) & heightMask ) * outWidth + x ) * 4 + c] + job->temp[( ( ( y * 2 + 1 + k ) & heightMask ) * outWidth + x ) * 4 + c] );
-				}
-				out[c] = (byte) Com_Clampi( 0, 255, (int) ( total + 0.5f ) );
-			}
-		}
-	}
-}
-
-static void R_MipMapLanczos( byte *in, int inWidth, int inHeight ) {
-	static float	weights[MIP_LANCZOS_LOBES];
-	static qboolean	weightsReady = qfalse;
-	const int		outWidth = inWidth >> 1;
-	const int		outHeight = inHeight >> 1;
-	int				k;
-
-	if ( !weightsReady ) {
-		// the output pixel sits between two input pixels, the taps are at 0.5, 1.5, 2.5 input pixels away on
-		// either side, which are 0.25, 0.75, 1.25 output pixels
-		float sum = 0.0f;
-		for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
-			const float u = ( k + 0.5f ) * 0.5f;
-			const float a = M_PI * u;
-			const float b = a / MIP_LANCZOS_LOBES;
-			weights[k] = ( sinf( a ) / a ) * ( sinf( b ) / b );
-			sum += 2.0f * weights[k];
-		}
-		for ( k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
-			weights[k] /= sum;
-		}
-		weightsReady = qtrue;
-	}
-
-	// horizontal pass: inWidth x inHeight -> outWidth x inHeight
-	float *temp = (float *) R_Malloc( outWidth * inHeight * 4 * sizeof( float ), TAG_TEMP_WORKSPACE, qfalse );
-	lanczosJob_t job = { in, temp, weights, inWidth, inHeight, outWidth, outHeight };
-
-	// the rows of both passes are independent of each other, so they are shared between the worker threads
-	// (small levels are done by this thread alone, waking the workers costs more than they save)
-	const int rowsPerPiece = Q_max( 4096 / Q_max( inWidth, 1 ), 1 );
-	Jobs::ParallelFor( inHeight, rowsPerPiece, R_MipMapLanczosHorizontal, &job );
-	// vertical pass: outWidth x inHeight -> outWidth x outHeight, written back over the input
-	Jobs::ParallelFor( outHeight, rowsPerPiece, R_MipMapLanczosVertical, &job );
-
-	R_Free( temp );
-}
-
-/*
-================
 R_MipMap
 
 Operates in place, quartering the size of the texture
@@ -593,7 +499,9 @@ static void R_MipMap (byte *in, int width, int height) {
 	}
 
 	if ( r_simpleMipMaps->integer >= 2 && width >= 2 && height >= 2 && !( width & ( width - 1 ) ) && !( height & ( height - 1 ) ) ) {
-		R_MipMapLanczos( in, width, height );
+		float *temp = (float *) R_Malloc( R_MipMapLanczosTempSize( width, height ), TAG_TEMP_WORKSPACE, qfalse );
+		R_MipMapLanczos( in, width, height, temp );
+		R_Free( temp );
 		return;
 	}
 

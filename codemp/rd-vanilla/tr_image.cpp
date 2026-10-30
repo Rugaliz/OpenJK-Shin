@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "tr_local.h"
 #include "../rd-common/tr_common.h"
 #include "glext.h"
+#include "renderer/tr_mip_lanczos.h"
 
 #include <map>
 
@@ -432,6 +433,13 @@ static void R_MipMap (byte *in, int width, int height) {
 	int		i, j;
 	byte	*out;
 	int		row;
+
+	if ( r_simpleMipMaps->integer >= 2 && width >= 2 && height >= 2 && !( width & ( width - 1 ) ) && !( height & ( height - 1 ) ) ) {
+		float *temp = (float *) Z_Malloc( R_MipMapLanczosTempSize( width, height ), TAG_TEMP_WORKSPACE, qfalse );
+		R_MipMapLanczos( in, width, height, temp );
+		Z_Free( temp );
+		return;
+	}
 
 	if ( !r_simpleMipMaps->integer ) {
 		R_MipMap2( (unsigned *)in, width, height );
