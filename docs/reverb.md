@@ -2,7 +2,8 @@
 
 Setup > Sound > **ROOM ECHO (REVERB)** (cvar `s_reverb`, default on) gives sounds the echo of the room they are in. It
 also muffles sounds that have a wall between them and the listener, and everything while under water.
-`s_reverbLevel` (default 1) scales how much reverb there is.
+`s_reverbLevel` (default 1) scales how much reverb there is. It is the same in single player and multiplayer, in both
+games (in Jedi Outcast multiplayer, whose menus are those of the original game, only in the console).
 
 The old games had this with the EAX hardware of the sound cards of the time, using hand made zones that came with each
 level (`eagle/*.eal`). Those rely on a closed library to tell which zone the listener is in, so they can't be used
@@ -11,14 +12,15 @@ including ones that were never given zones.
 
 ## How it works
 
-* **The room** (`S_AnalyseRoom`, snd_dma.cpp): ten times a second 26 rays are sent out from the listener through the
-  collision data of the level. How many hit something (the rest escape: outdoors, windows to the sky), how far they
+* **The room** (`S_AnalyseRoom`, snd_dma_effects.h): ten times a second 26 rays are sent out from the listener through
+  the collision data of the level. How many hit something (the rest escape: outdoors, windows to the sky), how far they
   go, how close the nearest wall is and what the surfaces are made of give the size of the room and how much of the
-  sound it soaks up. A room needs a ceiling: how many of the rays that point upwards hit something (not the sky)
-  within 25 metres says whether this is a room or the outdoors, and the reverb is scaled by it, so a canyon or a
-  street under the open sky has almost none (a little echo from the nearest walls) however close the cliffs are. The decay time follows from Sabine's rule for the reverberation time of a room (0.161 V / A,
-  with the volume over the surface worked out from the mean distance to the walls). Open places get little or none.
-  Many levels of Jedi Outcast don't say what their surfaces are made of, so a neutral value is used for those.
+  sound it soaks up. A room needs a ceiling: how many of the rays that point upwards hit something (not the sky) within
+  25 metres says whether this is a room or the outdoors, and the reverb is scaled by it, so a canyon or a street under
+  the open sky has almost none (a little echo from the nearest walls) however close the cliffs are. The decay time
+  follows from Sabine's rule for the reverberation time of a room (0.161 V / A, with the volume over the surface worked
+  out from the mean distance to the walls). Open places get little or none. Many levels of Jedi Outcast don't say what
+  their surfaces are made of, so a neutral value is used for those.
 * **The reverb** (snd_reverb.cpp, independent of the rest of the engine): the sounds that are to have reverb are
   mixed into one signal (each sends a share of itself that falls off with distance more slowly than the direct sound
   does), which goes through a few early reflections and a feedback delay network of eight lines with a low pass in
@@ -31,7 +33,8 @@ including ones that were never given zones.
   the level; if something is in the way the sound is filtered (the highs go) and made a bit quieter, gradually. The
   reverb of the room is not affected, so a sound in the next room is heard muffled and echoing.
 * **Under water**: everything is filtered down to 800Hz, and the reverb is dull and short.
-* The mixing is in snd_mix.cpp (`S_PaintMono`, `S_PaintChannelHRTF`, `S_SendToReverb`, and the end of `S_PaintChannels`).
+* The mixing is in snd_mix_effects.h (`S_PaintSource`, `S_PaintMono`, `S_PaintChannelHRTF`, `S_SendToReverb`,
+  `S_Mix_EffectsChunkEnd`).
   Music, videos and the sounds that come from the player's own entity (apart from sounds they make) and announcements
   have no reverb or muffling.
 
@@ -66,12 +69,21 @@ test.
 
 ## Cutscenes
 
-While a scripted cutscene plays (the `inCutscene` cvar) the listener is the camera, not someone standing in a room, so
-dialogue is heard as in a film: voices get no reverb (that includes the player's own voice, which otherwise always had
-some) and nothing is muffled by walls between the camera and the speaker, which a camera placed behind a bar does a lot.
+While a scripted cutscene plays (the `inCutscene` cvar, single player) the listener is the camera, not someone standing
+in a room, so dialogue is heard as in a film: voices get no reverb (that includes the player's own voice, which
+otherwise always had some) and nothing is muffled by walls between the camera and the speaker, which a camera placed
+behind a bar does a lot.
 
 ## Limits
 
 * Doors and other moving parts of a level aren't in the collision data used, so they don't muffle sound.
 * The first sound of a level can be heard before the room is first looked at (a tenth of a second).
 * Only the stereo output (and the HRTF output) has it.
+
+## The code
+
+The filters (snd_hrtf.cpp, snd_reverb.cpp) don't depend on the rest of the engine. What is worked out once a frame
+(the room, the walls, the directions) is in `code/client/snd_dma_effects.h`, the mixing in
+`code/client/snd_mix_effects.h`. The sound code of both engines, single player (`code/client`) and multiplayer
+(`codemp/client`), includes them, so all four games share one copy. In multiplayer the sounds that are played faster
+for the Doppler effect (`s_doppler`) get the effects as well.

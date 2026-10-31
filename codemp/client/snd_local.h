@@ -27,6 +27,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "snd_public.h"
 #include "mp3code/mp3struct.h"
+#include "../../code/client/snd_hrtf.h"		// (shared with the single player engine)
+#include "../../code/client/snd_reverb.h"
 
 #ifdef JK2_MODE
 // the sound channels that Jedi Academy has and Jedi Outcast does not: no sound has them (a negative number), but the
@@ -118,6 +120,25 @@ typedef struct channel_s {
 
 	qboolean	doppler;
 	float		dopplerScale;
+	//
+	// binaural positioning (s_hrtf): the direction of the sound relative to the listener, set by S_Respatialize,
+	// and the filter history of the sound. For a sound that persists (a one shot sound) the state lives in a pool
+	// indexed by channel, for a looping sound (whose channel is made afresh every frame) in a table by sfx.
+	qboolean	hrtf;
+	qboolean	hrtfInit;		// the pool entry of a one shot sound has been cleared for this sound
+	qboolean	hrtfKept;		// was among the sounds positioned binaurally after the last S_HrtfLimit
+	float		hrtfAzimuth;	// degrees, 0 = ahead, positive to the right
+	float		hrtfElevation;	// degrees, positive upwards
+	hrtfState_t	*pHrtfState;
+	//
+	// room effects (s_reverb): how much of the sound is sent to the reverb of the room, how much the sound is held
+	// back by something between it and the listener (0 to 1, and where that was heading and when it was last looked at),
+	// and the state of the low pass filter that does that
+	int			reverbvol;		// 0-255
+	float		obstruct;
+	float		obstructTarget;
+	int			obstructNextTime;
+	float		lpState;
 
 } channel_t;
 
@@ -143,6 +164,7 @@ typedef struct wavinfo_s {
 extern	channel_t   s_channels[MAX_CHANNELS];
 
 extern	int		s_paintedtime;
+extern	int		s_soundtime;		// the play position (sample pairs)
 extern	int		s_rawend;
 extern	vec3_t	listener_origin;
 extern	dma_t	dma;
@@ -154,6 +176,13 @@ extern	dma_t	dma;
 // still reacts quickly to volume and dynamic-music state changes.
 #define	MUSIC_RAW_LOOKAHEAD	16384
 extern	portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
+
+extern	cvar_t	*s_reverb;			// 1 = the sound of the room: reverb, sounds held back by walls, muffling underwater
+extern	cvar_t	*s_reverbLevel;		// how much reverb there is (1 = as worked out from the room)
+extern	qboolean	s_reverbActive;	// the room effects are in use this frame
+void	S_Mix_ResetReverb( void );		// (the reverb has been set up again: its time starts over)
+extern	float		s_underwater;	// 0 to 1, how far under the surface the listener is
+extern	cvar_t	*s_hrtf;			// 1 = position sounds binaurally (head-related transfer functions) for headphones
 portable_samplepair_t *S_GetRawSamplePointer();	// TA added this, but it just returns the s_rawsamples[] array above. Oh well...
 
 extern cvar_t *s_allowDynamicMusic;
@@ -174,7 +203,7 @@ qboolean S_LoadSound( sfx_t *sfx );
 
 
 // Mixes from s_paintedtime to endtime. An update mixes the part ahead of the play position that it mixes again every
-// time (bReserve qfalse), then the reserve further ahead that is only mixed once (qtrue)
+// time (bReserve qfalse, which also runs the reverb), then the reserve further ahead that is only mixed once (qtrue)
 void S_PaintChannels(int endtime, qboolean bReserve = qfalse);
 
 // picks a channel based on priorities, empty slots, number of channels

@@ -221,41 +221,6 @@ CHANNEL MIXING
 
 ===============================================================================
 */
-static void S_PaintChannelFrom16( channel_t *ch, const sfx_t *sfx, int count, int sampleOffset, int bufferOffset )
-{
-	portable_samplepair_t	*pSamplesDest;
-	int iData;
-	float ofst = sampleOffset;
-
-	int iLeftVol	= ch->leftvol  * snd_vol;
-	int iRightVol	= ch->rightvol * snd_vol;
-
-	pSamplesDest	= &paintbuffer[ bufferOffset ];
-
-	if ( !( ch->doppler && ch->dopplerScale > 1 ) )
-	{
-		// (the usual case: one sample after another)
-		const short *pSrc = sfx->pSoundData + sampleOffset;
-		for ( int i=0 ; i<count ; i++ )
-		{
-			iData = pSrc[i];
-			pSamplesDest[i].left  += (iData * iLeftVol )>>8;
-			pSamplesDest[i].right += (iData * iRightVol)>>8;
-		}
-		return;
-	}
-
-	for ( int i=0 ; i<count ; i++ )
-	{
-		iData = sfx->pSoundData[ (int)ofst ];
-
-		pSamplesDest[i].left  += (iData * iLeftVol )>>8;
-		pSamplesDest[i].right += (iData * iRightVol)>>8;
-		ofst += ch->dopplerScale;
-	}
-}
-
-
 // The most decoded samples a single request to the MP3 decoder's sliding window should ask for (see
 // MP3SlidingDecodeBuffer in snd_local.h), which also sizes the source buffer used when converting the rate.
 #define MP3_PAINT_MAX_SOURCE	3000
@@ -305,75 +270,52 @@ static void S_FetchMP3Samples( channel_t *ch, int count, int sampleOffset, short
 	}
 }
 
-void S_PaintChannelFromMP3( channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset )
-{
-	int data;
-	int leftvol, rightvol;
-	signed short *sfx;
-	int	i;
-	portable_samplepair_t	*samp;
-	static short tempMP3Buffer[PAINTBUFFER_SIZE];
-
-	S_FetchMP3Samples( ch, count, sampleOffset, tempMP3Buffer );
-
-	leftvol = ch->leftvol*snd_vol;
-	rightvol = ch->rightvol*snd_vol;
-	sfx = tempMP3Buffer;
-
-	samp = &paintbuffer[ bufferOffset ];
-
-
-	while ( count & 3 ) {
-		data = *sfx;
-		samp->left += (data * leftvol)>>8;
-		samp->right += (data * rightvol)>>8;
-
-		sfx++;
-		samp++;
-		count--;
-	}
-
-	for ( i=0 ; i<count ; i += 4 ) {
-		data = sfx[i];
-		samp[i].left += (data * leftvol)>>8;
-		samp[i].right += (data * rightvol)>>8;
-
-		data = sfx[i+1];
-		samp[i+1].left += (data * leftvol)>>8;
-		samp[i+1].right += (data * rightvol)>>8;
-
-		data = sfx[i+2];
-		samp[i+2].left += (data * leftvol)>>8;
-		samp[i+2].right += (data * rightvol)>>8;
-
-		data = sfx[i+3];
-		samp[i+3].left += (data * leftvol)>>8;
-		samp[i+3].right += (data * rightvol)>>8;
-	}
-}
+#include "../../code/client/snd_mix_effects.h"	// (the effects: shared with the single player engine)
 
 
 // subroutinised to save code dup (called twice)	-ste
 //
 void ChannelPaint(channel_t *ch, sfx_t *sc, int count, int sampleOffset, int bufferOffset)
 {
+	static short	samples[PAINTBUFFER_SIZE];
+	const short		*src;
+	float			step = 1.0f;
+
 	switch (sc->eSoundCompressionMethod)
 	{
 		case ct_16:
 
-			S_PaintChannelFrom16		(ch, sc, count, sampleOffset, bufferOffset);
+			if ( ch->doppler && ch->dopplerScale > 1 )
+			{
+				// (played faster: every dopplerScale samples of the sound)
+				float ofst = sampleOffset;
+				step = ch->dopplerScale;
+				for ( int i = 0; i < count; i++ )
+				{
+					samples[i] = sc->pSoundData[ (int)ofst ];
+					ofst += step;
+				}
+				src = samples;
+			}
+			else
+			{
+				src = sc->pSoundData + sampleOffset;
+			}
 			break;
 
 		case ct_MP3:
 
-			S_PaintChannelFromMP3		(ch, sc, count, sampleOffset, bufferOffset);
+			S_FetchMP3Samples( ch, count, sampleOffset, samples );
+			src = samples;
 			break;
 
 		default:
 
 			assert(0);	// debug aid, ignored in release. FIXME: Should we ERR_DROP here for badness-catch?
-			break;
+			return;
 	}
+
+	S_PaintSource( ch, sc, src, count, sampleOffset, step, bufferOffset );
 }
 
 
@@ -396,6 +338,7 @@ void S_PaintChannels( int endtime, qboolean bReserve ) {
 	s_crossfade = (qboolean)( !bReserve && !CL_VideoRecording() );
 	s_crossfadeStart = s_paintedtime;
 	s_crossfadeEnd = endtime;
+	const int commitEnd = S_Mix_EffectsBegin( bReserve );
 
 //Com_Printf ("%i to %i\n", s_paintedtime, endtime);
 	while ( s_paintedtime < endtime ) {
@@ -432,6 +375,8 @@ void S_PaintChannels( int endtime, qboolean bReserve ) {
 				paintbuffer[i-s_paintedtime].right = 0;
 			}
 		}
+
+		S_Mix_EffectsChunkBegin( end - s_paintedtime );
 
 		// paint in the channels.
 		ch = s_channels;
@@ -528,6 +473,8 @@ void S_PaintChannels( int endtime, qboolean bReserve ) {
 			}
 		}
 */
+		S_Mix_EffectsChunkEnd( end, commitEnd );
+
 		// transfer out according to DMA format
 		S_TransferPaintBuffer( end );
 		s_paintedtime = end;

@@ -34,6 +34,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "snd_local.h"
 #include "snd_mp3.h"
 #include "snd_music.h"
+#include "qcommon/cm_public.h"	// (to look at the shape of the room)
 #include "client.h"
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
@@ -230,6 +231,8 @@ int			s_entityWavVol_back[MAX_GENTITIES];
 
 int			s_numChannels;			// Number of AL Sources == Num of Channels
 
+#include "../../code/client/snd_dma_effects.h"	// (binaural positioning and the room: shared with the single player engine)
+
 
 // instead of clearing a whole channel_t struct, we're going to skip the MP3SlidingDecodeBuffer[] buffer in the middle...
 //
@@ -327,6 +330,7 @@ void S_Init( void ) {
 	s_debugdynamic      = Cvar_Get( "s_debugdynamic",      "0",       CVAR_CHEAT );
 	s_doppler           = Cvar_Get( "s_doppler",           "1",       CVAR_ARCHIVE_ND );
 	s_initsound         = Cvar_Get( "s_initsound",         "1",       CVAR_ARCHIVE );
+	S_Effects_Register();	// s_hrtf, s_reverb, s_reverbLevel
 	s_khz               = Cvar_Get( "s_khz",               "0",       CVAR_ARCHIVE | CVAR_LATCH );	// 0 = rate of the output device (also 11, 22, 44, the values the sound menu saves), or a rate in Hz
 	s_language          = Cvar_Get( "s_language",          "english", CVAR_ARCHIVE | CVAR_NORESTART, "Sound language" );
 	s_lip_threshold_1   = Cvar_Get( "s_threshold1",        "0.5",     0 );
@@ -782,7 +786,10 @@ S_SpatializeOrigin
 Used for spatializing s_channels
 =================
 */
-void S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left_vol, int *right_vol, int channel)
+// returns qtrue if the sound is to be positioned binaurally, in which case left_vol and right_vol are the same (the
+// distance has been allowed for, the sides are the HRTF's business) and dirOut, if given, is the direction of the
+// sound relative to the listener (x right, y ahead, z up)
+static qboolean S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left_vol, int *right_vol, int channel, vec3_t dirOut = NULL)
 {
     float		dot;
     float		dist;
@@ -825,6 +832,24 @@ void S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left_vol, i
 
 	dot = -DotProduct(listener_axis[1], source_vec);
 
+	if (s_hrtfActive)
+	{
+		if (dirOut)
+		{
+			dirOut[0] = dot;										// right
+			dirOut[1] = DotProduct(listener_axis[0], source_vec);	// ahead
+			dirOut[2] = DotProduct(listener_axis[2], source_vec);	// up
+		}
+
+		scale = (1.0f - dist);
+		*right_vol = *left_vol = (int) (master_vol * scale);
+		if (*right_vol < 0)
+		{
+			*right_vol = *left_vol = 0;
+		}
+		return qtrue;
+	}
+
 	if (dma.channels == 1)	// || !dist_mult)
 	{ // no attenuation = no spatialization
 		rscale = SOUND_FMAXVOL;
@@ -860,6 +885,8 @@ void S_SpatializeOrigin (const vec3_t origin, float master_vol, int *left_vol, i
 	{
 		*left_vol = 0;
 	}
+
+	return qfalse;
 }
 
 // =======================================================================
@@ -1217,6 +1244,8 @@ void S_StopAllSounds(void) {
 	S_StopBackgroundTrack();
 
 	S_StopSounds();
+
+	S_Effects_StopAll();
 }
 
 /*
@@ -1407,6 +1436,8 @@ void S_AddLoopSounds (void)
 
 		// find the total contribution of all sounds of this type
 		left_total = right_total = 0;
+		vec3_t	dirTotal = { 0, 0, 0 };	// where they come from, for binaural positioning (louder ones count for more)
+		qboolean bBinaural = qfalse;
 
 		for ( j = i ; j < numLoopSounds ; j++) {
 			loop2 = &loopSounds[j];
@@ -1415,7 +1446,12 @@ void S_AddLoopSounds (void)
 			}
 			loop2->mergeFrame = loopFrame;	// don't check this again later
 
-			S_SpatializeOrigin( loop2->origin, loop2->volume, &left, &right, CHAN_AUTO);	//FIXME: Allow for volume change!!
+			vec3_t	dir;
+			if ( S_SpatializeOrigin( loop2->origin, loop2->volume, &left, &right, CHAN_AUTO, dir) )	//FIXME: Allow for volume change!!
+			{
+				bBinaural = qtrue;
+				VectorMA( dirTotal, (float)left, dir, dirTotal );
+			}
 
 			left_total += left;
 			right_total += right;
@@ -1436,6 +1472,7 @@ void S_AddLoopSounds (void)
 		ch->leftvol = left_total;
 		ch->rightvol = right_total;
 		ch->loopSound = qtrue;	// remove next frame
+		S_Effects_LoopChannel( ch, loop->sfx, bBinaural, dirTotal, loopFrame, loop->volume, left_total, right_total );
 		ch->thesfx = loop->sfx;
 
 		ch->doppler = loop->doppler;
@@ -1931,6 +1968,8 @@ void S_Respatialize( int entityNum, const vec3_t head, matrix3_t axis, int inwat
 		return;
 	}
 
+		S_Effects_BeginFrame( head, (qboolean)!!inwater, qfalse );	// (no scripted cutscenes in multiplayer)
+
 		listener_number = entityNum;
 		VectorCopy(head, listener_origin);
 		VectorCopy(axis[0], listener_axis[0]);
@@ -1949,9 +1988,10 @@ void S_Respatialize( int entityNum, const vec3_t head, matrix3_t axis, int inwat
 			}
 
 			// anything coming from the view entity will always be full volume
-			if (ch->entnum == listener_number) {
+			if (ch->entnum == listener_number || ch->entchannel == CHAN_VOICE_GLOBAL || ch->entchannel == CHAN_ANNOUNCER) {
 				ch->leftvol = ch->master_vol;
 				ch->rightvol = ch->master_vol;
+				S_Effects_ListenerChannel( ch );
 			} else {
 				if (ch->fixed_origin) {
 					VectorCopy( ch->origin, origin );
@@ -1959,7 +1999,9 @@ void S_Respatialize( int entityNum, const vec3_t head, matrix3_t axis, int inwat
 					VectorCopy( s_entityPosition[ ch->entnum ], origin );
 				}
 
-				S_SpatializeOrigin (origin, (float)ch->master_vol, &ch->leftvol, &ch->rightvol, ch->entchannel);
+				vec3_t	dir;
+				const qboolean binaural = S_SpatializeOrigin (origin, (float)ch->master_vol, &ch->leftvol, &ch->rightvol, ch->entchannel, dir);
+				S_Effects_PlacedChannel( ch, i, origin, binaural, dir );
 			}
 
 			//NOTE: Made it so that voice sounds keep playing, even out of range
@@ -1972,6 +2014,8 @@ void S_Respatialize( int entityNum, const vec3_t head, matrix3_t axis, int inwat
 
 		// add loopsounds
 		S_AddLoopSounds ();
+
+		S_Effects_EndFrame();
 
 	return;
 }

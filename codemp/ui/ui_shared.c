@@ -8526,19 +8526,16 @@ Hacks to fix issues with Team Arena menu scripts
 static void Item_MakeMouseDPIRow( itemDef_t *item );
 
 static void Item_ApplyHacks( itemDef_t *item ) {
-#if !defined(_WIN32) || ( defined(_WIN32) && defined(idx64) )
+	// The stock sound menu has a row for EAX, the hardware reverb of the sound cards of the time, which the sound
+	// system here doesn't use. Use the row for binaural positioning for headphones (s_hrtf) instead.
 	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "s_UseOpenAL" ) ) {
-		if( item->parent )
-		{
-			menuDef_t *parent = (menuDef_t *)item->parent;
-			VectorSet4( parent->disableColor, 0.5f, 0.5f, 0.5f, 1.0f );
-			item->disabled = qtrue;
-			// Just in case it had focus
-			item->window.flags &= ~WINDOW_MOUSEOVER;
-			Com_Printf( "Disabling eax field because current platform does not support EAX.\n");
-		}
+		item->cvar = String_Alloc( "s_hrtf" );
+		item->text = String_Alloc( "Headphone 3D (HRTF):" );
+		item->descText = String_Alloc( "Positions sounds in 3D around your head. For headphones, leave off for speakers." );
+		item->action = String_Alloc( "\"play\" \"sound/interface/button1.wav\" ; " );	// (it used to restart the sound system)
 	}
 
+#if !defined(_WIN32) || ( defined(_WIN32) && defined(idx64) )
 	if ( item->type == ITEM_TYPE_TEXT && item->window.name && !Q_stricmp( item->window.name, "eax_icon") && item->cvarTest && !Q_stricmp( item->cvarTest, "s_UseOpenAL" ) && item->enableCvar && (item->cvarFlags & CVAR_HIDE) ) {
 		if( item->parent )
 		{
@@ -8977,12 +8974,15 @@ Rows the stock menus have no place for:
 - Setup > Video: Anti-Aliasing, below Video Sync (ui_r_ext_multisample, applied with the other video settings)
 - Setup > Controls > Mouse (main menu): Mouse DPI, in the gap under Sensitivity
 - Setup > More Video (main menu and in game): the screen effects (Menu_AddEffectRows)
+- Setup > Sound (main menu and in game): Room Echo (s_reverb), under the row that was for EAX and is now for HRTF
+  (Item_ApplyHacks)
 ===============
 */
 static void Menu_AddShinRows( menuDef_t *menu )
 {
 	itemDef_t *videoSync = NULL, *sensitivity = NULL, *smoothMouse = NULL;
-	qboolean haveDPI = qfalse;
+	itemDef_t *effectsVolume = NULL, *musicVolume = NULL, *hrtf = NULL;
+	qboolean haveDPI = qfalse, haveReverb = qfalse;
 	int i;
 
 	for ( i = 0; i < menu->itemCount; i++ )
@@ -8998,6 +8998,14 @@ static void Menu_AddShinRows( menuDef_t *menu )
 			smoothMouse = item;
 		else if ( !Q_stricmp( item->cvar, "in_mouseDPI" ) )
 			haveDPI = qtrue;
+		else if ( !Q_stricmp( item->cvar, "s_volume" ) && !Q_stricmp( item->window.group, "sound" ) )
+			effectsVolume = item;
+		else if ( !Q_stricmp( item->cvar, "s_musicvolume" ) && !Q_stricmp( item->window.group, "sound" ) )
+			musicVolume = item;
+		else if ( !Q_stricmp( item->cvar, "s_hrtf" ) && !Q_stricmp( item->window.group, "sound" ) && item->type == ITEM_TYPE_MULTI )
+			hrtf = item;
+		else if ( !Q_stricmp( item->cvar, "s_reverb" ) )
+			haveReverb = qtrue;
 	}
 
 	if ( videoSync )
@@ -9034,6 +9042,21 @@ static void Menu_AddShinRows( menuDef_t *menu )
 		itemDef_t *row = Menu_CloneRow( menu, smoothMouse, dy, "highlight_mousedpi" );
 		if ( row )
 			Item_MakeMouseDPIRow( row );
+	}
+
+	if ( hrtf && effectsVolume && musicVolume && !haveReverb )
+	{
+		// one row further down, as far as the volume rows are apart
+		const float dy = musicVolume->window.rectClient.y - effectsVolume->window.rectClient.y;
+		itemDef_t *row = Menu_CloneRow( menu, hrtf, dy, "highlight_reverb" );
+		if ( row )
+		{
+			row->window.name = String_Alloc( "reverb" );
+			row->cvar = String_Alloc( "s_reverb" );
+			row->text = String_Alloc( "Room Echo (Reverb):" );
+			row->descText = String_Alloc( "Gives sounds the echo of the room they are in, muffles them behind walls and under water." );
+			Com_Printf( "Added a room echo field to %s.\n", menu->window.name );
+		}
 	}
 
 	Menu_AddEffectRows( menu );
