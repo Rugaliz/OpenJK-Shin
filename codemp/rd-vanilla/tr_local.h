@@ -1208,6 +1208,16 @@ extern cvar_t	*r_ext_texture_env_add;
 extern cvar_t	*r_ext_texture_filter_anisotropic;
 extern cvar_t	*r_alphaToCoverage;
 extern cvar_t	*r_sampleShading;
+extern cvar_t	*r_glsl;
+extern cvar_t	*r_dlightGLSL;
+extern cvar_t	*r_postDebug;
+extern cvar_t	*r_ssao;
+extern cvar_t	*r_ssaoRadius;
+extern cvar_t	*r_ssaoStrength;
+extern cvar_t	*r_bloom;
+extern cvar_t	*r_bloomThreshold;
+extern cvar_t	*r_bloomIntensity;
+extern cvar_t	*r_smaa;
 
 extern cvar_t	*r_environmentMapping;
 
@@ -1890,6 +1900,20 @@ void R_IssuePendingRenderCommands( void );
 void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
 void RE_SetColor( const float *rgba );
+
+// tr_glsl.cpp
+void	R_GLSL_Init( void );
+qboolean	R_GLSL_Available( void );
+int		R_GLSL_Generation( void );
+GLuint	R_GLSL_BuildProgram( const char *name, const char *vertexSource, const char *fragmentSource );
+void	R_GLSL_DeleteProgram( GLuint program );
+
+// tr_post.cpp
+void	R_Post_Init( void );
+void	RB_PostProcess( void );
+
+// tr_backend.cpp
+void	SetViewportAndScissor( void );
 void RE_Set2DAnchor( int anchor );
 float R_Get2DAnchorShiftPixels( void );
 void RE_StretchPic ( float x, float y, float w, float h,

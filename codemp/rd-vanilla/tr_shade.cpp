@@ -432,6 +432,8 @@ static void DrawMultitextured( shaderCommands_t *input, int stage ) {
 	GL_SelectTexture( 0 );
 }
 
+#include "renderer/tr_dlight_glsl.h"
+
 /*
 ===================
 ProjectDlightTexture
@@ -1863,7 +1865,11 @@ void RB_StageIteratorGeneric( void )
 	//
 	if ( tess.dlightBits && tess.shader->sort <= SS_OPAQUE
 		&& !(tess.shader->surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) ) {
-		if (r_dlightStyle->integer>0)
+		if (r_dlightGLSL->integer && R_GLSL_Available() && ProjectDlightGLSL())
+		{
+			// done
+		}
+		else if (r_dlightStyle->integer>0)
 		{
 			ProjectDlightTexture2();
 		}

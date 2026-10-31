@@ -1,6 +1,8 @@
-# Screen effects and shader lighting (single player)
+# Screen effects and shader lighting
 
-The single player renderer (`code/rd-vanilla`; the Vulkan renderer, `docs/vulkan-renderer.md`, has the same effects with the same settings) is the original fixed function OpenGL 1.x one. It can now also run
+The renderers of all four games (single player `code/rd-vanilla` and its Vulkan version, `docs/vulkan-renderer.md`,
+and the multiplayer one, `codemp/rd-vanilla`, for Jedi Academy and Jedi Outcast) are the original fixed function
+OpenGL 1.x ones. They can now also run
 GLSL shader programs where that is useful, and every use keeps the original way of drawing as its fallback: if the
 graphics card or driver does not support what is needed, or a shader does not build, the old drawing is used and
 nothing else changes. All of it is off by default, nothing changes unless you turn it on. The menu is the easy way; the settings can also be typed in the
@@ -9,7 +11,10 @@ console (the key left of 1, or Shift+Esc) or put in your config file, and they a
 You do not need the console: **Setup > More Video** has a row for each of them (Ambient Occlusion, Bloom, SMAA Edge
 Smoothing, Shader Dynamic Lights), which take effect at once. A row only shows up if what it needs is there (SMAA needs
 OpenGL 3.3, the rest OpenGL 2.0). To make room, the rows of that page are a little closer together than before, and
-in Jedi Academy the panel is taller.
+in Jedi Academy the panel is taller. Jedi Academy multiplayer has the rows on the More Video page of Setup both in the
+main menu (where the slider for the brightness moves up a little to make room) and in the game menu. Jedi Outcast
+multiplayer uses the menus that came with the game, which can't be changed: there it is the console or the config
+file. (The other Jedi Academy multiplayer renderer, `rd-rend2`, has effects of its own and does not use these.)
 
 `r_glsl 0` (then `vid_restart`) turns all of it off. The start-up log says what was found: `...using GLSL`,
 `...using post processing`.
@@ -46,4 +51,11 @@ light no longer shows the triangles. The old look is one setting away, and also 
 
 SMAA is Subpixel Morphological Antialiasing by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and
 Diego Gutierrez (https://github.com/iryoku/smaa). Its shader code and lookup textures are used as they published
-them, under the MIT license (the notice is in `code/rd-vanilla/tr_smaa_data.h`).
+them, under the MIT license (the notice is in `shared/renderer/tr_smaa_data.h`).
+
+## The code
+
+The OpenGL renderers of single player and multiplayer share it: `shared/renderer/tr_glsl.h` (loading the GLSL
+functions, building programs), `shared/renderer/tr_post.h` (the screen effects) and `shared/renderer/tr_dlight_glsl.h`
+(the shader dynamic lights), each included once by a short file of each renderer (`tr_glsl.cpp`, `tr_post.cpp`,
+`tr_shade.cpp`) after its own `tr_local.h`. The Vulkan renderer has its own versions in `vk_post.cpp`.

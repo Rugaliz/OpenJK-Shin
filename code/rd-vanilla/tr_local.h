@@ -994,12 +994,6 @@ typedef struct {
 	// Handle to the Glow Effect Pixel Shader. - AReis
 	GLuint					glowPShader;
 
-	// The GLSL dynamic light pass (ProjectDlightGLSL in tr_shade.cpp), built when first needed. The program is 0
-	// until then, and dlightProgramFailed stops a build that failed from being tried again for every surface.
-	GLuint					dlightProgram;
-	GLint					dlightUniforms[5];
-	qboolean				dlightProgramFailed;
-
 	// Image the glowing objects are rendered to. - AReis
 	GLuint					screenGlow;
 
@@ -1301,6 +1295,7 @@ void	GL_TextureMode( const char *string );
 // tr_glsl.cpp
 void	R_GLSL_Init( void );
 qboolean	R_GLSL_Available( void );
+int		R_GLSL_Generation( void );
 GLuint	R_GLSL_BuildProgram( const char *name, const char *vertexSource, const char *fragmentSource );
 void	R_GLSL_DeleteProgram( GLuint program );
 
