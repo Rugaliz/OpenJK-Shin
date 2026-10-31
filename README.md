@@ -51,6 +51,10 @@ console variable is in brackets (you can type those in the console, opened with 
 - **The same game at any frame rate**: footsteps, the bobbing of the view, leaning and a few other things used to run
   faster or slower with the frame rate. They don't any more.
 - **Smoother movement**: running had a slight wobble twenty times a second. It's gone.
+- **Effects keep their density at any frame rate** (all games): some effects are started every frame for as long as
+  something goes on (the glow under a pickup in multiplayer, saber sparks), so at 500 frames per second there were four
+  times as many as at 125, enough to stop other things from being drawn in a big fight. They are now started about as
+  often as at 125 frames per second.
 
 ### Picture quality
 - **Smooth edges**: Setup > Video > **Anti-Aliasing** (Off, 2x, 4x, 8x) takes the jagged "staircase" off the edges of
