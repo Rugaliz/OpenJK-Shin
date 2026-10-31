@@ -104,6 +104,16 @@ cvar_t	*r_ext_texture_env_add;
 cvar_t	*r_ext_texture_filter_anisotropic;
 cvar_t	*r_alphaToCoverage;
 cvar_t	*r_sampleShading;
+cvar_t	*r_glsl;
+cvar_t	*r_dlightGLSL;
+cvar_t	*r_postDebug;
+cvar_t	*r_ssao;
+cvar_t	*r_ssaoRadius;
+cvar_t	*r_ssaoStrength;
+cvar_t	*r_bloom;
+cvar_t	*r_bloomThreshold;
+cvar_t	*r_bloomIntensity;
+cvar_t	*r_smaa;
 cvar_t	*r_gammaShaders;
 
 cvar_t	*r_environmentMapping;
@@ -759,6 +769,9 @@ static void GLimp_InitExtensions( void )
 		g_bDynamicGlowSupported = false;
 		ri.Cvar_Set( "r_DynamicGlow","0" );
 	}
+
+	R_GLSL_Init();
+	R_Post_Init();
 
 #if !defined(__APPLE__)
 	qglStencilOpSeparate = (PFNGLSTENCILOPSEPARATEPROC)ri.GL_GetProcAddress("glStencilOpSeparate");
@@ -1632,7 +1645,17 @@ void R_Register( void )
 	r_alphaToCoverage					= ri.Cvar_Get( "r_alphaToCoverage",					"1",						CVAR_ARCHIVE_ND, "Smooth the edges of alpha tested surfaces (leaves, fences...) when multisampling" );
 	r_sampleShading						= ri.Cvar_Get( "r_sampleShading",					"0",						CVAR_ARCHIVE_ND|CVAR_LATCH, "0 off, up to 1 = shade every sample (needs GL_ARB_sample_shading, slow)" );
 	ri.Cvar_CheckRange( r_sampleShading, 0, 1, qfalse );
-	Jobs::SetThreads( ri.Cvar_Get( "com_jobThreads", "-1", CVAR_ARCHIVE_ND, "Worker threads for loading: -1 automatic, 0 none" )->integer );	// (the renderer has a pool of its own, see docs/parallel-work.md)
+	Jobs::SetThreads( ri.Cvar_Get( "com_jobThreads", "-1", CVAR_ARCHIVE_ND, "Worker threads for loading: -1 automatic, 0 none" )->integer );
+	r_glsl								= ri.Cvar_Get( "r_glsl",							"1",						CVAR_ARCHIVE_ND|CVAR_LATCH, "Use GLSL shader programs where the renderer has them (needs OpenGL 2.0)" );
+	r_dlightGLSL						= ri.Cvar_Get( "r_dlightGLSL",						"0",						CVAR_ARCHIVE_ND, "1 = dynamic lights as a shader pass that lights every pixel by distance and surface angle" );
+	r_postDebug							= ri.Cvar_Get( "r_postDebug",						"0",						CVAR_NONE, "1 = run the post processing plumbing with no effect, 2 = show the ambient occlusion alone" );
+	r_ssao								= ri.Cvar_Get( "r_ssao",							"0",						CVAR_ARCHIVE_ND, "1 = ambient occlusion, darkens corners and where things meet" );
+	r_ssaoRadius						= ri.Cvar_Get( "r_ssaoRadius",						"48",						CVAR_ARCHIVE_ND, "How far from a pixel, in units, a surface still shades it" );
+	r_ssaoStrength						= ri.Cvar_Get( "r_ssaoStrength",					"2",						CVAR_ARCHIVE_ND, "" );
+	r_bloom								= ri.Cvar_Get( "r_bloom",							"0",						CVAR_ARCHIVE_ND, "1 = a soft glow around the bright parts of the picture" );
+	r_bloomThreshold					= ri.Cvar_Get( "r_bloomThreshold",					"0.8",						CVAR_ARCHIVE_ND, "How bright, 0 to 1, a pixel has to be to glow" );
+	r_bloomIntensity					= ri.Cvar_Get( "r_bloomIntensity",					"0.5",						CVAR_ARCHIVE_ND, "" );
+	r_smaa								= ri.Cvar_Get( "r_smaa",							"0",						CVAR_ARCHIVE_ND, "1 = SMAA, smooths edges without softening the rest of the picture (needs OpenGL 3.3)" );	// (the renderer has a pool of its own, see docs/parallel-work.md)
 	r_gammaShaders						= ri.Cvar_Get( "r_gammaShaders",					"0",						CVAR_ARCHIVE_ND|CVAR_LATCH, "" );
 	r_environmentMapping				= ri.Cvar_Get( "r_environmentMapping",				"1",						CVAR_ARCHIVE_ND, "" );
 	r_DynamicGlow						= ri.Cvar_Get( "r_DynamicGlow",					"0",						CVAR_ARCHIVE_ND, "" );

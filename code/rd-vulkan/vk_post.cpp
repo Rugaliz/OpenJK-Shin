@@ -26,7 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "../server/exe_headers.h"
 #include "../rd-vanilla/tr_local.h"
-#include "../rd-vanilla/tr_smaa_data.h"
+#include "renderer/tr_smaa_data.h"
 #include "vk_priv.h"
 #include "vk_spirv.h"
 #include <zlib.h>
@@ -104,14 +104,21 @@ GLSL AS THE RENDERER ASKS FOR IT: the only program is the dynamic light shader, 
 */
 
 static qboolean glslAvailable;
+static int glslGeneration;
 
 qboolean R_GLSL_Available( void )
 {
 	return glslAvailable;
 }
 
+int R_GLSL_Generation( void )
+{
+	return glslGeneration;
+}
+
 void R_GLSL_Init( void )
 {
+	glslGeneration++;
 	glslAvailable = r_glsl->integer ? qtrue : qfalse;
 	ri.Cvar_Get( "r_glslAvail", "0", 0 );
 	ri.Cvar_Set( "r_glslAvail", glslAvailable ? "1" : "0" );	// what the menus look at to show the rows for what needs it

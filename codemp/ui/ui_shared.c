@@ -8762,7 +8762,7 @@ static void Item_MakeMouseDPIRow( itemDef_t *item )
 Menu_CloneRow
 
 Adds a copy of a row of a menu, moved down by dy, with a copy of the highlight its mouseEnter shows (moved the same
-way, named newHighlight). Returns NULL if there is no room.
+way, named newHighlight; none if newHighlight is NULL). Returns NULL if there is no room.
 ===============
 */
 static itemDef_t *Menu_CloneRow( menuDef_t *menu, const itemDef_t *src, float dy, const char *newHighlight )
@@ -8785,7 +8785,7 @@ static itemDef_t *Menu_CloneRow( menuDef_t *menu, const itemDef_t *src, float dy
 	menu->items[menu->itemCount++] = row;
 
 	// the highlight bar of a row is an item of its own, at the place of the row
-	show = src->mouseEnter ? strstr( src->mouseEnter, "highlight" ) : NULL;
+	show = ( src->mouseEnter && newHighlight ) ? strstr( src->mouseEnter, "highlight" ) : NULL;
 	if ( show )
 	{
 		char name[64];
@@ -8820,11 +8820,163 @@ static itemDef_t *Menu_CloneRow( menuDef_t *menu, const itemDef_t *src, float dy
 
 /*
 ===============
+Menu_AddEffectRows
+
+The "More Video" page of Setup (main menu and in game) has no room for more rows. Make room for one row for each of
+the screen effects and the shader dynamic lights the renderer can do, by bringing the rows closer, with one highlight
+bar for all of them that is put where the row is. In the main menu, the slider for the brightness moves up a little
+and the button for the driver info down to the end. Does nothing if the page is not the one of the stock menus.
+===============
+*/
+static void Menu_AddEffectRows( menuDef_t *menu )
+{
+	static const struct {
+		const char	*name, *cvar, *avail, *text, *desc;
+	} effects[] = {
+		{ "ssao", "r_ssao", "r_postAvail", "Ambient Occlusion:", "Soft shading in corners and where things meet. Adds depth." },
+		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
+		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
+		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on." },
+	};
+	itemDef_t	*rows[24];
+	int			numRows = 0;
+	itemDef_t	*brightness = NULL, *marks = NULL, *driverButton = NULL, *driverGlow = NULL, *panel = NULL, *bar = NULL;
+	int			barIndex = -1;
+	float		x, w, firstY, pitch, barHeight;
+	const char	*barName = "highlight_video2";
+	char		name[64];
+	const char	*show;
+	int			i, len;
+	size_t		e;
+
+	for ( i = 0; i < menu->itemCount; i++ )
+	{
+		itemDef_t *item = menu->items[i];
+
+		if ( !item->window.name )
+			continue;
+		if ( !Q_stricmp( item->window.name, barName ) )
+			return;	// (done already)
+		if ( item->window.group && !Q_stricmp( item->window.group, "video2" ) )
+		{
+			if ( !Q_stricmp( item->window.name, "brightness" ) )
+				brightness = item;
+			else if ( !Q_stricmp( item->window.name, "advancedvideo" ) && item->type == ITEM_TYPE_BUTTON )
+				driverButton = item;
+			else if ( ( item->type == ITEM_TYPE_MULTI || item->type == ITEM_TYPE_SLIDER ) && numRows < 16 )
+			{
+				rows[numRows++] = item;
+				if ( !Q_stricmp( item->window.name, "wall_marks" ) )
+					marks = item;
+			}
+		}
+		else if ( !Q_stricmp( item->window.name, "advancedvideobutton_glow" ) )
+			driverGlow = item;
+		else if ( !Q_stricmp( item->window.name, "setup_background" ) )
+			panel = item;
+	}
+	if ( !brightness || !marks || marks->type != ITEM_TYPE_MULTI || !marks->typeData.data || !marks->mouseEnter || numRows < 3 )
+		return;
+
+	if ( driverButton && !Q_stricmp( menu->window.name, "setup_menu" ) )
+	{
+		// main menu: rows 14 apart under the slider for the brightness, the driver info at the end
+		x = 260; w = 340; firstY = 281; pitch = 13; barHeight = 14;
+	}
+	else if ( !driverButton && !Q_stricmp( menu->window.name, "ingame_setup" ) )
+	{
+		// in game: rows 20 apart from 183 under the slider for the brightness (which ends at 161), the panel ends at 291
+		x = 220; w = 300; firstY = 174; pitch = 16; barHeight = 16;
+	}
+	else
+	{
+		return;
+	}
+
+	// the bar: a copy of the one of the row of the wall marks, drawn before (under) the rows, so it goes right after it
+	show = strstr( marks->mouseEnter, "highlight" );
+	if ( !show )
+		return;
+	for ( len = 0; show[len] && show[len] != '"' && show[len] != ' ' && show[len] != ';' && len < (int)sizeof( name ) - 1; len++ )
+		name[len] = show[len];
+	name[len] = '\0';
+	for ( i = 0; i < menu->itemCount; i++ )
+	{
+		if ( menu->items[i]->window.name && !Q_stricmp( menu->items[i]->window.name, name ) )
+		{
+			barIndex = i;
+			break;
+		}
+	}
+	if ( barIndex < 0 || menu->itemCount >= MAX_MENUITEMS - (int)ARRAY_LEN( effects ) - 1 )
+		return;
+
+	bar = (itemDef_t *)UI_Alloc( sizeof( itemDef_t ) );
+	memcpy( bar, menu->items[barIndex], sizeof( itemDef_t ) );
+	bar->typeData.data = NULL;
+	Item_ValidateTypeData( bar );
+	bar->window.name = String_Alloc( barName );
+	memmove( &menu->items[barIndex + 2], &menu->items[barIndex + 1], ( menu->itemCount - barIndex - 1 ) * sizeof( menu->items[0] ) );
+	menu->items[barIndex + 1] = bar;
+	menu->itemCount++;
+
+	// one new row for each effect that can be used, a copy of the row of the wall marks (an off and on row)
+	for ( e = 0; e < ARRAY_LEN( effects ) && numRows < (int)ARRAY_LEN( rows ); e++ )
+	{
+		itemDef_t *row;
+
+		if ( !DC->getCVarValue( effects[e].avail ) )
+			continue;
+		row = Menu_CloneRow( menu, marks, 0, NULL );
+		if ( !row )
+			break;
+		row->window.name = String_Alloc( effects[e].name );
+		row->cvar = String_Alloc( effects[e].cvar );
+		row->text = String_Alloc( effects[e].text );
+		row->descText = String_Alloc( effects[e].desc );
+		row->cvarTest = NULL;
+		row->cvarFlags = 0;
+		rows[numRows++] = row;
+	}
+
+	if ( driverButton )
+	{
+		// (the two lines of text above the slider end at 262)
+		const float driverY = firstY + numRows * pitch + 2;
+
+		brightness->window.rectClient.y = firstY - pitch - 2;
+		brightness->mouseEnter = String_Alloc( va( "\"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ; \"show\" \"%s\" ; ",
+			barName, x, brightness->window.rectClient.y, w, barHeight, barName ) );
+		brightness->mouseExit = String_Alloc( va( "\"hide\" \"%s\" ; ", barName ) );
+
+		driverButton->window.rectClient.y = driverY;
+		if ( driverGlow )
+			driverGlow->window.rectClient.y = driverY;
+		if ( panel && panel->window.rectClient.y + panel->window.rectClient.h < driverY + barHeight + 4 )
+			panel->window.rectClient.h = driverY + barHeight + 4 - panel->window.rectClient.y;
+	}
+
+	for ( i = 0; i < numRows; i++ )
+	{
+		const float y = firstY + i * pitch;
+
+		rows[i]->window.rectClient.y = y;
+		rows[i]->window.rectClient.h = pitch;
+		rows[i]->mouseEnter = String_Alloc( va( "\"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ; \"show\" \"%s\" ; ",
+			barName, x, y, w, barHeight, barName ) );
+		rows[i]->mouseExit = String_Alloc( va( "\"hide\" \"%s\" ; ", barName ) );
+	}
+	Com_Printf( "More Video of %s: %d rows\n", menu->window.name, numRows );
+}
+
+/*
+===============
 Menu_AddShinRows
 
 Rows the stock menus have no place for:
 - Setup > Video: Anti-Aliasing, below Video Sync (ui_r_ext_multisample, applied with the other video settings)
 - Setup > Controls > Mouse (main menu): Mouse DPI, in the gap under Sensitivity
+- Setup > More Video (main menu and in game): the screen effects (Menu_AddEffectRows)
 ===============
 */
 static void Menu_AddShinRows( menuDef_t *menu )
@@ -8883,6 +9035,8 @@ static void Menu_AddShinRows( menuDef_t *menu )
 		if ( row )
 			Item_MakeMouseDPIRow( row );
 	}
+
+	Menu_AddEffectRows( menu );
 }
 
 /*
