@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "FxScheduler.h"
 #include "qcommon/q_shared.h"
 
+#include "qcommon/fx_spawn_limit.h"
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -814,6 +815,14 @@ void CFxScheduler::PlayEffect( int id, vec3_t origin, matrix3_t axis, const int 
 		return;
 	}
 #endif
+
+	// an effect asked for again at the same place within 8 msec (a game module plays some every frame) is left out, so
+	// that how many there are does not grow with the frame rate (see fx_spawn_limit.h)
+	static CFxSpawnLimit<FX_MAX_EFFECTS> spawnLimit;
+	if ( !iLoopTime && origin && !spawnLimit.Allow( id, origin, boltInfo, theFxHelper.mTime ) )
+	{
+		return;
+	}
 
 	int						modelNum = 0, boltNum = -1;
 	int						entityNum = -1;

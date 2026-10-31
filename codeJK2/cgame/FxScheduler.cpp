@@ -39,6 +39,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "cg_media.h"
 
 #include "qcommon/safe/string.h"
+#include "qcommon/fx_spawn_limit.h"
 #include <cmath>
 
 
@@ -856,6 +857,14 @@ void CFxScheduler::PlayEffect( int id, vec3_t origin, vec3_t axis[3], const int 
 
 	// Don't bother scheduling the effect if the system is currently frozen
 	if ( fx_freeze.integer )
+	{
+		return;
+	}
+
+	// an effect asked for again at the same place within 8 msec (a game module plays some every frame) is left out, so
+	// that how many there are does not grow with the frame rate (see fx_spawn_limit.h)
+	static CFxSpawnLimit<FX_MAX_EFFECTS> spawnLimit;
+	if ( origin && !spawnLimit.Allow( id, origin, ( boltInfo > 0 ) ? boltInfo : -2 - entNum, theFxHelper.mTime ) )
 	{
 		return;
 	}
