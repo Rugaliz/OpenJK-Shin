@@ -836,7 +836,12 @@ void RB_StageIteratorSky( void ) {
 	// by the generic shader routine
 	R_BuildCloudData( &tess );
 
-	RB_StageIteratorGeneric();
+	// (a sky without cloud layers has nothing to draw here; drawing nothing locked an empty vertex array, a GL error
+	// every frame)
+	if ( tess.numIndexes && tess.numVertexes )
+	{
+		RB_StageIteratorGeneric();
+	}
 
 	// draw the inner skybox
 
