@@ -265,6 +265,15 @@ function Test-Dependencies {
     }
     Write-Ok 'zlib, libpng, libjpeg: the copies in lib\ are used'
 
+    # --- Vulkan SDK (optional: without it the single player games have no Vulkan renderer and use OpenGL) ---
+    $vulkanSdk = [Environment]::GetEnvironmentVariable('VULKAN_SDK')
+    if ($vulkanSdk -and (Test-Path (Join-Path $vulkanSdk 'Include\vulkan\vulkan.h'))) {
+        Write-Ok "Vulkan SDK ($vulkanSdk)"
+    } else {
+        Write-Warn 'Vulkan SDK not found: the Vulkan renderer of the single player games is not built, they use OpenGL'
+        Write-Info 'optional: winget install KhronosGroup.VulkanSDK (or https://vulkan.lunarg.com/), then open a new PowerShell'
+    }
+
     # --- SDL3 is downloaded by CMake ---
     if (Test-Internet) {
         Write-Ok 'internet connection (SDL3 is downloaded and built the first time)'
