@@ -4,7 +4,9 @@ Setup > Sound > **HEADPHONE 3D (HRTF)** (cvar `s_hrtf`, default off) positions t
 your head when you are using headphones. On speakers leave it off.
 
 The stock sound menu has a row for EAX, the hardware reverb of old Creative sound cards, which OpenJK's sound system
-doesn't use. That row is used for this option instead.
+doesn't use. That row is used for this option instead. It works the same in both games, single player and
+multiplayer; the menus of Jedi Outcast multiplayer are those of the original game (QVM files), so there it is only in
+the console (`s_hrtf 1`).
 
 ## How it works
 
@@ -21,11 +23,11 @@ responses for its direction, relative to where the player is looking, including 
   sample by sample, over as long as the last change took to come, so a sound that keeps moving (or a player who keeps
   turning) glides instead of stepping at each frame. The change is worked out from the sample time, so when the mixer
   mixes the same moment again in its next update (it mixes ahead) it comes out the same as before.
-* `S_SpatializeOrigin` (snd_dma.cpp) works out the direction of each sound, `S_PaintChannelHRTF` (snd_mix.cpp) does the
-  filtering while mixing. Distance attenuation is unchanged.
+* `S_SpatializeOrigin` (snd_dma.cpp) works out the direction of each sound, `S_PaintChannelHRTF` (snd_mix_effects.h)
+  does the filtering while mixing. Distance attenuation is unchanged.
 * The cost is a convolution of about 140 taps per ear for each positioned sound that is playing (both ears are done
   in one pass), twice that while it is changing direction. So that a big fight can't eat the frame rate, only the 32
-  loudest positioned sounds are filtered binaurally (`S_HrtfLimit`, snd_dma.cpp); the rest, which are quieter than
+  loudest positioned sounds are filtered binaurally (`S_HrtfLimit`, snd_dma_effects.h); the rest, which are quieter than
   those, are panned as they are with `s_hrtf 0`. A sound that is filtered binaurally counts as half as loud again when
   they are ranked, so it doesn't change between the two as volumes go up and down.
 * The loudness is matched to the old panning, on average over all directions, so switching it on doesn't change the

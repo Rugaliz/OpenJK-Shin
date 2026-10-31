@@ -89,6 +89,8 @@ if(BuildSPEngine OR BuildJK2SPEngine)
 		"${SPDir}/client/snd_ambient.h"
 		"${SPDir}/client/snd_hrtf.h"
 		"${SPDir}/client/snd_reverb.h"
+		"${SPDir}/client/snd_dma_effects.h"
+		"${SPDir}/client/snd_mix_effects.h"
 		"${SPDir}/client/snd_local.h"
 		"${SPDir}/client/snd_music.h"
 		"${SPDir}/client/snd_public.h"
