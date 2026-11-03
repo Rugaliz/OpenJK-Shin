@@ -1541,15 +1541,23 @@ qboolean CL_ReadyToSendPacket( void ) {
 	}
 
 	// check for exceeding cl_maxpackets
-	if ( cl_maxpackets->integer < 20 ) {
+	// (15 and 30 are what the connection speed settings of the original menus set, of the time of modems: they hold
+	// the commands back for up to 4 frames at 125 frames a second, so they count as the default)
+	int maxPackets = cl_maxpackets->integer;
+	if ( maxPackets == 15 || maxPackets == 30 ) {
+		maxPackets = 125;
+	}
+	else if ( cl_maxpackets->integer < 20 ) {
 		Cvar_Set( "cl_maxpackets", "20" );
+		maxPackets = 20;
 	}
 	else if ( cl_maxpackets->integer > 1000 ) {
 		Cvar_Set( "cl_maxpackets", "1000" );
+		maxPackets = 1000;
 	}
 	oldPacketNum = (clc.netchan.outgoingSequence - 1) & PACKET_MASK;
 	delta = cls.realtime -  cl.outPackets[ oldPacketNum ].p_realtime;
-	if ( delta < 1000 / cl_maxpackets->integer ) {
+	if ( delta < 1000 / maxPackets ) {
 		// the accumulated commands will go out in the next packet
 		return qfalse;
 	}

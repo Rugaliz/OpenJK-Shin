@@ -8535,6 +8535,13 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 		item->action = String_Alloc( "\"play\" \"sound/interface/button1.wav\" ; " );	// (it used to restart the sound system)
 	}
 
+	// The Data Rate row of the server browser offers the connection speeds of 2003 (56K, ISDN, LAN/Cable), which only
+	// hold back the snapshots today: the default (100000) is right for any connection, so the row is hidden.
+	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "rate" ) ) {
+		item->disabled = item->disabledHidden = qtrue;
+		item->window.flags &= ~WINDOW_MOUSEOVER;
+	}
+
 #if !defined(_WIN32) || ( defined(_WIN32) && defined(idx64) )
 	if ( item->type == ITEM_TYPE_TEXT && item->window.name && !Q_stricmp( item->window.name, "eax_icon") && item->cvarTest && !Q_stricmp( item->cvarTest, "s_UseOpenAL" ) && item->enableCvar && (item->cvarFlags & CVAR_HIDE) ) {
 		if( item->parent )
