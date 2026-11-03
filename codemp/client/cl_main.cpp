@@ -61,6 +61,7 @@ cvar_t	*cl_maxpackets;
 cvar_t	*cl_packetdup;
 cvar_t	*cl_timeNudge;
 cvar_t	*cl_showTimeDelta;
+cvar_t	*cl_timeSync;
 cvar_t	*cl_freezeDemo;
 
 cvar_t	*cl_shownet;
@@ -2768,6 +2769,7 @@ void CL_Init( void ) {
 	cl_shownet = Cvar_Get ("cl_shownet", "0", CVAR_TEMP );
 	cl_showSend = Cvar_Get ("cl_showSend", "0", CVAR_TEMP );
 	cl_showTimeDelta = Cvar_Get ("cl_showTimeDelta", "0", CVAR_TEMP );
+	cl_timeSync = Cvar_Get ("cl_timeSync", "1", CVAR_ARCHIVE_ND, "1 = draw just far enough behind the newest snapshot for the connection, 0 = the original timing" );
 	cl_freezeDemo = Cvar_Get ("cl_freezeDemo", "0", CVAR_TEMP );
 	rcon_client_password = Cvar_Get ("rconPassword", "", CVAR_TEMP, "Password for remote console access" );
 	cl_activeAction = Cvar_Get( "activeAction", "", CVAR_TEMP );
