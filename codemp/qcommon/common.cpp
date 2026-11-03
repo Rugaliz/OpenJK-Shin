@@ -1153,6 +1153,45 @@ static void Com_CatchError ( int code )
 }
 
 /*
+===============
+Com_MigrateConfig
+
+Config files written by older versions saved the old defaults, which cannot be told apart from a deliberate choice, so
+new defaults would never reach anybody who has played before. They are changed once, only where they still hold an old
+default (or the value of a setting of the original menus that is of no use any more).
+
+Version 1: the network settings of the time of modems. rate 4000, 5000 and 25000 (the connection speeds of the
+original menus; 25000 was also the default) become 100000, cl_maxpackets 15, 30 (the same menus) and 63 (the old
+default) become 125, and the sv_clientRate of a server 50000 (the old default) becomes 100000.
+===============
+*/
+#define COM_CONFIG_VERSION	1
+
+static void Com_MigrateConfig( void ) {
+	cvar_t *version = Cvar_Get( "com_configVersion", "0", CVAR_ARCHIVE_ND );
+	const char *value;
+
+	if ( version->integer >= COM_CONFIG_VERSION ) {
+		return;
+	}
+
+	// (the cvars are not registered yet, only what the config files set is there: nothing is made that wasn't)
+	value = Cvar_VariableString( "rate" );
+	if ( !strcmp( value, "4000" ) || !strcmp( value, "5000" ) || !strcmp( value, "25000" ) ) {
+		Cvar_Set( "rate", "100000" );
+	}
+	value = Cvar_VariableString( "cl_maxpackets" );
+	if ( !strcmp( value, "15" ) || !strcmp( value, "30" ) || !strcmp( value, "63" ) ) {
+		Cvar_Set( "cl_maxpackets", "125" );
+	}
+	if ( !strcmp( Cvar_VariableString( "sv_clientRate" ), "50000" ) ) {
+		Cvar_Set( "sv_clientRate", "100000" );
+	}
+
+	Cvar_Set( "com_configVersion", va( "%d", COM_CONFIG_VERSION ) );
+}
+
+/*
 =================
 Com_Init
 =================
@@ -1222,6 +1261,8 @@ void Com_Init( char *commandLine ) {
 		Cmd_SetCommandCompletionFunc( "writeconfig", Cmd_CompleteCfgName );
 
 		Com_ExecuteCfg();
+
+		Com_MigrateConfig();
 
 		// override anything from the config files with command line args
 		Com_StartupVariable( NULL );

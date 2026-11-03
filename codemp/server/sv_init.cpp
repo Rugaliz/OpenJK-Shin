@@ -960,7 +960,7 @@ void SV_Init (void) {
 	//cvar_t	*sv_clientRate;
 	sv_ratePolicy = Cvar_Get( "sv_ratePolicy", "1", CVAR_ARCHIVE_ND, "Determines which policy of enforcement is used for client's \"rate\" cvar" );
 	Cvar_CheckRange(sv_ratePolicy, 1, 2, qtrue);
-	sv_clientRate = Cvar_Get( "sv_clientRate", "50000", CVAR_ARCHIVE_ND);
+	sv_clientRate = Cvar_Get( "sv_clientRate", "100000", CVAR_ARCHIVE_ND);	// (was 50000: too little for 40 snapshots a second in a big fight)
 	sv_minRate = Cvar_Get ("sv_minRate", "0", CVAR_ARCHIVE_ND | CVAR_SERVERINFO, "Min bandwidth rate allowed on server. Use 0 for unlimited." );
 	sv_maxRate = Cvar_Get ("sv_maxRate", "0", CVAR_ARCHIVE_ND | CVAR_SERVERINFO, "Max bandwidth rate allowed on server. Use 0 for unlimited." );
 	sv_minPing = Cvar_Get ("sv_minPing", "0", CVAR_ARCHIVE_ND | CVAR_SERVERINFO );
