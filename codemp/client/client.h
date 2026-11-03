@@ -407,6 +407,8 @@ extern	cvar_t	*cl_showSend;
 extern	cvar_t	*cl_timeNudge;
 extern	cvar_t	*cl_showTimeDelta;
 extern	cvar_t	*cl_timeSync;
+
+const char *CL_UserinfoString( void );
 extern	cvar_t	*cl_freezeDemo;
 
 extern	cvar_t	*cl_yawspeed;

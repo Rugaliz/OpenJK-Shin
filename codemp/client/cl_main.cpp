@@ -1576,6 +1576,28 @@ void CL_InitDownloads(void) {
 
 /*
 =================
+CL_UserinfoString
+
+The userinfo sent to the server. The "rate" values of the connection speed settings of the original menus (56K,
+ISDN, LAN/Cable: 4000, 5000 and 25000) are of the time of modems; today they only hold back the snapshots of a big
+fight, so they are sent as the current default (the Jedi Outcast multiplayer menus, which can't be changed, still
+set them).
+=================
+*/
+const char *CL_UserinfoString( void ) {
+	static char info[MAX_INFO_STRING];
+	const char *rate;
+
+	Q_strncpyz( info, Cvar_InfoString( CVAR_USERINFO ), sizeof( info ) );
+	rate = Info_ValueForKey( info, "rate" );
+	if ( !strcmp( rate, "4000" ) || !strcmp( rate, "5000" ) || !strcmp( rate, "25000" ) ) {
+		Info_SetValueForKey( info, "rate", "100000" );
+	}
+	return info;
+}
+
+/*
+=================
 CL_CheckForResend
 
 Resend a connect message if the last one has timed out
@@ -1618,7 +1640,7 @@ void CL_CheckForResend( void ) {
 		// sending back the challenge
 		port = (int) Cvar_VariableValue ("net_qport");
 
-		Q_strncpyz( info, Cvar_InfoString( CVAR_USERINFO ), sizeof( info ) );
+		Q_strncpyz( info, CL_UserinfoString(), sizeof( info ) );
 		Info_SetValueForKey( info, "protocol", va("%i", PROTOCOL_VERSION ) );
 		Info_SetValueForKey( info, "qport", va("%i", port ) );
 		Info_SetValueForKey( info, "challenge", va("%i", clc.challenge ) );
@@ -2176,7 +2198,7 @@ void CL_CheckUserinfo( void ) {
 	// send a reliable userinfo update if needed
 	if ( cvar_modifiedFlags & CVAR_USERINFO ) {
 		cvar_modifiedFlags &= ~CVAR_USERINFO;
-		CL_AddReliableCommand( va("userinfo \"%s\"", Cvar_InfoString( CVAR_USERINFO ) ), qfalse );
+		CL_AddReliableCommand( va("userinfo \"%s\"", CL_UserinfoString() ), qfalse );
 	}
 
 }
@@ -2786,7 +2808,7 @@ void CL_Init( void ) {
 	cl_pitchspeed = Cvar_Get ("cl_pitchspeed", "140", CVAR_ARCHIVE_ND );
 	cl_anglespeedkey = Cvar_Get ("cl_anglespeedkey", "1.5", CVAR_ARCHIVE_ND );
 
-	cl_maxpackets = Cvar_Get ("cl_maxpackets", "63", CVAR_ARCHIVE );
+	cl_maxpackets = Cvar_Get ("cl_maxpackets", "125", CVAR_ARCHIVE );	// (every frame at 125 frames a second; was 63)
 	cl_packetdup = Cvar_Get ("cl_packetdup", "1", CVAR_ARCHIVE_ND );
 
 	cl_run = Cvar_Get ("cl_run", "1", CVAR_ARCHIVE_ND, "Always run");
@@ -2860,7 +2882,7 @@ void CL_Init( void ) {
 
 	// userinfo
 	Cvar_Get ("name", "Padawan", CVAR_USERINFO | CVAR_ARCHIVE_ND, "Player name" );
-	Cvar_Get ("rate", "25000", CVAR_USERINFO | CVAR_ARCHIVE, "Data rate" );
+	Cvar_Get ("rate", "100000", CVAR_USERINFO | CVAR_ARCHIVE, "Data rate" );	// (was 25000: too little for 40 snapshots a second in a big fight)
 	Cvar_Get ("snaps", "40", CVAR_USERINFO | CVAR_ARCHIVE, "Client snapshots per second" );
 #ifdef JK2_MODE
 	Cvar_Get ("model", "kyle/default", CVAR_USERINFO | CVAR_ARCHIVE, "Player model" );
