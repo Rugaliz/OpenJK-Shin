@@ -207,6 +207,7 @@ if(BuildMPEngine OR BuildMPDed OR BuildJK2MPEngine OR BuildJK2MPDed)
 
 	set(MPEngineAndDedClientFiles
 		"${MPDir}/client/client.h"
+		"${MPDir}/client/cl_cgame_time.h"
 		"${MPDir}/client/keys.h"
 		"${MPDir}/client/snd_public.h"
 		)
