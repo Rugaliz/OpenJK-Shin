@@ -24,6 +24,7 @@ game made today would have. Everything below is new compared with OpenJK.
 - **Headphone 3D sound and real room echo**, worked out live in every level, mods included.
 - **128 sounds at once**, crackle-free, at your sound card's own quality, with less delay.
 - **Mouse settings for today's mice**: a Mouse DPI setting and a sensible sensitivity range.
+- **Smoother online play**: other players no longer stutter when the connection is uneven.
 - **Faster level loading** in single player.
 - **Jedi Outcast multiplayer** on a modern engine, which OpenJK doesn't have.
 
@@ -118,6 +119,14 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   at 2, already too fast for a modern mouse). The default is 1.5.
 - **Setup > Controls > Mouse/Joystick > Mouse DPI**: tell the game your mouse's DPI (on the box or in the mouse's
   software) and a sensitivity feels the same on any mouse. See [docs/mouse.md](docs/mouse.md).
+
+### Online play
+- **Other players move smoothly on any connection**: when a server update comes late, the original game had to guess
+  where everyone went, and they stuttered and jumped when the update came. The game now measures your connection
+  and waits just long enough for the next update: in tests it went from guessing in 4 to 13% of frames to under 1%,
+  with no extra delay on a steady connection (`cl_timeSync`). See [docs/network.md](docs/network.md).
+- **Network settings for today's connections**: your inputs go out every frame, the server may send you up to
+  100000 bytes a second, and the modem-era Data Rate choices are gone. Old settings files are updated once.
 
 ### Gameplay (single player)
 - **Realistic saber combat is on by default**: more precise saber hits and higher damage. To play with the original
