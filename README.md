@@ -216,8 +216,11 @@ Then, from the folder of this repository:
 
 What you need (the script checks all of it):
 
-- Visual Studio 2019, 2022 or 2026 (Community is free) or its Build Tools, with the **"Desktop development with
-  C++"** workload and a Windows 10/11 SDK
+- Microsoft's C++ compiler. The free **Build Tools for Visual Studio** (2019, 2022 or 2026) are enough: you don't
+  need the Visual Studio editor, only its **"Desktop development with C++"** workload and a Windows 10/11 SDK. One
+  command installs them:
+  `winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`.
+  If you already have Visual Studio (Community is free) with that workload, it is used.
 - CMake 3.16 or newer (`winget install Kitware.CMake`)
 - an internet connection the first time (SDL3 is downloaded and built)
 - the [Vulkan SDK](https://vulkan.lunarg.com/) (optional: without it the single player games have no Vulkan renderer
@@ -243,6 +246,31 @@ If you would rather call CMake yourself, the options are the usual OpenJK ones (
 player, `BuildSP*` for Jedi Academy single player, `BuildMP*` and `BuildJK2MP*` for multiplayer), plus
 `BuildSPRdVulkan` and `BuildJK2SPRdVulkan` for the Vulkan renderers. They are explained at the top of
 `CMakeLists.txt`. On Windows SDL3 is always downloaded; on Linux `-DUseInternalSDL3=ON` does the same.
+
+### The Windows version, built on Linux
+
+No Windows machine and no Microsoft compiler needed: the MinGW compiler on Linux builds the Windows programs. They
+need nothing but Windows itself (10 or newer) to run. They have no Vulkan renderer: the single player games use
+OpenGL.
+
+What you need: CMake, Ninja and a MinGW-w64 compiler for 64-bit Windows. Shin is tested with
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases): unpack it and put its `bin` folder on your `PATH`.
+The MinGW of your distribution should work too: `mingw-w64-gcc` on Arch, `mingw64-gcc-c++` on Fedora, and
+`g++-mingw-w64-x86-64` on Debian/Ubuntu, where you also have to pick its "posix" variant (the default one can't build
+Shin's worker threads): `sudo update-alternatives --config x86_64-w64-mingw32-g++` and the same for
+`x86_64-w64-mingw32-gcc`. zlib, libpng, libjpeg and SDL3 are built from source; SDL3 is downloaded the first time.
+
+```sh
+cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/Toolchains/x86_64-w64-mingw32.cmake \
+  -DBuildJK2SPEngine=ON -DBuildJK2SPGame=ON -DBuildJK2SPRdVanilla=ON \
+  -DBuildJK2MPEngine=ON -DBuildJK2MPDed=ON -DBuildJK2MPRdVanilla=ON -DBuildMPRend2=OFF
+cmake --build build-win
+cmake --install build-win --prefix dist/windows
+```
+
+The games end up in `dist/windows/JediOutcast/` and `dist/windows/JediAcademy/`, laid out like the game folders. (The
+experimental rend2 renderer is left out: building it runs a Windows tool, which needs Wine.)
 
 More about the code: [renderer architecture](docs/renderer-architecture.md), [library loading](docs/libraries.md),
 [save games](docs/save%20games.md), [language strings](docs/language%20strings.md). Upstream's
