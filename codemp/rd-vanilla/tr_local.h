@@ -1219,6 +1219,7 @@ extern cvar_t	*r_ssaoStrength;
 extern cvar_t	*r_bloom;
 extern cvar_t	*r_bloomThreshold;
 extern cvar_t	*r_bloomIntensity;
+extern cvar_t	*r_sharpen;			// contrast adaptive sharpening of the 3D view, 0 (off) to 1
 extern cvar_t	*r_smaa;
 
 extern cvar_t	*r_environmentMapping;

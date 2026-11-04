@@ -34,9 +34,10 @@ out of the occlusion. Needs OpenGL 2.0 and framebuffer objects (every graphics c
 | `r_bloomThreshold` | 0.8 | How bright (0 to 1) a pixel has to be to glow. Lower makes more of the picture glow. |
 | `r_bloomIntensity` | 0.5 | How strong the glow is. |
 | `r_smaa` | 0 | **SMAA**, a high quality edge smoothing that works on what the multisampling (the Anti-Aliasing setting) leaves behind, like the edges that textures and shaders make. Unlike FXAA it only touches the edges it finds, so textures stay as sharp as they are. Needs OpenGL 3.3. Use it with or without multisampling. |
+| `r_sharpen` | 0 | **Sharpening** (contrast adaptive sharpening, the method of AMD's FidelityFX CAS), 0 (off) to 1 (strongest). Brings out the detail of the textures, especially with SMAA or multisampling, without halos: each pixel is sharpened by as much as the pixels around it leave room for before they would clip, so flat and busy areas get the most and edges that are already sharp the least. Console only for now. |
 | `r_postDebug` | 0 | For testing: 1 runs the effects' plumbing with nothing in it (the picture must not change), 2 shows the occlusion alone. |
 
-The effects run one after the other: occlusion, bloom, then SMAA. Cost on a Radeon RX 7800 XT at 3440x1440 with 8x
+The effects run one after the other: occlusion, bloom, SMAA, then sharpening. Cost on a Radeon RX 7800 XT at 3440x1440 with 8x
 multisampling: not measurable (about 135 fps with and without, with a noisy counter).
 
 ## Shader dynamic lights (`r_dlightGLSL`, default 0)
@@ -65,6 +66,11 @@ comparing it with the table applied in software: no pixel differs, in all five r
 GLSL; without it the old way (textures) is used. In multiplayer it replaces the older `r_gammaShaders`.
 
 ## Credits
+
+Contrast adaptive sharpening is AMD's method (FidelityFX CAS, GPUOpen, published under the MIT license); the shader
+here is written from its description (`Post_Sharpen` in `shared/renderer/tr_post.h`, `post_sharpen.frag` for
+Vulkan) and runs on any graphics card.
+
 
 SMAA is Subpixel Morphological Antialiasing by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and
 Diego Gutierrez (https://github.com/iryoku/smaa). Its shader code and lookup textures are used as they published

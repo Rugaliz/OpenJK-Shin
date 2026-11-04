@@ -41,7 +41,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
-	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_COUNT
+	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_COUNT
 };
 
 typedef struct {
@@ -60,6 +60,7 @@ static const passInfo_t passInfos[PASS_COUNT] = {
 	{ vk_spirv_smaa_weights_frag, sizeof( vk_spirv_smaa_weights_frag ), false },
 	{ vk_spirv_smaa_blend_frag, sizeof( vk_spirv_smaa_blend_frag ), false },
 	{ vk_spirv_post_gamma_frag, sizeof( vk_spirv_post_gamma_frag ), false },
+	{ vk_spirv_post_sharpen_frag, sizeof( vk_spirv_post_sharpen_frag ), false },
 };
 
 typedef struct {
@@ -93,6 +94,7 @@ static struct {
 
 	int					width, height;				// size of the view the images are made for
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
+	postImage_t			sharp;						// the view sharpened (r_sharpen)
 	postImage_t			bloom[POST_BLOOM_LEVELS];
 	bool				smaaTextures;
 
@@ -224,6 +226,7 @@ static void FreeImages( void )
 	FreeImage( &post.edges );
 	FreeImage( &post.weights );
 	FreeImage( &post.result );
+	FreeImage( &post.sharp );
 	for ( int i = 0; i < POST_BLOOM_LEVELS; i++ )
 	{
 		FreeImage( &post.bloom[i] );
@@ -241,7 +244,7 @@ static bool EnsureImages( int width, int height )
 	VK_WaitIdle();
 	FreeImages();
 	bool ok = NewImage( &post.scene, width, height ) && NewImage( &post.aoA, width, height ) && NewImage( &post.aoB, width, height )
-		&& NewImage( &post.final, width, height );
+		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height );
 	for ( int i = 0; ok && i < POST_BLOOM_LEVELS; i++ )
 	{
 		ok = NewImage( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
@@ -556,7 +559,7 @@ static bool PostWanted( void )
 	{
 		return false;
 	}
-	return r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer;
+	return r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f;
 }
 
 // ambient occlusion, blurred, into post.aoA
@@ -756,6 +759,17 @@ void RB_PostProcess( void )
 		VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT );
 
 	const postImage_t *finished = smaa ? &post.result : &post.final;
+	if ( r_sharpen->value > 0.0f )
+	{
+		// contrast adaptive sharpening of the finished view (see tr_post.h)
+		const float sharpness = ( r_sharpen->value > 1.0f ) ? 1.0f : r_sharpen->value;
+		postInput_t inputs[3] = { Input( finished ), Input( finished ), Input( finished ) };
+		inputs[1].view = inputs[2].view = VK_NULL_HANDLE;
+		inputs[0].nearest = true;
+		const float push[16] = { -1.0f / ( 8.0f - 3.0f * sharpness ) };
+		RunPass( PASS_SHARPEN, &post.sharp, false, inputs, push );
+		finished = &post.sharp;
+	}
 	VK_SetExternalTexture( POST_RESULT_ID, finished->image, finished->view, finished->width, finished->height );
 
 	const GLboolean scissored = qglIsEnabled( GL_SCISSOR_TEST );

@@ -75,6 +75,7 @@ static struct {
 	postProgram_t	bloomDown, bloomUp;
 	postTarget_t	final, edges, weights;	// for SMAA: the view with the other effects on, the edges found in it, how to blend them
 	postProgram_t	smaaEdges, smaaWeights, smaaBlend;
+	postProgram_t	sharpen;			// contrast adaptive sharpening (r_sharpen)
 	GLuint			smaaAreaTexture, smaaSearchTexture;
 	qboolean		smaaOk;				// GLSL 3.30 is there, which SMAA is written for
 	qboolean		smaaFailed;
@@ -548,7 +549,7 @@ static qboolean Post_Wanted( void ) {
 	if ( backEnd.viewParms.isPortal || backEnd.viewParms.viewportWidth < 64 || backEnd.viewParms.viewportHeight < 64 ) {
 		return qfalse;
 	}
-	return (qboolean)( r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer );
+	return (qboolean)( r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f );
 }
 
 // draws the quad into a target (or the window, with 0), with the viewport set for it
@@ -708,6 +709,54 @@ Called when the 3D view is finished. Leaves the GL state as it found it, so the 
 notice.
 ================
 */
+/*
+================
+Contrast adaptive sharpening (r_sharpen)
+
+The method of AMD's FidelityFX CAS (GPUOpen, MIT license), written here from its description: each pixel is pulled
+away from its four neighbours by an amount that depends on how much room the 3 x 3 pixels around it leave before they
+would clip, so flat and busy areas get the most and edges that are already sharp the least, and nothing is pushed past
+black or white. r_sharpen is its sharpness, 0 (off) to 1. It runs on the finished 3D view (after SMAA), not the HUD.
+================
+*/
+static const char *postSharpenFragmentSource =
+	"#version 120\n"
+	"uniform sampler2D uScene;\n"
+	"uniform vec3 uParams;\n"		// the size of a texel, the weight of the neighbours at full amount (negative)
+	"vec3 at( float x, float y ) { return texture2D( uScene, gl_TexCoord[0].xy + vec2( x, y ) * uParams.xy ).rgb; }\n"
+	"void main() {\n"
+	"	vec3 a = at( -1.0, -1.0 ), b = at( 0.0, -1.0 ), c = at( 1.0, -1.0 );\n"
+	"	vec3 d = at( -1.0, 0.0 ), e = at( 0.0, 0.0 ), f = at( 1.0, 0.0 );\n"
+	"	vec3 g = at( -1.0, 1.0 ), h = at( 0.0, 1.0 ), i = at( 1.0, 1.0 );\n"
+	"	vec3 mn = min( min( min( d, e ), min( f, b ) ), h );\n"
+	"	vec3 mx = max( max( max( d, e ), max( f, b ) ), h );\n"
+	"	mn += min( min( min( mn, a ), min( g, c ) ), i );\n"		// (the cross and the whole square, soft)
+	"	mx += max( max( max( mx, a ), max( g, c ) ), i );\n"
+	"	vec3 amount = sqrt( clamp( min( mn, 2.0 - mx ) / max( mx, vec3( 0.0001 ) ), 0.0, 1.0 ) );\n"
+	"	vec3 w = amount * uParams.z;\n"
+	"	gl_FragColor = vec4( clamp( ( ( b + d + f + h ) * w + e ) / ( 1.0 + 4.0 * w ), 0.0, 1.0 ), 1.0 );\n"
+	"}\n";
+
+static void Post_Sharpen( int x, int y, int width, int height ) {
+	static const char *const uniforms[] = { "uScene", "uParams", NULL };
+	const float sharpness = ( r_sharpen->value > 1.0f ) ? 1.0f : r_sharpen->value;
+
+	if ( !post.sharpen.id && !Post_BuildProgram( &post.sharpen, "post sharpen", postSharpenFragmentSource, uniforms ) ) {
+		post.failed = qtrue;
+		return;
+	}
+
+	// the view as it is now (with the other effects on it), then drawn over itself sharpened
+	Post_BindTexture( 0, post.sceneTexture );
+	qglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, x, y, width, height );
+	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	qglViewport( x, y, width, height );
+	qglUseProgram( post.sharpen.id );
+	qglUniform1i( post.sharpen.uniforms[0], 0 );
+	qglUniform3f( post.sharpen.uniforms[1], 1.0f / width, 1.0f / height, -1.0f / ( 8.0f - 3.0f * sharpness ) );
+	Post_Quad();
+}
+
 void RB_PostProcess( void ) {
 	static const char *const compositeUniforms[] = { "uScene", "uAO", "uBloom", "uRect", "uMode", NULL };
 	const int	x = backEnd.viewParms.viewportX;
@@ -762,27 +811,33 @@ void RB_PostProcess( void ) {
 		post.failed = qtrue;
 	}
 
-	// draw the result over the view, or into the picture SMAA works on
-	if ( smaa ) {
-		qglBindFramebuffer( GL_FRAMEBUFFER, post.final.fbo );
-		qglViewport( 0, 0, width, height );
-	} else {
-		qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
-		qglViewport( x, y, width, height );
+	// draw the result over the view, or into the picture SMAA works on (when only sharpening is on there is nothing to
+	// draw: the view is as it was)
+	if ( ssao || bloom || smaa || r_postDebug->integer ) {
+		if ( smaa ) {
+			qglBindFramebuffer( GL_FRAMEBUFFER, post.final.fbo );
+			qglViewport( 0, 0, width, height );
+		} else {
+			qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+			qglViewport( x, y, width, height );
+		}
+		Post_BindTexture( 0, post.sceneTexture );
+		Post_BindTexture( 1, post.aoA.texture );
+		Post_BindTexture( 2, post.bloom[0].texture );
+		qglUseProgram( post.composite.id );
+		qglUniform1i( post.composite.uniforms[0], 0 );
+		qglUniform1i( post.composite.uniforms[1], 1 );
+		qglUniform1i( post.composite.uniforms[2], 2 );
+		qglUniform4fv( post.composite.uniforms[3], 1, smaa ? smaaRect : rect );
+		qglUniform3f( post.composite.uniforms[4], ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f,
+			bloom ? r_bloomIntensity->value : 0.0f );
+		Post_Quad();
+		if ( smaa ) {
+			Post_Smaa( x, y, width, height );
+		}
 	}
-	Post_BindTexture( 0, post.sceneTexture );
-	Post_BindTexture( 1, post.aoA.texture );
-	Post_BindTexture( 2, post.bloom[0].texture );
-	qglUseProgram( post.composite.id );
-	qglUniform1i( post.composite.uniforms[0], 0 );
-	qglUniform1i( post.composite.uniforms[1], 1 );
-	qglUniform1i( post.composite.uniforms[2], 2 );
-	qglUniform4fv( post.composite.uniforms[3], 1, smaa ? smaaRect : rect );
-	qglUniform3f( post.composite.uniforms[4], ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f,
-		bloom ? r_bloomIntensity->value : 0.0f );
-	Post_Quad();
-	if ( smaa ) {
-		Post_Smaa( x, y, width, height );
+	if ( r_sharpen->value > 0.0f ) {
+		Post_Sharpen( x, y, width, height );
 	}
 	qglUseProgram( 0 );
 
