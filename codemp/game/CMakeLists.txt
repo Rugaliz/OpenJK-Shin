@@ -60,6 +60,7 @@ set(MPGameGameFiles
 	"${MPDir}/game/g_main.c"
 	"${MPDir}/game/g_mem.c"
 	"${MPDir}/game/g_misc.c"
+	"${MPDir}/game/g_lagcomp.c"
 	"${MPDir}/game/g_missile.c"
 	"${MPDir}/game/g_mover.c"
 	"${MPDir}/game/g_nav.c"

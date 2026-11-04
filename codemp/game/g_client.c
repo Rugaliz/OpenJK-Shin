@@ -2612,6 +2612,8 @@ void ClientBegin( int clientNum, qboolean allowTeamReset ) {
 
 	ent = g_entities + clientNum;
 
+	G_LagComp_ResetClient( clientNum );
+
 	if ((ent->r.svFlags & SVF_BOT) && level.gametype >= GT_TEAM)
 	{
 		if (allowTeamReset)
@@ -3903,6 +3905,8 @@ void ClientDisconnect( int clientNum ) {
 	// cleanup if we are kicking a bot that
 	// hasn't spawned yet
 	G_RemoveQueuedBotBegin( clientNum );
+
+	G_LagComp_ResetClient( clientNum );	// (where they were is of no use to the next one in this slot)
 
 	ent = g_entities + clientNum;
 	if ( !ent->client || ent->client->pers.connected == CON_DISCONNECTED ) {

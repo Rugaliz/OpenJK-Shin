@@ -3378,6 +3378,9 @@ void G_RunFrame( int levelTime ) {
 			ClientEndFrame( ent );
 		}
 	}
+
+	// where everybody is drawn in the snapshot about to be sent, for lag compensation
+	G_LagComp_Record();
 #ifdef _G_FRAME_PERFANAL
 	iTimer_ClientEndframe = trap->PrecisionTimer_End(timer_ClientEndframe);
 #endif

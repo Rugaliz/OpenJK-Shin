@@ -111,6 +111,8 @@ XCVAR_DEF( g_gravity,					"800",			NULL,						CVAR_NONE,										qtrue )
 XCVAR_DEF( g_inactivity,				"0",			NULL,						CVAR_NONE,										qtrue )
 XCVAR_DEF( g_jediVmerc,					"0",			NULL,						CVAR_SERVERINFO|CVAR_LATCH|CVAR_ARCHIVE,		qtrue )
 XCVAR_DEF( g_knockback,					"1000",			NULL,						CVAR_NONE,										qtrue )
+XCVAR_DEF( g_lagCompensation,			"1",			NULL,						CVAR_ARCHIVE|CVAR_SERVERINFO,					qtrue )	// 1 = weapons that hit at once (g_lagcomp.c)
+XCVAR_DEF( g_lagCompensationMax,		"300",			NULL,						CVAR_ARCHIVE,									qtrue )	// msec, how far back lag compensation goes at most
 XCVAR_DEF( g_locationBasedDamage,		"1",			NULL,						CVAR_NONE,										qtrue )
 XCVAR_DEF( g_log,						"games.log",	NULL,						CVAR_ARCHIVE,									qfalse )
 XCVAR_DEF( g_logClientInfo,				"0",			NULL,						CVAR_ARCHIVE,									qtrue )
