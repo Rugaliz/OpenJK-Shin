@@ -93,6 +93,8 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   used to give 166).
 - **The same game at any frame rate** (single player): footsteps, the bobbing of the view, leaning and other things
   no longer speed up or slow down with the frame rate, and the slight wobble when running is gone.
+- **Big fights are drawn whole**: a scene can now hold 8191 things (players, weapons, effects) instead of 2047; past
+  that, the original stopped drawing whatever came next.
 - **Effects keep their density at any frame rate**: at high frame rates some effects (saber sparks, the glow under
   pickups) used to multiply until other things stopped being drawn in big fights.
 - **Faster loading** (single player): the work of loading a level is shared between your processor's cores, and the
