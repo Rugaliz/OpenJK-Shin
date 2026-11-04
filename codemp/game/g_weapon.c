@@ -4488,7 +4488,16 @@ FireWeapon
 */
 int BG_EmplacedView(vec3_t baseAngles, vec3_t angles, float *newYaw, float constraint);
 
+static void FireWeapon_Real( gentity_t *ent, qboolean altFire );
+
+// (with lag compensation: the shot is decided against the others where the shooter saw them, see g_lagcomp.c)
 void FireWeapon( gentity_t *ent, qboolean altFire ) {
+	G_LagComp_FireStart( ent, altFire );
+	FireWeapon_Real( ent, altFire );
+	G_LagComp_FireEnd();
+}
+
+static void FireWeapon_Real( gentity_t *ent, qboolean altFire ) {
 	// track shots taken for accuracy tracking. melee weapons are not tracked.
 	if( ent->s.weapon != WP_SABER && ent->s.weapon != WP_STUN_BATON && ent->s.weapon != WP_MELEE )
 	{

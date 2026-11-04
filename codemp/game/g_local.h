@@ -1295,6 +1295,17 @@ qboolean G_FilterPacket (char *from);
 // g_weapon.c
 //
 void FireWeapon( gentity_t *ent, qboolean altFire );
+
+//
+// g_lagcomp.c
+//
+void G_LagComp_Record( void );
+void G_LagComp_RewindTo( int time, const gentity_t *skip );
+void G_LagComp_Rewind( gentity_t *shooter );
+void G_LagComp_Restore( void );
+void G_LagComp_FireStart( gentity_t *ent, qboolean altFire );
+void G_LagComp_FireEnd( void );
+void G_LagComp_ResetClient( int clientNum );
 void BlowDetpacks(gentity_t *ent);
 void RemoveDetpacks(gentity_t *ent);
 
