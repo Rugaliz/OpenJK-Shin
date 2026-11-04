@@ -114,6 +114,7 @@ cvar_t	*r_ssaoStrength;
 cvar_t	*r_bloom;
 cvar_t	*r_bloomThreshold;
 cvar_t	*r_bloomIntensity;
+cvar_t	*r_sharpen;
 cvar_t	*r_smaa;
 cvar_t	*r_gammaShaders;
 
@@ -1664,6 +1665,7 @@ void R_Register( void )
 	r_bloom								= ri.Cvar_Get( "r_bloom",							"0",						CVAR_ARCHIVE_ND, "1 = a soft glow around the bright parts of the picture" );
 	r_bloomThreshold					= ri.Cvar_Get( "r_bloomThreshold",					"0.8",						CVAR_ARCHIVE_ND, "How bright, 0 to 1, a pixel has to be to glow" );
 	r_bloomIntensity					= ri.Cvar_Get( "r_bloomIntensity",					"0.5",						CVAR_ARCHIVE_ND, "" );
+	r_sharpen							= ri.Cvar_Get( "r_sharpen",							"0",						CVAR_ARCHIVE_ND, "Contrast adaptive sharpening of the 3D view, 0 (off) to 1" );
 	r_smaa								= ri.Cvar_Get( "r_smaa",							"0",						CVAR_ARCHIVE_ND, "1 = SMAA, smooths edges without softening the rest of the picture (needs OpenGL 3.3)" );	// (the renderer has a pool of its own, see docs/parallel-work.md)
 	r_gammaShaders						= ri.Cvar_Get( "r_gammaShaders",					"0",						CVAR_ARCHIVE_ND|CVAR_LATCH, "" );
 	r_environmentMapping				= ri.Cvar_Get( "r_environmentMapping",				"1",						CVAR_ARCHIVE_ND, "" );

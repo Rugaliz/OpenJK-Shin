@@ -39,7 +39,7 @@ SMAA_MAINS = {
 shaders = [("fixed.vert", "vert"), ("fixed.frag", "frag"), ("dlight.vert", "vert"), ("dlight.frag", "frag"),
            ("post.vert", "vert"), ("post_ssao.frag", "frag"), ("post_ssao_blur.frag", "frag"),
            ("post_bloom_down.frag", "frag"), ("post_bloom_up.frag", "frag"), ("post_composite.frag", "frag"),
-           ("post_gamma.frag", "frag")]
+           ("post_gamma.frag", "frag"), ("post_sharpen.frag", "frag")]
 shaders += [(n, "frag") for n in SMAA_MAINS]
 
 for name, stage in shaders:
