@@ -70,6 +70,10 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
     falls on, instead of blocky patches.
 
   See [docs/post-processing.md](docs/post-processing.md).
+- **A brightness slider that works**: the Brightness slider of the video setup takes effect at once and brightens the whole
+  picture, as on the original game's hardware, and the overbright lighting of the original (`r_overBrightBits 1`,
+  light up to twice as bright as white) works again, in a window too. See
+  [docs/post-processing.md](docs/post-processing.md).
 - **Shadows that work** (Setup > More Video > Shadows in single player, `cg_shadows 2` in multiplayer): characters are
   no longer darkened by their own shadow, shadows have soft edges, fall away from the light, are lighter where there
   is little direct light, and no longer show through walls. See [docs/shadows.md](docs/shadows.md).

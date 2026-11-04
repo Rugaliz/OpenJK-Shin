@@ -1594,6 +1594,9 @@ const void	*RB_SwapBuffers( const void *data ) {
 		RB_EndSurface();
 	}
 
+	// brightness and overbright, as the gamma ramps of the graphics card did it
+	RB_GammaPass();
+
 	// texture swapping test
 	if ( r_showImages->integer ) {
 		RB_ShowImages();

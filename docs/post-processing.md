@@ -47,6 +47,23 @@ light and by the angle between its surface and the light, with the surface norma
 flat walls this looks very close to the original; the difference is on curved surfaces and characters, where the
 light no longer shows the triangles. The old look is one setting away, and also used when the shader does not build.
 
+## Brightness and overbright (`r_gamma`, `r_overBrightBits`)
+
+The original games set the brightness (the Brightness slider of the video setup, `r_gamma`) with the gamma ramps of the graphics
+card, which changed everything on the screen at once, and used the same ramps for overbright lighting: with
+`r_overBrightBits 1` the game draws at half brightness and the ramps double it, so lighting can be up to twice as
+bright as white. SDL3, which the game now uses for its window, has no gamma ramps; until now the brightness was baked
+into the textures as they loaded (only the textures, not the lighting or the menus, and only after a restart), and
+overbright was off.
+
+All renderers (OpenGL and Vulkan, single player and multiplayer, both games) now do what the ramps did in a pass over
+the finished picture, just before it is shown, with the same table (rounding included): the slider takes effect at
+once and brightens everything, overbright works, in a window too (where the original never allowed it, since the
+ramps would have brightened the whole desktop), and screenshots look like the screen. At brightness 1 without
+overbright, the defaults, the pass is skipped. Checked by reading the picture back before and after the pass and
+comparing it with the table applied in software: no pixel differs, in all five renderers. The OpenGL version needs
+GLSL; without it the old way (textures) is used. In multiplayer it replaces the older `r_gammaShaders`.
+
 ## Credits
 
 SMAA is Subpixel Morphological Antialiasing by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and

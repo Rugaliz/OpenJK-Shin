@@ -37,10 +37,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define POST_AREA_ID		0x7ffe0001u
 #define POST_SEARCH_ID		0x7ffe0002u
 #define POST_RESULT_ID		0x7ffe0003u
+#define POST_GAMMA_ID		0x7ffe0004u	// (the picture through the brightness table, RB_GammaPass)
 
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
-	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_COUNT
+	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_COUNT
 };
 
 typedef struct {
@@ -58,6 +59,7 @@ static const passInfo_t passInfos[PASS_COUNT] = {
 	{ vk_spirv_smaa_edges_frag, sizeof( vk_spirv_smaa_edges_frag ), false },
 	{ vk_spirv_smaa_weights_frag, sizeof( vk_spirv_smaa_weights_frag ), false },
 	{ vk_spirv_smaa_blend_frag, sizeof( vk_spirv_smaa_blend_frag ), false },
+	{ vk_spirv_post_gamma_frag, sizeof( vk_spirv_post_gamma_frag ), false },
 };
 
 typedef struct {
@@ -93,6 +95,9 @@ static struct {
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
 	postImage_t			bloom[POST_BLOOM_LEVELS];
 	bool				smaaTextures;
+
+	postImage_t			gammaIn, gammaOut;			// the whole picture, for RB_GammaPass
+	bool				gammaFailed;
 } post;
 
 /*
@@ -763,6 +768,78 @@ void RB_PostProcess( void )
 }
 
 /*
+================
+RB_GammaPass
+
+Brightness and overbright for the whole picture before it is shown, the way the gamma ramps of the original games did
+it (see the same in tr_post.h for the OpenGL renderers): the picture is copied, run through the table in a pass, and
+drawn back. At brightness 1 without overbright (the defaults) nothing is done.
+================
+*/
+qboolean R_Post_GammaAvailable( void )
+{
+	return post.ready ? qtrue : qfalse;
+}
+
+void RB_GammaPass( void )
+{
+	const float gamma = r_gamma->value;
+	const int overbright = tr.overbrightBits;
+	if ( !post.ready || post.gammaFailed || !glConfig.deviceSupportsGamma || ( gamma == 1.0f && overbright <= 0 ) )
+	{
+		return;
+	}
+	const int width = vk.width;
+	const int height = vk.height;
+	if ( !post.gammaIn.image || post.gammaIn.width != width || post.gammaIn.height != height )
+	{
+		VK_WaitIdle();
+		FreeImage( &post.gammaIn );
+		FreeImage( &post.gammaOut );
+		if ( !NewImage( &post.gammaIn, width, height ) || !NewImage( &post.gammaOut, width, height ) )
+		{
+			FreeImage( &post.gammaIn );
+			FreeImage( &post.gammaOut );
+			post.gammaFailed = true;
+			return;
+		}
+	}
+
+	VK_EnsureFrame();
+	VK_EndRenderPass();
+	VK_FlushUploads( false );
+
+	// the picture into an image of its own (the same way up as RB_PostProcess copies the view)
+	Barrier( vk.colorImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT );
+	Barrier( post.gammaIn.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
+	VkImageBlit blit = {};
+	blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	blit.srcSubresource.layerCount = 1;
+	blit.srcOffsets[1] = { width, height, 1 };
+	blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	blit.dstSubresource.layerCount = 1;
+	blit.dstOffsets[1] = { width, height, 1 };
+	vkCmdBlitImage( vk.cmd, vk.colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, post.gammaIn.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1, &blit, VK_FILTER_NEAREST );
+	Barrier( post.gammaIn.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+
+	postInput_t inputs[3] = { Input( &post.gammaIn ), Input( &post.gammaIn ), Input( &post.gammaIn ) };
+	inputs[1].view = inputs[2].view = VK_NULL_HANDLE;
+	const float push[16] = { 1.0f / gamma, (float)( 1 << overbright ) };
+	RunPass( PASS_GAMMA, &post.gammaOut, false, inputs, push );
+
+	Barrier( vk.colorImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT );
+
+	VK_SetExternalTexture( POST_GAMMA_ID, post.gammaOut.image, post.gammaOut.view, width, height );
+	DrawBack( 0, 0, width, height, POST_GAMMA_ID );
+}
+
+/*
 =============================================================================
 
 START AND END
@@ -862,6 +939,8 @@ void VK_ShutdownPost( void )
 	}
 	vkDeviceWaitIdle( vk.device );
 	FreeImages();
+	FreeImage( &post.gammaIn );
+	FreeImage( &post.gammaOut );
 	for ( int i = 0; i < PASS_COUNT; i++ )
 	{
 		if ( post.pipelines[i] ) vkDestroyPipeline( vk.device, post.pipelines[i], NULL );
