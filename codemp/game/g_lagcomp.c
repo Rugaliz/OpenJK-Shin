@@ -31,8 +31,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // (G_LagComp_Record), and for a shot moves the others back to where the shooter saw them (G_LagComp_Rewind), decides
 // the shot, and puts them back (G_LagComp_Restore):
 //
-// - g_lagCompensation 1 (the default): the weapons that hit at once (the disruptor, the beam of the concussion rifle,
-//   the stun baton, punches): FireWeapon
+// - g_lagCompensation 1: the weapons that hit at once (the disruptor, the beam of the concussion rifle, the stun baton,
+//   punches): FireWeapon
+// - g_lagCompensation 2 (the default): also projectiles. A new bolt or rocket starts as far along its path as the time
+//   the shooter's command took (at most LAGCOMP_PROJECTILE_MAX), and the first stretch of it is decided against the
+//   players where the shooter saw them: CreateMissile, G_RunMissile
 //
 // How far back it goes is limited by g_lagCompensationMax (msec), so a very high ping can't shoot somebody who has long
 // since got away. Players are moved whole: their bounding box, their position and the way they face (which places the
@@ -43,6 +46,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #define LAGCOMP_FRAMES			64		// frames remembered (1.6 seconds at 40 a second)
 #define LAGCOMP_TELEPORT		256.0f	// units moved in one frame that are not movement (a respawn, a teleport)
+#define LAGCOMP_PROJECTILE_MAX	150		// msec, the longest head start a projectile gets
 
 typedef struct {
 	int			time;		// level.time of the frame
@@ -66,6 +70,10 @@ static struct {
 } lagSaved[MAX_CLIENTS];
 
 static qboolean	lagRewound;
+
+// The player that is firing in FireWeapon (for CreateMissile), and how far behind the server their command was
+static gentity_t	*lagShooter;
+static int			lagShooterTime;
 
 static qboolean G_LagComp_CanBeHit( const gentity_t *ent ) {
 	const gclient_t *client = ent->client;
@@ -246,13 +254,18 @@ void G_LagComp_Restore( void ) {
 ================
 G_LagComp_FireStart / G_LagComp_FireEnd
 
-Around FireWeapon: the weapons that hit at once are decided with everybody rewound.
+Around FireWeapon: the weapons that hit at once are decided with everybody rewound, and the projectiles made in
+between get their head start (G_LagComp_NewMissile).
 ================
 */
 void G_LagComp_FireStart( gentity_t *ent, qboolean altFire ) {
+	lagShooter = NULL;
 	if ( g_lagCompensation.integer <= 0 || !ent || !ent->client || ent->s.number >= MAX_CLIENTS ) {
 		return;
 	}
+
+	lagShooter = ent;
+	lagShooterTime = G_LagComp_TimeOf( ent );
 
 	switch ( ent->s.weapon ) {
 	case WP_DISRUPTOR:
@@ -272,6 +285,41 @@ void G_LagComp_FireStart( gentity_t *ent, qboolean altFire ) {
 
 void G_LagComp_FireEnd( void ) {
 	G_LagComp_Restore();
+	lagShooter = NULL;
+}
+
+// A missile was made; if a player is firing it, it starts as far along as their command was behind
+void G_LagComp_NewMissile( gentity_t *missile ) {
+	int delay;
+
+	if ( g_lagCompensation.integer < 2 || !lagShooter || missile->r.ownerNum != lagShooter->s.number ) {
+		return;
+	}
+
+	delay = level.time - lagShooterTime;
+	if ( delay > LAGCOMP_PROJECTILE_MAX ) {
+		delay = LAGCOMP_PROJECTILE_MAX;
+	}
+	if ( delay <= 0 ) {
+		return;
+	}
+
+	missile->s.pos.trTime -= delay;
+	missile->lagCompTime = level.time - delay;	// (its first move is decided against the players as they were then)
+}
+
+// Before and after the first move of a missile that got a head start
+void G_LagComp_MissileStart( gentity_t *missile ) {
+	if ( missile->lagCompTime && g_lagCompensation.integer >= 2 ) {
+		G_LagComp_RewindTo( missile->lagCompTime, &g_entities[missile->r.ownerNum] );
+	}
+}
+
+void G_LagComp_MissileEnd( gentity_t *missile ) {
+	if ( missile->lagCompTime ) {
+		G_LagComp_Restore();
+		missile->lagCompTime = 0;
+	}
 }
 
 // A player connected or left: forget where they were

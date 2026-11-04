@@ -42,6 +42,41 @@ had to extrapolate, how many snapshots came, the snapshot interval and how uneve
 
 The code is `codemp/client/cl_cgame_time.h`, shared by the client of both games.
 
+## Lag compensation (`g_lagCompensation`, Jedi Academy multiplayer servers)
+
+You see the other players where they were a little while ago: their positions took as long as the network does to
+reach you, and your shot takes as long again to reach the server. Without lag compensation the server decides the
+shot against where everybody is when it arrives, so with a ping of 100 a running player has moved on by about a body's
+width and you have to aim ahead of what you see.
+
+Every command a client sends says which moment of the game the player was looking at. The server keeps where every
+player was at the end of each of its frames for the last second and, for a shot, moves the others back to where the
+shooter saw them, decides the shot, and puts them back.
+
+| Setting | Default | What it does |
+| - | - | - |
+| `g_lagCompensation` | 2 | 0 off; 1 the weapons that hit at once (the disruptor, the beam of the concussion rifle, the stun baton, punches); 2 also projectiles: a new bolt or rocket starts as far along its path as the shooter's command was behind (at most 150 msec), and its first stretch is decided against the players where the shooter saw them |
+| `g_lagCompensationMax` | 300 | msec, how far back it goes at most, so a very high ping can't shoot somebody who has long since got away |
+
+Players are moved whole (their box, position and the way they face, which places the model the accurate hit tests
+use); the pose of the model is the current one. Sabers are not compensated: both fighters' blades and poses would have
+to go back, and a hit the defender saw blocked could land. Bots need none.
+
+It is in the server's game module (`codemp/game/g_lagcomp.c`), so it works on servers running Shin's server with any
+client, and not on servers running other mods. Jedi Outcast multiplayer runs the game modules of the original game,
+so it doesn't have it.
+
+Measured with a local server, 5 bots and a relay adding 50 msec each way (the shots reached the server 110 to 160 msec
+after the moment the shooter saw), comparing where the shooter's client drew each player when firing with where the
+server decided the shot:
+
+| Weapon | Rewound position vs drawn (median / 90%) | Without (median / 90%) |
+| - | - | - |
+| Disruptor | 2.0 / 2.8 units | 31.0 / 42.9 units |
+| Repeater (projectiles, first stretch) | 0.2 / 2.0 units | 18.6 / 40.8 units |
+
+A player is about 30 units wide.
+
 ## Bandwidth
 
 | Setting | Default | Was | What it does |

@@ -401,6 +401,8 @@ struct gentity_s {
 
 	// OpenJK add
 	int			useDebounceTime;	// for cultist_destroyer
+
+	int			lagCompTime;		// a missile with a head start: the time its first move is decided at (g_lagcomp.c)
 };
 
 #define DAMAGEREDIRECT_HEAD		1
@@ -1305,6 +1307,9 @@ void G_LagComp_Rewind( gentity_t *shooter );
 void G_LagComp_Restore( void );
 void G_LagComp_FireStart( gentity_t *ent, qboolean altFire );
 void G_LagComp_FireEnd( void );
+void G_LagComp_NewMissile( gentity_t *missile );
+void G_LagComp_MissileStart( gentity_t *missile );
+void G_LagComp_MissileEnd( gentity_t *missile );
 void G_LagComp_ResetClient( int clientNum );
 void BlowDetpacks(gentity_t *ent);
 void RemoveDetpacks(gentity_t *ent);

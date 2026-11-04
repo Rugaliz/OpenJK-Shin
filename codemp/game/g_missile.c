@@ -324,6 +324,8 @@ gentity_t *CreateMissile( vec3_t org, vec3_t dir, float vel, int life,
 	VectorCopy( org, missile->r.currentOrigin);
 	SnapVector(missile->s.pos.trDelta);
 
+	G_LagComp_NewMissile( missile );	// (a head start when a player fires it, see g_lagcomp.c)
+
 	return missile;
 }
 
@@ -845,6 +847,7 @@ void G_RunMissile( gentity_t *ent ) {
 		}
 	}
 	// trace a line from the previous position to the current position
+	G_LagComp_MissileStart( ent );	// (the first move of a missile with a head start: against the players as they were)
 	if (d_projectileGhoul2Collision.integer)
 	{
 		trap->Trace( &tr, ent->r.currentOrigin, ent->r.mins, ent->r.maxs, origin, passent, ent->clipmask, qfalse, G2TRFLAG_DOGHOULTRACE|G2TRFLAG_GETSURFINDEX|G2TRFLAG_THICK|G2TRFLAG_HITCORPSES, g_g2TraceLod.integer );
@@ -878,6 +881,7 @@ void G_RunMissile( gentity_t *ent ) {
 	else {
 		VectorCopy( tr.endpos, ent->r.currentOrigin );
 	}
+	G_LagComp_MissileEnd( ent );
 
 	if (ent->passThroughNum && tr.entityNum == (ent->passThroughNum-1))
 	{
