@@ -125,6 +125,10 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   where everyone went, and they stuttered and jumped when the update came. The game now measures your connection
   and waits just long enough for the next update: in tests it went from guessing in 4 to 13% of frames to under 1%,
   with no extra delay on a steady connection (`cl_timeSync`). See [docs/network.md](docs/network.md).
+- **Hit what you see** (Jedi Academy multiplayer, on servers running Shin): with lag compensation the server checks
+  your shot against where the other players were on your screen when you fired, not where they got to while the shot
+  travelled to the server. No more aiming ahead of moving targets to make up for your ping, for instant-hit weapons
+  and blaster bolts alike (`g_lagCompensation`). Saber combat is unchanged.
 - **Network settings for today's connections**: your inputs go out every frame, the server may send you up to
   100000 bytes a second, and the modem-era Data Rate choices are gone. Old settings files are updated once.
 
