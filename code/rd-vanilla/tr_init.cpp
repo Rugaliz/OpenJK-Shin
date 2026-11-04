@@ -87,6 +87,7 @@ cvar_t	*r_allowExtensions;
 
 cvar_t	*r_ext_compressed_textures;
 cvar_t	*r_ext_compressed_lightmaps;
+cvar_t	*r_smoothLightmaps;
 cvar_t	*r_ext_preferred_tc_method;
 cvar_t	*r_ext_gamma_control;
 cvar_t	*r_ext_multitexture;
@@ -1608,6 +1609,7 @@ void R_Register( void )
 	r_allowExtensions = ri.Cvar_Get( "r_allowExtensions", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compress_textures", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ext_compressed_lightmaps = ri.Cvar_Get( "r_ext_compress_lightmaps", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_smoothLightmaps = ri.Cvar_Get( "r_smoothLightmaps", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 1 = lightmaps made larger with a bicubic filter as the level loads (tr_lightmap_smooth.h)
 	r_ext_preferred_tc_method = ri.Cvar_Get( "r_ext_preferred_tc_method", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ext_gamma_control = ri.Cvar_Get( "r_ext_gamma_control", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ext_multitexture = ri.Cvar_Get( "r_ext_multitexture", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );

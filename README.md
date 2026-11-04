@@ -62,6 +62,9 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   can't do the level you picked, it uses the highest it can.
 - **Sharp textures**: Setup > More Video > **Anisotropic Filtering** from Off to 16x keeps floors and walls sharp when
   you look along them, and textures stay sharper in the distance. See [docs/antialiasing.md](docs/antialiasing.md).
+- **Smoother lighting**: the lighting of the levels is stored at a few dots per metre, which shows as creases and
+  steps along the edges of shadows and pools of light. Levels now load it smoothed (`r_smoothLightmaps`), with the
+  light itself exactly as it was made. See [docs/antialiasing.md](docs/antialiasing.md).
 - **Screen effects**, each with its own row in Setup > More Video (off by default):
   - **Ambient Occlusion**: soft shading in corners and where things meet, for a sense of depth.
   - **Bloom**: a soft glow around the brightest lights.
