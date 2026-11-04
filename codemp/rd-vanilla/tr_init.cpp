@@ -773,6 +773,13 @@ static void GLimp_InitExtensions( void )
 	R_GLSL_Init();
 	R_Post_Init();
 
+	// SDL3 has no gamma ramps; a pass over the finished picture does what they did (brightness, overbright), so the
+	// rest of the renderer treats it as hardware gamma (RB_GammaPass). It takes the place of r_gammaShaders.
+	glConfig.deviceSupportsGamma = R_Post_GammaAvailable();
+	if ( glConfig.deviceSupportsGamma ) {
+		glConfigExt.doGammaCorrectionWithShaders = qfalse;
+	}
+
 #if !defined(__APPLE__)
 	qglStencilOpSeparate = (PFNGLSTENCILOPSEPARATEPROC)ri.GL_GetProcAddress("glStencilOpSeparate");
 	if ( qglStencilOpSeparate )

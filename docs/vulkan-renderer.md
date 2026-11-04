@@ -36,7 +36,7 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
 - [x] 5. 2D drawing (immediate mode + `DrawStretchPic`): menus and console visible.
 - [x] 6. 3D: matrices, depth, blend, alpha test, cull, multitexture + texenv, fog, clip plane, polygon offset, scissor,
       stencil (shadows), depth range (weapon), vertex arrays.
-- [x] 7. `ReadPixels` (screenshots), `CopyTexImage2D` / `CopyTexSubImage2D` (distortion effects), depth read back (flares), cinematics (`DrawStretchRaw`). Gamma is done by the renderer on the textures, as in the OpenGL one.
+- [x] 7. `ReadPixels` (screenshots), `CopyTexImage2D` / `CopyTexSubImage2D` (distortion effects), depth read back (flares), cinematics (`DrawStretchRaw`). Brightness and overbright are a pass over the finished picture (`RB_GammaPass`, as in the OpenGL renderers).
 - [~] 8. Done: MSAA (with alpha to coverage and sample shading), anisotropy, vsync modes, `vid_restart` and mode changes, a pipeline cache kept between runs, 3440x1440 at 8x MSAA reaches the 250 fps cap. Still to do: run with the validation layer (`r_vkValidation 1`, needs the layer installed: `vulkan-validation-layers`), Windows / Wine check.
 - [x] 9. Post effects (SSAO, bloom, SMAA, shader dynamic lights) natively in Vulkan (`vk_post.cpp`, shaders `post_*.frag`, `smaa_*.frag`, `dlight.*`); the Setup > More Video rows show with the Vulkan renderer too. Checked against the OpenGL renderer by screenshots (occlusion map, bloom, SMAA) and with 4x multisampling.
 - [ ] 10. Docs, README, CI (build the module only when the Vulkan headers and `glslc` exist).

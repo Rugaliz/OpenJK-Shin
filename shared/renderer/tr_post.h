@@ -239,8 +239,11 @@ static void Post_SetAvailable( const char *name, qboolean available ) {
 	ri.Cvar_Set( name, available ? "1" : "0" );	// (made if it is not there yet)	// what the menus look at to show the rows for what needs it
 }
 
+static void Gamma_Reset( void );
+
 void R_Post_Init( void ) {
 	memset( &post, 0, sizeof( post ) );
+	Gamma_Reset();
 	Post_SetAvailable( "r_postAvail", qfalse );
 	Post_SetAvailable( "r_smaaAvail", qfalse );
 
@@ -796,6 +799,101 @@ void RB_PostProcess( void ) {
 	}
 	SetViewportAndScissor();	// also sets the projection matrix, which the pops below put back anyway
 
+	qglMatrixMode( GL_PROJECTION );
+	qglPopMatrix();
+	qglMatrixMode( GL_MODELVIEW );
+	qglPopMatrix();
+}
+
+/*
+=============================================================================
+
+BRIGHTNESS AND OVERBRIGHT (r_gamma, r_overBrightBits)
+
+The original games set the brightness with the gamma ramps of the graphics card, which applied to everything on the
+screen, and they used the same ramps for overbright lighting: with r_overBrightBits 1 the game draws at half the
+brightness and the ramps double it, so that lighting can go up to twice as bright as white. SDL3 has no gamma ramps,
+so without this the brightness was baked into the textures when they were loaded (only the textures, and only after a
+restart) and overbright was off. This does what the ramps did, in a pass over the finished picture before it is shown,
+with the same table (R_SetColorMappings), rounding included; the engine then treats it as hardware gamma
+(glConfig.deviceSupportsGamma): textures are loaded as they are, overbright works (in a window too, since it changes
+only the game's picture) and screenshots get the table applied as they are saved. At brightness 1 without overbright
+(the defaults) it does nothing.
+=============================================================================
+*/
+
+static struct {
+	qboolean		failed;
+	postProgram_t	program;
+	GLuint			texture;
+	int				width, height;
+} gammaPass;
+
+static void Gamma_Reset( void ) {
+	memset( &gammaPass, 0, sizeof( gammaPass ) );	// (the textures and programs went with the context)
+}
+
+static const char *gammaFragmentSource =
+	"#version 120\n"
+	"uniform sampler2D uScene;\n"
+	"uniform vec2 uParams;\n"		// 1 / gamma, 2 ^ overbright
+	"void main() {\n"
+	"	vec3 c = floor( texture2D( uScene, gl_TexCoord[0].xy ).rgb * 255.0 + 0.5 );\n"
+	"	c = floor( 255.0 * pow( c / 255.0, vec3( uParams.x ) ) + 0.5 ) * uParams.y;\n"
+	"	gl_FragColor = vec4( min( c, vec3( 255.0 ) ) / 255.0, 1.0 );\n"
+	"}\n";
+
+qboolean R_Post_GammaAvailable( void ) {
+	return (qboolean)( R_GLSL_Available() && qglActiveTextureARB && qglMultiTexCoord2fARB );
+}
+
+void RB_GammaPass( void ) {
+	static const char *const uniforms[] = { "uScene", "uParams", NULL };
+	const float	gamma = r_gamma->value;
+	const int	overbright = tr.overbrightBits;
+	const int	width = glConfig.vidWidth;
+	const int	height = glConfig.vidHeight;
+
+	if ( gammaPass.failed || !glConfig.deviceSupportsGamma || ( gamma == 1.0f && overbright <= 0 ) ) {
+		return;
+	}
+	if ( !gammaPass.program.id && !Post_BuildProgram( &gammaPass.program, "gamma", gammaFragmentSource, uniforms ) ) {
+		gammaPass.failed = qtrue;
+		return;
+	}
+	if ( !gammaPass.texture || gammaPass.width != width || gammaPass.height != height ) {
+		if ( gammaPass.texture ) {
+			qglDeleteTextures( 1, &gammaPass.texture );
+		}
+		gammaPass.texture = Post_NewTexture( GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, width, height );
+		gammaPass.width = width;
+		gammaPass.height = height;
+	}
+
+	// the picture as it is, then drawn over itself through the table
+	Post_BindTexture( 0, gammaPass.texture );
+	qglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height );
+
+	qglMatrixMode( GL_PROJECTION );
+	qglPushMatrix();
+	qglLoadIdentity();
+	qglMatrixMode( GL_MODELVIEW );
+	qglPushMatrix();
+	qglLoadIdentity();
+	qglViewport( 0, 0, width, height );
+	GL_State( GLS_DEPTHTEST_DISABLE );
+	GL_Cull( CT_TWO_SIDED );
+	qglDisable( GL_CLIP_PLANE0 );
+	qglDisable( GL_SCISSOR_TEST );
+
+	qglUseProgram( gammaPass.program.id );
+	qglUniform1i( gammaPass.program.uniforms[0], 0 );
+	qglUniform2f( gammaPass.program.uniforms[1], 1.0f / gamma, (float)( 1 << overbright ) );
+	Post_Quad();
+	qglUseProgram( 0 );
+
+	Post_BindTexture( 0, 0 );
+	glState.currenttextures[0] = glState.currenttextures[1] = 0;	// (the engine caches what is bound)
 	qglMatrixMode( GL_PROJECTION );
 	qglPopMatrix();
 	qglMatrixMode( GL_MODELVIEW );

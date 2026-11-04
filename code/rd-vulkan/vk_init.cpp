@@ -943,6 +943,9 @@ bool VK_Init( glconfig_t *glConfig )
 	R_GLSL_Init();
 	R_Post_Init();
 
+	// no gamma ramps: a pass over the finished picture does what they did (RB_GammaPass, vk_post.cpp)
+	glConfig->deviceSupportsGamma = R_Post_GammaAvailable();
+
 	// the renderer ends a frame with ri.WIN_Present: the Vulkan module presents itself, the window does not
 	ri.WIN_Present = VK_PresentFrame;
 	return true;

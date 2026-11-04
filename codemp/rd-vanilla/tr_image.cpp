@@ -1422,11 +1422,8 @@ void R_SetColorMappings( void ) {
 		tr.overbrightBits = 0;		// need hardware gamma for overbright
 	}
 
-	// never overbright in windowed mode
-	if ( !glConfig.isFullscreen )
-	{
-		tr.overbrightBits = 0;
-	}
+	// (the original never used overbright in a window, where the gamma ramps would have changed the whole desktop;
+	// the pass that does it now, RB_GammaPass, changes only the game's picture)
 
 	if ( tr.overbrightBits > 1 ) {
 		tr.overbrightBits = 1;

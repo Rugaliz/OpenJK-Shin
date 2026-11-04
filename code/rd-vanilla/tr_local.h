@@ -1302,6 +1302,8 @@ void	R_GLSL_DeleteProgram( GLuint program );
 // tr_post.cpp
 void	R_Post_Init( void );
 void	RB_PostProcess( void );
+qboolean	R_Post_GammaAvailable( void );
+void	RB_GammaPass( void );	// brightness and overbright for the whole picture (tr_post.h)
 
 // tr_backend.cpp
 void	SetViewportAndScissor( void );
