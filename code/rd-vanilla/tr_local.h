@@ -1160,6 +1160,7 @@ extern cvar_t	*r_ignorehwgamma;		// overrides hardware gamma capabilities
 extern cvar_t	*r_allowExtensions;				// global enable/disable of OpenGL extensions
 extern cvar_t	*r_ext_compressed_textures;		// these control use of specific extensions
 extern cvar_t	*r_ext_compressed_lightmaps;	// turns on compression of lightmaps, off by default
+extern cvar_t	*r_smoothLightmaps;			// lightmaps made larger and smoother as the level loads
 extern cvar_t	*r_ext_preferred_tc_method;
 extern cvar_t	*r_ext_gamma_control;
 extern cvar_t	*r_ext_texenv_op;

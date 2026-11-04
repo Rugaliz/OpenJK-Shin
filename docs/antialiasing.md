@@ -26,3 +26,22 @@ shared by both renderers (`shared/renderer/tr_mip_lanczos.h`).
 | `r_simpleMipMaps` | 2 | How the smaller sizes of the textures are made: 0 the blur of the original Quake 3 filter, 1 average of 2x2 pixels (what the game used), 2 Lanczos (3 lobes windowed sinc, `R_MipMapLanczos` in shared/renderer/tr_mip_lanczos.h). Latched. Costs about a third of a second more per level load. |
 
 `gfxinfo` shows what is in use ("multisampling: 4x, alpha to coverage").
+
+## Smoother lightmaps (`r_smoothLightmaps`, default 1)
+
+The light of a level is stored in lightmaps, 128 x 128 texels to a page, a few texels per metre, and drawn with linear
+filtering: between two texels the light changes along a straight line, and at each texel the slope changes at once.
+So the edges of shadows and the pools of light show the texel grid as creases, steps and diamonds.
+
+As a level loads, every page is made 4 times larger with a bicubic filter (Catmull-Rom), which goes through the value
+of every texel, so the light stays as it was made and only the way it changes between texels becomes smooth. A cubic
+curve swings past the values on either side of a sharp change, which would draw a bright or dark line along the edge
+of a shadow, so what it gives is kept between the two texels it lies between. A page holds the lightmaps of many
+surfaces side by side, and a bicubic filter reaches further than a linear one: each surface's rectangle is filtered on
+its own, so no light is brought in from its neighbours. The larger pages are drawn with linear filtering and mipmaps
+as before.
+
+It costs nothing while playing, works the same in every renderer (OpenGL and Vulkan, single player and multiplayer),
+adds a few milliseconds per page to loading a level (60 to 85 msec for the 26 pages of `mp/ffa3`) and takes 16 times
+the memory for the lightmaps (a megabyte a page). `r_smoothLightmaps 0` and a map restart bring back the originals.
+The code is `shared/renderer/tr_lightmap_smooth.h`.

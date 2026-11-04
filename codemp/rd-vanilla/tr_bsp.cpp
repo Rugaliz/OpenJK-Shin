@@ -23,6 +23,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 // tr_map.c
 #include "tr_local.h"
+#include "renderer/tr_lightmap_smooth.h"	// (smoother lightmaps, shared with the single player renderer)
 
 /*
 
@@ -166,7 +167,7 @@ R_LoadLightmaps
 ===============
 */
 #define	LIGHTMAP_SIZE	128
-static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldData ) {
+static	void R_LoadLightmaps( lump_t *l, lump_t *surfs, const char *psMapName, world_t &worldData ) {
 	byte		*buf, *buf_p;
 	int			len;
 	byte		image[LIGHTMAP_SIZE*LIGHTMAP_SIZE*4];
@@ -243,8 +244,8 @@ static	void R_LoadLightmaps( lump_t *l, const char *psMapName, world_t &worldDat
 				image[j*4+3] = 255;
 			}
 		}
-		tr.lightmaps[i] = R_CreateImage( va("*%s/lightmap%d",sMapName,i), image,
-			LIGHTMAP_SIZE, LIGHTMAP_SIZE, GL_RGBA, qfalse, qfalse, (qboolean)r_ext_compressed_lightmaps->integer, GL_CLAMP );
+		tr.lightmaps[i] = R_CreateLightmapImage( va("*%s/lightmap%d",sMapName,i), image,
+			LIGHTMAP_SIZE, fileBase, surfs, i, (qboolean)r_ext_compressed_lightmaps->integer );
 	}
 
 	if ( r_lightmap->integer == 2 )	{
@@ -2077,7 +2078,7 @@ void RE_LoadWorldMap_Actual( const char *name, world_t &worldData, int index )
 
 	// load into heap
 	R_LoadShaders( &header->lumps[LUMP_SHADERS], worldData );
-	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS], name, worldData );
+	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS], &header->lumps[LUMP_SURFACES], name, worldData );
 	R_LoadPlanes (&header->lumps[LUMP_PLANES], worldData);
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES], worldData, index );
 	R_LoadSurfaces( &header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES], worldData, index );
