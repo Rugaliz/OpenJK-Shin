@@ -32,6 +32,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_allocator.h"
 #include "tr_extratypes.h"
 #include "tr_extramath.h"
+
+// rend2 packs its drawsurf sort key into 32 bits with room for 11 bits of entity number (2047 entities), the limit
+// rd-common/tr_types.h had before the other renderers went to 64 bit keys
+#undef	REFENTITYNUM_BITS
+#undef	REFENTITYNUM_MASK
+#undef	MAX_REFENTITIES
+#undef	REFENTITYNUM_WORLD
+#define	REFENTITYNUM_BITS	11
+#define	REFENTITYNUM_MASK	((1<<REFENTITYNUM_BITS) - 1)
+#define	MAX_REFENTITIES		((1<<REFENTITYNUM_BITS) - 1)
+#define	REFENTITYNUM_WORLD	((1<<REFENTITYNUM_BITS) - 1)
 #include "tr_fbo.h"
 #include "tr_postprocess.h"
 #include "iqm.h"

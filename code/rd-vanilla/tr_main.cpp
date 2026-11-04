@@ -1133,23 +1133,23 @@ static QINLINE void R_Radix( int byte, int size, drawSurf_t *source, drawSurf_t 
 ===============
 R_RadixSort
 
-Radix sort with 4 byte size buckets
+Radix sort, a byte of the sort key at a time (the QSORT_KEY_BYTES of it that are used, an even number, so the result
+ends where it started)
 ===============
 */
+#ifdef Q3_LITTLE_ENDIAN
+#define QSORT_BYTE( n )		( n )
+#else
+#define QSORT_BYTE( n )		( (int)sizeof( uint64_t ) - 1 - ( n ) )
+#endif
+
 static void R_RadixSort( drawSurf_t *source, int size )
 {
   static drawSurf_t scratch[ MAX_DRAWSURFS ];
-#ifdef Q3_LITTLE_ENDIAN
-  R_Radix( 0, size, source, scratch );
-  R_Radix( 1, size, scratch, source );
-  R_Radix( 2, size, source, scratch );
-  R_Radix( 3, size, scratch, source );
-#else
-  R_Radix( 3, size, source, scratch );
-  R_Radix( 2, size, scratch, source );
-  R_Radix( 1, size, source, scratch );
-  R_Radix( 0, size, scratch, source );
-#endif //Q3_LITTLE_ENDIAN
+  for ( int b = 0; b < QSORT_KEY_BYTES; b += 2 ) {
+    R_Radix( QSORT_BYTE( b ), size, source, scratch );
+    R_Radix( QSORT_BYTE( b + 1 ), size, scratch, source );
+  }
 }
 
 //==========================================================================================
@@ -1179,8 +1179,8 @@ void R_AddDrawSurf( const surfaceType_t *surface, const shader_t *shader, int fo
 
 	// the sort data is packed into a single 32 bit value so it can be
 	// compared quickly during the qsorting process
-	tr.refdef.drawSurfs[index].sort = (shader->sortedIndex << QSORT_SHADERNUM_SHIFT)
-		| tr.shiftedEntityNum | ( fogIndex << QSORT_FOGNUM_SHIFT ) | (int)dlightMap;
+	tr.refdef.drawSurfs[index].sort = ( (uint64_t)shader->sortedIndex << QSORT_SHADERNUM_SHIFT )
+		| tr.shiftedEntityNum | ( (uint64_t)fogIndex << QSORT_FOGNUM_SHIFT ) | (uint64_t)dlightMap;
 	tr.refdef.drawSurfs[index].surface = (surfaceType_t *)surface;
 	tr.refdef.numDrawSurfs++;
 }
@@ -1190,7 +1190,7 @@ void R_AddDrawSurf( const surfaceType_t *surface, const shader_t *shader, int fo
 R_DecomposeSort
 =================
 */
-void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader,
+void R_DecomposeSort( uint64_t sort, int *entityNum, shader_t **shader,
 					 int *fogNum, int *dlightMap ) {
 	*fogNum = ( sort >> QSORT_FOGNUM_SHIFT ) & 31;
 	*shader = tr.sortedShaders[ ( sort >> QSORT_SHADERNUM_SHIFT ) & (MAX_SHADERS-1) ];
@@ -1274,15 +1274,14 @@ void R_AddEntitySurfaces (void) {
 		ent->needDlights = qfalse;
 
 		// preshift the value we are going to OR into the drawsurf sort
-		tr.shiftedEntityNum = tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
+		tr.shiftedEntityNum = (uint64_t)tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
 
 		if ((ent->e.renderfx & RF_ALPHA_FADE))
 		{
 			// we need to make sure this is not sorted before the world..in fact we
 			// want this to be sorted quite late...like how about last.
-			// I don't want to use the highest bit, since no doubt someone fumbled
-			// handling that as an unsigned quantity somewhere
-			tr.shiftedEntityNum |= 0x80000000;
+			// (the bit above the shader index)
+			tr.shiftedEntityNum |= (uint64_t)1 << QSORT_ALPHAFADE_SHIFT;
 		}
 		//
 		// the weapon model must be handled special --

@@ -667,7 +667,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	int				depthRange, oldDepthRange;
 	int				i;
 	drawSurf_t		*drawSurf;
-	unsigned int	oldSort;
+	uint64_t		oldSort;
 	float			originalTime;
 	trRefEntity_t	*curEnt;
 	postRender_t	*pRender;
@@ -691,7 +691,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	oldFogNum = -1;
 	oldDepthRange = qfalse;
 	oldDlighted = qfalse;
-	oldSort = (unsigned int) -1;
+	oldSort = (uint64_t) -1;
 	depthRange = qfalse;
 
 	backEnd.pc.c_surfaces += numDrawSurfs;
