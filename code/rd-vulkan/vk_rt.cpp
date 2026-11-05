@@ -400,12 +400,16 @@ static struct {
 		vkRtStructure_t	tlas;
 		vkRtBuffer_t	instances, scratch;
 		int				frame;				// vk.frameCounter + 1 it was built for
+		vkRtStructure_t	characters;			// the characters of the frame (VK_RT_SetCharacters)
+		vkRtBuffer_t	charactersInput, charactersScratch;
+		int				charactersFrame;	// vk.frameCounter + 1 they were built for
 	} frames[VK_FRAMES_IN_FLIGHT];
 } rtScene;
 
 #define RT_MAX_INSTANCES	1024
-#define RT_MASK_WORLD		0x01			// the instance masks: the level, its brush models
+#define RT_MASK_WORLD		0x01			// the instance masks: the level, its brush models, the characters
 #define RT_MASK_BMODEL		0x02
+#define RT_MASK_CHARACTERS	0x04
 
 static void VK_RT_AddTriangle( std::vector<float> &xyz, std::vector<uint32_t> &indexes, const float *a, const float *b, const float *c )
 {
@@ -523,6 +527,10 @@ static void VK_RT_FreeScene( void )
 		VK_RT_FreeBuffer( &rtScene.frames[i].instances );
 		VK_RT_FreeBuffer( &rtScene.frames[i].scratch );
 		rtScene.frames[i].frame = 0;
+		VK_RT_FreeStructure( &rtScene.frames[i].characters );
+		VK_RT_FreeBuffer( &rtScene.frames[i].charactersInput );
+		VK_RT_FreeBuffer( &rtScene.frames[i].charactersScratch );
+		rtScene.frames[i].charactersFrame = 0;
 	}
 	rtScene.world = NULL;
 }
@@ -610,6 +618,12 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 	{
 		VK_RT_Place( &instances[count++], world, NULL, NULL, RT_MASK_WORLD );
 	}
+	if ( frame.charactersFrame == vk.frameCounter + 1 && frame.characters.handle )
+	{
+		rtModel_t characters = {};
+		characters.blas = frame.characters;
+		VK_RT_Place( &instances[count++], &characters, NULL, NULL, RT_MASK_CHARACTERS );	// (in world space already)
+	}
 	for ( int i = 0; i < backEnd.refdef.num_entities && count < RT_MAX_INSTANCES; i++ )
 	{
 		const trRefEntity_t *ent = &backEnd.refdef.entities[i];
@@ -633,7 +647,12 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 		return VK_NULL_HANDLE;
 	}
 
-	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );
+	// (built again in the same frame, it may have been read by shaders already)
+	VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+	barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+	vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, NULL, 0, NULL );
 	if ( !VK_RT_BuildInstances( cmd, &frame.tlas, &frame.scratch, frame.instances.address, count ) )
 	{
 		return VK_NULL_HANDLE;
@@ -652,6 +671,46 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 			(int)( rtScene.models.size() - modelsBefore ), triangles, VK_Now() - start );
 	}
 	return frame.tlas.handle;
+}
+
+/*
+=================
+VK_RT_SetCharacters
+
+The triangles of the characters this frame (xyz: 3 floats a point, world space; indexes: 3 a triangle), into a
+bottom level structure built fast in vk.cmd (outside a render pass); the next VK_RT_Scene of the frame places it.
+=================
+*/
+bool VK_RT_SetCharacters( const float *xyz, int numPoints, const int *indexes, int numTriangles )
+{
+	if ( !vk.rayTracing || numPoints < 3 || numTriangles < 1 )
+	{
+		return false;
+	}
+	auto &frame = rtScene.frames[vk.frameIndex];
+	const VkDeviceSize vertexBytes = ( (VkDeviceSize)numPoints * 3 * sizeof( float ) + 15 ) & ~(VkDeviceSize)15;
+	const VkDeviceSize bytes = vertexBytes + (VkDeviceSize)numTriangles * 3 * sizeof( uint32_t );
+	if ( frame.charactersInput.size < bytes )
+	{
+		VK_RT_FreeBuffer( &frame.charactersInput );
+		if ( !VK_RT_NewBuffer( &frame.charactersInput, bytes + bytes / 2, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
+		{
+			return false;
+		}
+	}
+	memcpy( frame.charactersInput.mapped, xyz, (size_t)numPoints * 3 * sizeof( float ) );
+	memcpy( (byte *)frame.charactersInput.mapped + vertexBytes, indexes, (size_t)numTriangles * 3 * sizeof( uint32_t ) );
+
+	VkCommandBuffer cmd = vk.cmd;
+	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );
+	if ( !VK_RT_BuildTriangles( cmd, &frame.characters, &frame.charactersScratch, frame.charactersInput.address, (uint32_t)numPoints,
+			frame.charactersInput.address + vertexBytes, (uint32_t)numTriangles, true ) )
+	{
+		return false;
+	}
+	frame.charactersFrame = vk.frameCounter + 1;
+	frame.frame = 0;	// (the top level structure of the frame is made again with them)
+	return true;
 }
 
 /*

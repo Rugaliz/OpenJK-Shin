@@ -92,8 +92,12 @@ triangles, made in 2 ms on the first frame.
 
 `r_rtDebug 1` darkens the view where a ray from the pixel towards the level's sun is blocked (or the surface faces away
 from it), `r_rtDebug 2` shows only that. The result should match the shadows the level's own lighting has
-(`r_lightmap 1` shows that lighting alone), with hard edges. Still to come: the characters' shadows
-(`cg_shadows 5`) and the shadows of dynamic lights.
+(`r_lightmap 1` shows that lighting alone), with hard edges.
+
+The characters' shadows (`cg_shadows 5`, Shadows > Ray Traced, see [shadows](shadows.md)): every frame the
+triangles of the characters go into a bottom level structure built for speed of building, placed by the frame's top
+level structure (mask 0x04, the level is 0x01 and its brush models 0x02); `post_rt_shadow.frag` reads the casters from
+a buffer by its device address. Still to come: the shadows of dynamic lights.
 
 ## What is not there yet
 

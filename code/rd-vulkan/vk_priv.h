@@ -154,6 +154,7 @@ bool		VK_RT_BuildInstances( VkCommandBuffer cmd, vkRtStructure_t *tlas, vkRtBuff
 				uint32_t numInstances );
 void		VK_RT_Barrier( VkCommandBuffer cmd, VkPipelineStageFlags stage );
 VkAccelerationStructureKHR	VK_RT_Scene( void );		// this frame's top level structure (the level and its brush models)
+bool		VK_RT_SetCharacters( const float *xyz, int numPoints, const int *indexes, int numTriangles );
 
 // vk_mem.cpp
 typedef struct vkAlloc_s {

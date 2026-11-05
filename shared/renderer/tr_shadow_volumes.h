@@ -68,6 +68,7 @@ typedef struct {
 
 static std::vector<shadowPt_t>	shPts;
 static std::vector<int>			shTris;		// all triangles of all casters, 3 point indices each
+static std::vector<int>			shRtTris;	// ray traced: the same, and those of the casters only there for their shadow
 static std::vector<int>			shCaps;		// the triangles facing the light
 static std::vector<int>			shWalls;	// directed edges, 2 point indices each
 static float					shStrengthSum;
@@ -124,6 +125,7 @@ static void RB_ShadowClear( void )
 {
 	shPts.clear();
 	shTris.clear();
+	shRtTris.clear();
 	shCaps.clear();
 	shWalls.clear();
 	shStrengthSum = 0.0f;
@@ -132,7 +134,7 @@ static void RB_ShadowClear( void )
 }
 
 // 2 = stencil volumes, 4 = shadow maps (cg_shadows 4, or 2 with r_shadowMaps 1; volumes where the renderer can't
-// draw maps), 0 = neither
+// draw maps), 5 = ray traced (cg_shadows 5; maps, then volumes, where the renderer can't), 0 = none
 static int RB_ShadowMode( void )
 {
 	const int shadows = r_shadows->integer;
@@ -140,7 +142,10 @@ static int RB_ShadowMode( void )
 	if ( glConfig.stencilBits < 4 || !R_MODEL_SHADOWS( shadows ) ) {
 		return 0;
 	}
-	if ( ( shadows == 4 || r_shadowMaps->integer ) && R_ShadowMaps_Available() ) {
+	if ( shadows == 5 && R_RayTracedShadows_Available() ) {
+		return 5;
+	}
+	if ( ( shadows >= 4 || r_shadowMaps->integer ) && R_ShadowMaps_Available() ) {
 		return 4;
 	}
 	return 2;
@@ -322,6 +327,11 @@ void RB_ShadowTessEnd( void )
 			shTris.push_back( p2 );
 			shTris.push_back( p3 );
 		}
+		if ( mode == 5 ) {
+			shRtTris.push_back( p1 );
+			shRtTris.push_back( p2 );
+			shRtTris.push_back( p3 );
+		}
 
 		vec3_t d1, d2, normal;
 		VectorSubtract( shWorld[r2], shWorld[r1], d1 );
@@ -336,8 +346,8 @@ void RB_ShadowTessEnd( void )
 		shCaps.push_back( p2 );
 		shCaps.push_back( p3 );
 
-		if ( mode == 4 ) {
-			continue;	// (the shadow maps only need the triangles)
+		if ( mode >= 4 ) {
+			continue;	// (the shadow maps and the rays only need the triangles)
 		}
 		RB_ShadowCountEdge( r1, r2, &numUsed );
 		RB_ShadowCountEdge( r2, r3, &numUsed );
@@ -364,7 +374,7 @@ void RB_ShadowTessEnd( void )
 	shStrengthSum += strength;
 	shCasters++;
 
-	if ( mode == 4 && (int)shCaps.size() > capsStart ) {
+	if ( mode >= 4 && (int)shCaps.size() > capsStart ) {
 		shadowSurf_t surf;
 		surf.ent = ent;
 		surf.capsStart = capsStart;
@@ -481,8 +491,8 @@ static void RB_ShadowMapsFinish( void );
 
 void RB_ShadowFinish( void )
 {
-	if ( RB_ShadowMode() == 4 ) {
-		RB_ShadowMapsFinish();
+	if ( RB_ShadowMode() >= 4 ) {
+		RB_ShadowMapsFinish();	// (the ray traced shadows too: the casters are found the same way)
 		return;
 	}
 	if ( RB_ShadowMode() != 2 || shCaps.empty() ) {
@@ -716,6 +726,7 @@ static void RB_ShadowMapsFinish( void )
 	static std::vector<shadowCaster_t>	casters;
 	shadowMapCaster_t	maps[SHADOWMAP_MAX_CASTERS];
 	int					numMaps = 0;
+	const bool			rayTraced = RB_ShadowMode() == 5;	// (then there are no tiles to draw)
 
 	if ( backEnd.viewParms.isPortal || shSurfs.empty() ) {
 		RB_ShadowClear();
@@ -755,7 +766,9 @@ static void RB_ShadowMapsFinish( void )
 	}
 	std::sort( casters.begin(), casters.end(), []( const shadowCaster_t &a, const shadowCaster_t &b ) { return a.dist2 < b.dist2; } );
 
-	memset( shAtlas, 0, sizeof( shAtlas ) );
+	if ( !rayTraced ) {
+		memset( shAtlas, 0, sizeof( shAtlas ) );
+	}
 
 	for ( size_t c = 0; c < casters.size() && numMaps < SHADOWMAP_MAX_CASTERS; c++ ) {
 		const shadowCaster_t	*caster = &casters[c];
@@ -788,10 +801,11 @@ static void RB_ShadowMapsFinish( void )
 		const float toTexels = SHADOWMAP_TILE / size;
 
 		// the tile
-		for ( int i = 0; i < SHADOWMAP_TILE * SHADOWMAP_TILE; i++ ) {
+		const int tx = numMaps % SHADOWMAP_TILES, ty = numMaps / SHADOWMAP_TILES;
+		for ( int i = 0; !rayTraced && i < SHADOWMAP_TILE * SHADOWMAP_TILE; i++ ) {
 			shTile[i] = -1.0f;
 		}
-		for ( int s = 0; s < caster->numSurfs; s++ ) {
+		for ( int s = 0; !rayTraced && s < caster->numSurfs; s++ ) {
 			const shadowSurf_t *surf = &shSurfs[order[caster->firstSurf + s]];
 			for ( int k = surf->capsStart; k + 2 < surf->capsEnd; k += 3 ) {
 				float tri[3][3];
@@ -804,8 +818,7 @@ static void RB_ShadowMapsFinish( void )
 				RB_ShadowMapTriangle( tri[0], tri[1], tri[2] );
 			}
 		}
-		const int tx = numMaps % SHADOWMAP_TILES, ty = numMaps / SHADOWMAP_TILES;
-		for ( int y = 0; y < SHADOWMAP_TILE; y++ ) {
+		for ( int y = 0; !rayTraced && y < SHADOWMAP_TILE; y++ ) {
 			byte *dst = shAtlas + ( ( ty * SHADOWMAP_TILE + y ) * SHADOWMAP_ATLAS + tx * SHADOWMAP_TILE ) * 4;
 			for ( int x = 0; x < SHADOWMAP_TILE; x++, dst += 4 ) {
 				const float n = shTile[y * SHADOWMAP_TILE + x];
@@ -835,6 +848,8 @@ static void RB_ShadowMapsFinish( void )
 		map->tile[1] = (float)ty / SHADOWMAP_TILES;
 		const float uv[4] = { uc - 0.5f * size, uc + 0.5f * size, vc - 0.5f * size, vc + 0.5f * size };
 		RB_ShadowMapRect( U, V, L, uv, hmax, map->floorZ, map->rect );
+		VectorCopy( L, map->light );
+		map->light[3] = r_shadowSoftness->value * 0.12f;	// (the spread of the volumes' samples)
 		numMaps++;
 	}
 
@@ -858,7 +873,17 @@ static void RB_ShadowMapsFinish( void )
 		}
 
 		qglLoadIdentity();
-		RB_ShadowMapsApply( maps, numMaps, shAtlas, skipCasters ? SHADOW_STENCIL_SKIP : 0 );
+		if ( rayTraced ) {
+			static std::vector<float> xyz;
+			xyz.resize( shPts.size() * 3 );
+			for ( size_t i = 0; i < shPts.size(); i++ ) {
+				VectorCopy( shPts[i].xyz, &xyz[i * 3] );
+			}
+			RB_RayTracedShadowsApply( maps, numMaps, xyz.data(), (int)shPts.size(), shRtTris.data(), (int)shRtTris.size() / 3,
+				skipCasters ? SHADOW_STENCIL_SKIP : 0 );
+		} else {
+			RB_ShadowMapsApply( maps, numMaps, shAtlas, skipCasters ? SHADOW_STENCIL_SKIP : 0 );
+		}
 
 		// and the marks cleared again
 		if ( skipCasters ) {

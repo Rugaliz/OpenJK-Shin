@@ -1204,6 +1204,15 @@ static void ShadowMaps_Reset( void ) {
 	ri.Cvar_Set( "r_shadowMapsAvail", R_ShadowMaps_Available() ? "1" : "0" );	// (what the menus look at)
 }
 
+// (ray traced shadows are the Vulkan renderer's, vk_post.cpp)
+qboolean R_RayTracedShadows_Available( void ) {
+	return qfalse;
+}
+
+void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters, const float *xyz, int numPoints,
+							   const int *indexes, int numTriangles, int stencilSkip ) {
+}
+
 qboolean R_ShadowMaps_Available( void ) {
 	return (qboolean)( R_GLSL_Available() && qglActiveTextureARB && qglMultiTexCoord2fARB && !shadowPass.failed );
 }

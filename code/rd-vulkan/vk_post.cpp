@@ -46,7 +46,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
 	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_SHADOW, PASS_SHADOW_MUL,
-	PASS_SHAFTS, PASS_SHAFTS_ADD, PASS_EYE, PASS_RT_DEBUG, PASS_COUNT
+	PASS_SHAFTS, PASS_SHAFTS_ADD, PASS_EYE, PASS_RT_DEBUG,
+	PASS_RT_SHADOW, PASS_COUNT
 };
 
 typedef struct {
@@ -74,6 +75,7 @@ static const passInfo_t passInfos[PASS_COUNT] = {
 	{ vk_spirv_post_shafts_frag, sizeof( vk_spirv_post_shafts_frag ), true },
 	{ vk_spirv_post_eye_frag, sizeof( vk_spirv_post_eye_frag ), false },
 	{ vk_spirv_post_rt_debug_frag, sizeof( vk_spirv_post_rt_debug_frag ), false, false, true },
+	{ vk_spirv_post_rt_shadow_frag, sizeof( vk_spirv_post_rt_shadow_frag ), false, false, true },
 };
 
 typedef struct {
@@ -112,6 +114,9 @@ static struct {
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
 	postImage_t			sharp;						// the view sharpened (r_sharpen)
 	postImage_t			shadow;						// the darkening of the shadow maps
+	postImage_t			rtShadow;					// the ray traced shadows, at half the size of the view before the blur
+	vkRtBuffer_t		rtCasters[VK_FRAMES_IN_FLIGHT];	// their casters (RT_CASTER_SECTIONS lots a frame, read by address)
+	int					rtCastersFrame[VK_FRAMES_IN_FLIGHT], rtCastersUsed[VK_FRAMES_IN_FLIGHT];
 	postImage_t			shaftsA, shaftsB;			// light shafts: the sky near the sun, then blurred towards it
 	postImage_t			lum, lumAverage;			// eye adaptation: the brightness of the view shrunk, then one pixel
 	VkBuffer			eyeBuffer;					// its measurements on their way back, one for each frame in flight
@@ -122,6 +127,7 @@ static struct {
 	float				eyeExposure;
 	bool				eyeFailed;
 	bool				atlasMade, shadowFailed;
+	bool				rtShadowFailed;
 	postImage_t			bloom[POST_BLOOM_LEVELS];
 	bool				smaaTextures;
 
@@ -256,6 +262,7 @@ static void FreeImages( void )
 	FreeImage( &post.result );
 	FreeImage( &post.sharp );
 	FreeImage( &post.shadow );
+	FreeImage( &post.rtShadow );
 	FreeImage( &post.shaftsA );
 	FreeImage( &post.shaftsB );
 	FreeImage( &post.lum );
@@ -280,7 +287,8 @@ static bool EnsureImages( int width, int height )
 		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height ) && NewImage( &post.shadow, width, height )
 		&& NewImage( &post.shaftsA, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) )
 		&& NewImage( &post.shaftsB, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) )
-		&& NewImage( &post.lum, EYE_LUM_SIZE, EYE_LUM_SIZE ) && NewImage( &post.lumAverage, 1, 1 );
+		&& NewImage( &post.lum, EYE_LUM_SIZE, EYE_LUM_SIZE ) && NewImage( &post.lumAverage, 1, 1 )
+		&& NewImage( &post.rtShadow, ( width + 1 ) / 2, ( height + 1 ) / 2 );
 	for ( int i = 0; ok && i < POST_BLOOM_LEVELS; i++ )
 	{
 		ok = NewImage( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
@@ -647,6 +655,8 @@ static void Barrier( VkImage image, VkImageAspectFlags aspect, VkImageLayout fro
 {
 	VK_ImageBarrier( vk.cmd, image, aspect, from, to, srcStage, srcAccess, dstStage, dstAccess );
 }
+
+#define RT_CASTER_SECTIONS	4	// the views a frame that can have ray traced shadows
 
 static cvar_t *r_rtDebug;	// 1: the view darkened where rays to the sun are blocked (vk_rt.cpp), 2: that alone
 
@@ -1212,6 +1222,140 @@ void RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, const
 }
 
 /*
+=================
+RB_RayTracedShadowsApply
+
+The ray traced shadows of the characters (cg_shadows 5, see tr_shadow_maps.h): their triangles into the frame's ray
+tracing structure, the casters into a buffer the shader reads by its address, then one pass over the view at half its
+size (a quarter of the rays) into post.rtShadow, where each pixel traces rays only for the casters whose shadow can
+fall on it; blurred along the surfaces at the size of the view into post.shadow, and multiplied into the picture where
+the stencil does not mark a character.
+=================
+*/
+qboolean R_RayTracedShadows_Available( void )
+{
+	return ( post.ready && vk.rayTracing && !post.rtShadowFailed && !post.shadowFailed ) ? qtrue : qfalse;
+}
+
+void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters, const float *xyz, int numPoints,
+	const int *indexes, int numTriangles, int stencilSkip )
+{
+	const int x = backEnd.viewParms.viewportX;
+	const int y = backEnd.viewParms.viewportY;
+	const int width = backEnd.viewParms.viewportWidth;
+	const int height = backEnd.viewParms.viewportHeight;
+	if ( !R_RayTracedShadows_Available() || numCasters <= 0 || x < 0 || y < 0 || x + width > vk.width || y + height > vk.height )
+	{
+		return;
+	}
+	if ( !EnsureImages( width, height ) || !EnsureRtLayout() )
+	{
+		post.rtShadowFailed = true;
+		return;
+	}
+
+	VK_EnsureFrame();
+
+	// the casters, as post_rt_shadow.frag reads them (5 vec4 each)
+	const int slot = vk.frameIndex;
+	if ( post.rtCastersFrame[slot] != vk.frameCounter + 1 )
+	{
+		post.rtCastersFrame[slot] = vk.frameCounter + 1;
+		post.rtCastersUsed[slot] = 0;
+	}
+	const VkDeviceSize sectionBytes = SHADOWMAP_MAX_CASTERS * 20 * sizeof( float );
+	if ( post.rtCastersUsed[slot] >= RT_CASTER_SECTIONS ||
+		 ( !post.rtCasters[slot].buffer && !VK_RT_NewBuffer( &post.rtCasters[slot], sectionBytes * RT_CASTER_SECTIONS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true ) ) )
+	{
+		return;
+	}
+	const VkDeviceSize offset = sectionBytes * post.rtCastersUsed[slot]++;
+	float *data = (float *)( (byte *)post.rtCasters[slot].mapped + offset );
+	numCasters = Q_min( numCasters, SHADOWMAP_MAX_CASTERS );
+	for ( int i = 0; i < numCasters; i++, data += 20 )
+	{
+		const shadowMapCaster_t *c = &casters[i];
+		memcpy( data, c->rowS, 4 * sizeof( float ) );
+		memcpy( data + 4, c->rowT, 4 * sizeof( float ) );
+		data[8] = c->tile[0];
+		data[9] = c->tile[1];
+		data[10] = c->tile[0] + 1.0f / SHADOWMAP_TILES;
+		data[11] = c->tile[1] + 1.0f / SHADOWMAP_TILES;
+		memcpy( data + 12, c->light, 4 * sizeof( float ) );
+		data[16] = c->floorZ;
+		data[17] = c->darkness;
+		data[18] = data[19] = 0.0f;
+	}
+
+	VK_EndRenderPass();	// (resolves the view into the single sample colour and depth)
+	VK_FlushUploads( false );
+	if ( !VK_RT_SetCharacters( xyz, numPoints, indexes, numTriangles ) )
+	{
+		return;
+	}
+	const VkAccelerationStructureKHR scene = VK_RT_Scene();
+	if ( !scene )
+	{
+		return;
+	}
+
+	const VkImageAspectFlags depthAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+		VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+
+	const float *proj = backEnd.viewParms.projectionMatrix;
+	const float *m = backEnd.viewParms.world.modelMatrix;	// world to eye; its inverse, from the eye to the world, below
+	const postInput_t depth = { post.depthView, true, true };
+	postInput_t inputs[3] = { depth, {}, {} };
+
+	float push[32] = {
+		proj[0], proj[5], proj[8], proj[9],
+		proj[10], proj[14], (float)width / vk.width, (float)height / vk.height,
+		(float)x / vk.width, (float)( vk.height - ( y + height ) ) / vk.height, 0.0f, 0.0f };
+	for ( int j = 0; j < 3; j++ )
+	{
+		float *row = push + 12 + j * 4;
+		row[3] = 0.0f;
+		for ( int k = 0; k < 3; k++ )
+		{
+			row[k] = m[j * 4 + k];
+			row[3] -= m[j * 4 + k] * m[12 + k];
+		}
+	}
+	const VkDeviceAddress address = post.rtCasters[slot].address + offset;
+	const uint32_t count = (uint32_t)numCasters;
+	memcpy( push + 24, &address, sizeof( address ) );
+	memcpy( push + 26, &count, sizeof( count ) );
+	RunPass( PASS_RT_SHADOW, &post.rtShadow, false, inputs, push, 28, NULL, scene );
+
+	// the few rays a pixel has, blurred along the surfaces (the blur of the ambient occlusion)
+	float blur[16] = {
+		proj[0], proj[5], proj[8], proj[9],
+		proj[10], proj[14], (float)width, (float)height,
+		1.0f, 0.0f, 0.0f, 0.0f,
+		(float)width / vk.width, (float)height / vk.height, (float)x / vk.width, (float)( vk.height - ( y + height ) ) / vk.height };
+	inputs[1] = Input( &post.rtShadow );
+	RunPass( PASS_SSAO_BLUR, &post.aoB, false, inputs, blur );
+	blur[8] = 0.0f;
+	blur[9] = 1.0f;
+	inputs[1] = Input( &post.aoB );
+	RunPass( PASS_SSAO_BLUR, &post.shadow, false, inputs, blur );
+
+	Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
+
+	VK_SetExternalTexture( POST_SHADOW_ID, post.shadow.image, post.shadow.view, width, height );
+	const GLboolean scissored = qglIsEnabled( GL_SCISSOR_TEST );
+	DrawBack( x, y, width, height, POST_SHADOW_ID, GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ZERO | GLS_DSTBLEND_SRC_COLOR, stencilSkip );
+	if ( scissored )
+	{
+		qglEnable( GL_SCISSOR_TEST );
+	}
+	SetViewportAndScissor();
+}
+
+/*
 =============================================================================
 
 START AND END
@@ -1228,6 +1372,7 @@ void R_Post_Init( void )
 	ri.Cvar_Set( "r_smaaAvail", post.ready && post.smaaOk ? "1" : "0" );
 	ri.Cvar_Get( "r_shadowMapsAvail", "0", 0 );
 	ri.Cvar_Set( "r_shadowMapsAvail", R_ShadowMaps_Available() ? "1" : "0" );
+	// (r_rtAvail, for the Ray Traced shadows, is set by VK_RT_Init)
 	if ( post.ready )
 	{
 		Com_Printf( "...using post processing\n" );
@@ -1337,6 +1482,10 @@ void VK_ShutdownPost( void )
 		if ( post.rtPools[i] ) vkDestroyDescriptorPool( vk.device, post.rtPools[i], NULL );
 	}
 	if ( post.rtPipelineLayout ) vkDestroyPipelineLayout( vk.device, post.rtPipelineLayout, NULL );
+	for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
+	{
+		VK_RT_FreeBuffer( &post.rtCasters[i] );
+	}
 	if ( post.rtSetLayout ) vkDestroyDescriptorSetLayout( vk.device, post.rtSetLayout, NULL );
 	vkDestroyImageView( vk.device, post.depthView, NULL );
 	vkDestroySampler( vk.device, post.linear, NULL );
