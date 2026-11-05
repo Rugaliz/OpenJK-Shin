@@ -8880,6 +8880,7 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
 		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
 		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on. Detailed: it picks out the bumps of the surface too." },
+		{ "lightshafts", "r_lightShafts", "r_postAvail", "Light Shafts:", "Rays of sunlight through gaps and around edges, on levels with a sun." },
 		{ "sharpen", "r_sharpen", "r_postAvail", "Sharpening:", "Crisper textures, without halos. Good with SMAA or Anti-Aliasing." },
 	};
 	itemDef_t	*rows[24];
@@ -9000,7 +9001,13 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 	{
 		const float rowsFit = ( 291 - 4 - firstY ) / numRows;
 		if ( pitch > rowsFit )
+		{
+			// closer rows, and their text smaller by as much, so the lines don't touch
+			const float shrink = floorf( rowsFit ) / pitch;
 			pitch = barHeight = floorf( rowsFit );
+			for ( i = 0; i < numRows; i++ )
+				rows[i]->textscale *= shrink;
+		}
 	}
 
 	if ( driverButton )

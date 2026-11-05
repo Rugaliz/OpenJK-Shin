@@ -9,7 +9,7 @@ nothing else changes. All of it is off by default, nothing changes unless you tu
 console (the key left of 1, or Shift+Esc) or put in your config file, and they are saved.
 
 You do not need the console: **Setup > More Video** has a row for each of them (Ambient Occlusion, Bloom, SMAA Edge
-Smoothing, Shader Dynamic Lights, Sharpening), which take effect at once. A row only shows up if what it needs is there
+Smoothing, Shader Dynamic Lights, Light Shafts, Sharpening), which take effect at once. A row only shows up if what it needs is there
 (SMAA needs OpenGL 3.3, the rest OpenGL 2.0). To make room, the rows of that page are a little closer together than
 before, and in Jedi Academy the panel is taller. Jedi Academy multiplayer has the rows on the More Video page of Setup
 both in the main menu (where the slider for the brightness moves up a little to make room) and in the game menu. Jedi
@@ -35,6 +35,7 @@ out of the occlusion. Needs OpenGL 2.0 and framebuffer objects (every graphics c
 | `r_bloomIntensity` | 0.5 | How strong the glow is. |
 | `r_smaa` | 0 | **SMAA**, a high quality edge smoothing that works on what the multisampling (the Anti-Aliasing setting) leaves behind, like the edges that textures and shaders make. Unlike FXAA it only touches the edges it finds, so textures stay as sharp as they are. Needs OpenGL 3.3. Use it with or without multisampling. |
 | `r_sharpen` | 0 | **Sharpening** (contrast adaptive sharpening, the method of AMD's FidelityFX CAS), 0 (off) to 1 (strongest). Brings out the detail of the textures, especially with SMAA or multisampling, without halos: each pixel is sharpened by as much as the pixels around it leave room for before they would clip, so flat and busy areas get the most and edges that are already sharp the least. Setup > More Video > Sharpening: Off, Low (0.3), Medium (0.6), High (1). |
+| `r_lightShafts` | 0 | **Light shafts**: rays of sunlight, on levels whose sky gives a sun. The sky near the sun is blurred along lines towards the sun (the scattering of light as a post process of Mitchell, GPU Gems 3, chapter 13), so where something stands in front of the sky the rays have gaps: they come through windows and gratings, between pillars and around the edges of roofs, and the sun gets a soft glow. Only the brighter parts of the sky give rays; they fade out as the sun leaves the view. 1 is the normal strength, up to 2. Done at a quarter of the size of the view, about the cost of bloom. Setup > More Video > Light Shafts: Off, On. |
 | `r_postDebug` | 0 | For testing: 1 runs the effects' plumbing with nothing in it (the picture must not change), 2 shows the occlusion alone. |
 
 The effects run one after the other: occlusion, bloom, SMAA, then sharpening. Cost on a Radeon RX 7800 XT at 3440x1440 with 8x
@@ -77,6 +78,9 @@ GLSL; without it the old way (textures) is used. In multiplayer it replaces the 
 Contrast adaptive sharpening is AMD's method (FidelityFX CAS, GPUOpen, published under the MIT license); the shader
 here is written from its description (`Post_Sharpen` in `shared/renderer/tr_post.h`, `post_sharpen.frag` for
 Vulkan) and runs on any graphics card.
+
+The light shafts follow Kenny Mitchell's "Volumetric Light Scattering as a Post-Process" (GPU Gems 3, chapter 13);
+the shaders are written here (`Post_LightShafts` in `shared/renderer/tr_post.h`, `post_shafts.frag` for Vulkan).
 
 
 SMAA is Subpixel Morphological Antialiasing by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and

@@ -1059,6 +1059,7 @@ typedef struct trGlobals_s {
 
 	vec3_t					sunLight;			// from the sky shader for this level
 	vec3_t					sunDirection;
+	qboolean				levelHasSun;		// the sky shader of this level gave the sun (sunDirection is a default otherwise)
 	int						sunSurfaceLight;	// from the sky shader for this level
 	vec3_t					sunAmbient;			// from the sky shader	(only used for John's terrain system)
 
@@ -1220,6 +1221,7 @@ extern cvar_t	*r_bloom;
 extern cvar_t	*r_bloomThreshold;
 extern cvar_t	*r_bloomIntensity;
 extern cvar_t	*r_sharpen;			// contrast adaptive sharpening of the 3D view, 0 (off) to 1
+extern cvar_t	*r_lightShafts;		// rays of sunlight over the 3D view, on levels with a sun: 0 (off), 1 (normal) to 2
 extern cvar_t	*r_smaa;
 
 extern cvar_t	*r_environmentMapping;

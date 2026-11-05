@@ -29,6 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "renderer/tr_smaa_data.h"
 #include "vk_priv.h"
 #include "vk_spirv.h"
+#include "renderer/tr_light_shafts.h"
 #include <zlib.h>
 #include <string>
 
@@ -43,7 +44,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
-	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_SHADOW, PASS_SHADOW_MUL, PASS_COUNT
+	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_SHADOW, PASS_SHADOW_MUL,
+	PASS_SHAFTS, PASS_SHAFTS_ADD, PASS_COUNT
 };
 
 typedef struct {
@@ -66,6 +68,8 @@ static const passInfo_t passInfos[PASS_COUNT] = {
 	{ vk_spirv_post_sharpen_frag, sizeof( vk_spirv_post_sharpen_frag ), false },
 	{ vk_spirv_post_shadow_frag, sizeof( vk_spirv_post_shadow_frag ), false },
 	{ vk_spirv_post_shadow_frag, sizeof( vk_spirv_post_shadow_frag ), false, true },
+	{ vk_spirv_post_shafts_frag, sizeof( vk_spirv_post_shafts_frag ), false },
+	{ vk_spirv_post_shafts_frag, sizeof( vk_spirv_post_shafts_frag ), true },
 };
 
 typedef struct {
@@ -101,6 +105,7 @@ static struct {
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
 	postImage_t			sharp;						// the view sharpened (r_sharpen)
 	postImage_t			shadow;						// the darkening of the shadow maps
+	postImage_t			shaftsA, shaftsB;			// light shafts: the sky near the sun, then blurred towards it
 	bool				atlasMade, shadowFailed;
 	postImage_t			bloom[POST_BLOOM_LEVELS];
 	bool				smaaTextures;
@@ -235,6 +240,8 @@ static void FreeImages( void )
 	FreeImage( &post.result );
 	FreeImage( &post.sharp );
 	FreeImage( &post.shadow );
+	FreeImage( &post.shaftsA );
+	FreeImage( &post.shaftsB );
 	for ( int i = 0; i < POST_BLOOM_LEVELS; i++ )
 	{
 		FreeImage( &post.bloom[i] );
@@ -252,7 +259,9 @@ static bool EnsureImages( int width, int height )
 	VK_WaitIdle();
 	FreeImages();
 	bool ok = NewImage( &post.scene, width, height ) && NewImage( &post.aoA, width, height ) && NewImage( &post.aoB, width, height )
-		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height ) && NewImage( &post.shadow, width, height );
+		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height ) && NewImage( &post.shadow, width, height )
+		&& NewImage( &post.shaftsA, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) )
+		&& NewImage( &post.shaftsB, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) );
 	for ( int i = 0; ok && i < POST_BLOOM_LEVELS; i++ )
 	{
 		ok = NewImage( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
@@ -576,7 +585,8 @@ static bool PostWanted( void )
 	{
 		return false;
 	}
-	return r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f;
+	return r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f ||
+		r_lightShafts->value > 0.0f;
 }
 
 // ambient occlusion, blurred, into post.aoA
@@ -599,6 +609,28 @@ static void Ssao( int x, int y, int width, int height, const postInput_t &depth 
 	inputs[1] = Input( &post.aoB );
 	push[8] = 0.0f; push[9] = 1.0f;
 	RunPass( PASS_SSAO_BLUR, &post.aoA, false, inputs, push );
+}
+
+// light shafts (see tr_light_shafts.h): the sky near the sun into post.shaftsA (while the depth can be read)
+static void LightShaftsSky( int x, int y, int width, int height, const float sun[3], const postInput_t &depth )
+{
+	const float push[16] = { sun[0], 1.0f - sun[1], (float)width / height, sun[2],
+		(float)width / vk.width, (float)height / vk.height, (float)x / vk.width, (float)( vk.height - ( y + height ) ) / vk.height,
+		0.0f };
+	postInput_t inputs[3] = { Input( &post.scene ), depth, {} };
+	RunPass( PASS_SHAFTS, &post.shaftsA, false, inputs, push );
+}
+
+// ... blurred towards the sun into post.shaftsB, and added over the view with the effects on it (post.final)
+static void LightShaftsAdd( const float sun[3] )
+{
+	float push[16] = { sun[0], 1.0f - sun[1], 0.0f, sun[2], 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+	postInput_t inputs[3] = { Input( &post.shaftsA ), {}, {} };
+	RunPass( PASS_SHAFTS, &post.shaftsB, false, inputs, push );
+
+	push[8] = 2.0f;
+	inputs[0] = Input( &post.shaftsB );
+	RunPass( PASS_SHAFTS_ADD, &post.final, true, inputs, push );
 }
 
 // the bright parts shrunk and grown again, into post.bloom[0]
@@ -718,6 +750,8 @@ void RB_PostProcess( void )
 	}
 	const bool ssao = r_ssao->integer != 0;
 	const bool bloom = r_bloom->integer != 0;
+	float sun[3];
+	const bool shafts = R_LightShaftsSun( sun );
 	const bool smaa = r_smaa->integer && post.smaaOk && SmaaReady();
 	if ( !EnsureImages( width, height ) )
 	{
@@ -751,11 +785,18 @@ void RB_PostProcess( void )
 
 	// the depth is read where it is
 	postInput_t depth = { post.depthView, true, true };
-	if ( ssao )
+	if ( ssao || shafts )
 	{
 		Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
 			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
-		Ssao( x, y, width, height, depth );
+		if ( ssao )
+		{
+			Ssao( x, y, width, height, depth );
+		}
+		if ( shafts )
+		{
+			LightShaftsSky( x, y, width, height, sun, depth );
+		}
 		Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
 			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
@@ -772,6 +813,10 @@ void RB_PostProcess( void )
 		if ( !bloom ) inputs[2].view = VK_NULL_HANDLE;
 		const float push[16] = { ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f, bloom ? r_bloomIntensity->value : 0.0f };
 		RunPass( PASS_COMPOSITE, &post.final, false, inputs, push );
+	}
+	if ( shafts )
+	{
+		LightShaftsAdd( sun );
 	}
 	if ( smaa )
 	{
