@@ -30,11 +30,12 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "vk_priv.h"
 #include "vk_spirv.h"
 #include "renderer/tr_light_shafts.h"
+#include "renderer/tr_eye_adaptation.h"
 #include <zlib.h>
 #include <string>
 
 #define POST_BLOOM_LEVELS	5
-#define POST_FRAME_SETS		32
+#define POST_FRAME_SETS		96	// descriptor sets a frame: every effect at once uses about 40 (16 of them the shadow maps)
 #define POST_AREA_ID		0x7ffe0001u
 #define POST_SEARCH_ID		0x7ffe0002u
 #define POST_RESULT_ID		0x7ffe0003u
@@ -45,7 +46,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
 	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_SHADOW, PASS_SHADOW_MUL,
-	PASS_SHAFTS, PASS_SHAFTS_ADD, PASS_COUNT
+	PASS_SHAFTS, PASS_SHAFTS_ADD, PASS_EYE, PASS_COUNT
 };
 
 typedef struct {
@@ -70,6 +71,7 @@ static const passInfo_t passInfos[PASS_COUNT] = {
 	{ vk_spirv_post_shadow_frag, sizeof( vk_spirv_post_shadow_frag ), false, true },
 	{ vk_spirv_post_shafts_frag, sizeof( vk_spirv_post_shafts_frag ), false },
 	{ vk_spirv_post_shafts_frag, sizeof( vk_spirv_post_shafts_frag ), true },
+	{ vk_spirv_post_eye_frag, sizeof( vk_spirv_post_eye_frag ), false },
 };
 
 typedef struct {
@@ -106,6 +108,14 @@ static struct {
 	postImage_t			sharp;						// the view sharpened (r_sharpen)
 	postImage_t			shadow;						// the darkening of the shadow maps
 	postImage_t			shaftsA, shaftsB;			// light shafts: the sky near the sun, then blurred towards it
+	postImage_t			lum, lumAverage;			// eye adaptation: the brightness of the view shrunk, then one pixel
+	VkBuffer			eyeBuffer;					// its measurements on their way back, one for each frame in flight
+	VkDeviceMemory		eyeMemory;
+	const byte			*eyeMapped;
+	bool				eyeWritten[VK_FRAMES_IN_FLIGHT];
+	int					eyeFrame;					// (measured once a frame: vk.frameCounter + 1 when it was)
+	float				eyeExposure;
+	bool				eyeFailed;
 	bool				atlasMade, shadowFailed;
 	postImage_t			bloom[POST_BLOOM_LEVELS];
 	bool				smaaTextures;
@@ -177,7 +187,8 @@ static bool NewImage( postImage_t *image, int width, int height )
 	info.arrayLayers = 1;
 	info.samples = VK_SAMPLE_COUNT_1_BIT;
 	info.tiling = VK_IMAGE_TILING_OPTIMAL;
-	info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	if ( vkCreateImage( vk.device, &info, NULL, &image->image ) != VK_SUCCESS )
@@ -242,6 +253,8 @@ static void FreeImages( void )
 	FreeImage( &post.shadow );
 	FreeImage( &post.shaftsA );
 	FreeImage( &post.shaftsB );
+	FreeImage( &post.lum );
+	FreeImage( &post.lumAverage );
 	for ( int i = 0; i < POST_BLOOM_LEVELS; i++ )
 	{
 		FreeImage( &post.bloom[i] );
@@ -261,7 +274,8 @@ static bool EnsureImages( int width, int height )
 	bool ok = NewImage( &post.scene, width, height ) && NewImage( &post.aoA, width, height ) && NewImage( &post.aoB, width, height )
 		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height ) && NewImage( &post.shadow, width, height )
 		&& NewImage( &post.shaftsA, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) )
-		&& NewImage( &post.shaftsB, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) );
+		&& NewImage( &post.shaftsB, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) )
+		&& NewImage( &post.lum, EYE_LUM_SIZE, EYE_LUM_SIZE ) && NewImage( &post.lumAverage, 1, 1 );
 	for ( int i = 0; ok && i < POST_BLOOM_LEVELS; i++ )
 	{
 		ok = NewImage( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
@@ -586,7 +600,7 @@ static bool PostWanted( void )
 		return false;
 	}
 	return r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f ||
-		r_lightShafts->value > 0.0f;
+		r_lightShafts->value > 0.0f || r_eyeAdaptation->value > 0.0f;
 }
 
 // ambient occlusion, blurred, into post.aoA
@@ -609,6 +623,79 @@ static void Ssao( int x, int y, int width, int height, const postInput_t &depth 
 	inputs[1] = Input( &post.aoB );
 	push[8] = 0.0f; push[9] = 1.0f;
 	RunPass( PASS_SSAO_BLUR, &post.aoA, false, inputs, push );
+}
+
+// the buffer the measurements of the eye adaptation come back in (host visible, mapped for good), false if there is none
+static bool EnsureEyeBuffer( void )
+{
+	if ( post.eyeBuffer || post.eyeFailed )
+	{
+		return !post.eyeFailed;
+	}
+	VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bufferInfo.size = 256 * VK_FRAMES_IN_FLIGHT;
+	bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	VK_CheckResult( vkCreateBuffer( vk.device, &bufferInfo, NULL, &post.eyeBuffer ), "vkCreateBuffer" );
+	VkMemoryRequirements requirements;
+	vkGetBufferMemoryRequirements( vk.device, post.eyeBuffer, &requirements );
+	const uint32_t type = VK_FindMemoryType( requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+	VkMemoryAllocateInfo allocate = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	allocate.allocationSize = requirements.size;
+	allocate.memoryTypeIndex = type;
+	void *mapped = NULL;
+	if ( vkAllocateMemory( vk.device, &allocate, NULL, &post.eyeMemory ) != VK_SUCCESS )
+	{
+		vkDestroyBuffer( vk.device, post.eyeBuffer, NULL );
+		post.eyeBuffer = VK_NULL_HANDLE;
+		post.eyeFailed = true;
+		return false;
+	}
+	VK_CheckResult( vkBindBufferMemory( vk.device, post.eyeBuffer, post.eyeMemory, 0 ), "vkBindBufferMemory" );
+	VK_CheckResult( vkMapMemory( vk.device, post.eyeMemory, 0, requirements.size, 0, &mapped ), "vkMapMemory" );
+	post.eyeMapped = (const byte *)mapped;
+	return true;
+}
+
+// eye adaptation (see tr_eye_adaptation.h): reads back the measurement this frame slot made last time (its fence was
+// waited for when the frame started), measures post.scene, and returns the exposure for the view
+static float EyeAdaptation( void )
+{
+	if ( r_eyeAdaptation->value <= 0.0f || !EnsureEyeBuffer() )
+	{
+		memset( post.eyeWritten, 0, sizeof( post.eyeWritten ) );
+		return R_EyeAdaptation_Exposure( -1 );
+	}
+	if ( post.eyeFrame == vk.frameCounter + 1 )
+	{
+		return post.eyeExposure;	// (another view in the same frame)
+	}
+	post.eyeFrame = vk.frameCounter + 1;
+
+	const int slot = vk.frameIndex;
+	const int measured = post.eyeWritten[slot] ? post.eyeMapped[slot * 256] : -1;
+
+	postInput_t inputs[3] = { Input( &post.scene ), {}, {} };
+	float push[16] = {};
+	RunPass( PASS_EYE, &post.lum, false, inputs, push );
+	inputs[0] = Input( &post.lum );
+	push[8] = 1.0f;
+	RunPass( PASS_EYE, &post.lumAverage, false, inputs, push );
+
+	Barrier( post.lumAverage.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT );
+	VkBufferImageCopy copy = {};
+	copy.bufferOffset = (VkDeviceSize)slot * 256;
+	copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	copy.imageSubresource.layerCount = 1;
+	copy.imageExtent = { 1, 1, 1 };
+	vkCmdCopyImageToBuffer( vk.cmd, post.lumAverage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, post.eyeBuffer, 1, &copy );
+	Barrier( post.lumAverage.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+	post.eyeWritten[slot] = true;
+
+	post.eyeExposure = R_EyeAdaptation_Exposure( measured );
+	return post.eyeExposure;
 }
 
 // light shafts (see tr_light_shafts.h): the sky near the sun into post.shaftsA (while the depth can be read)
@@ -783,6 +870,8 @@ void RB_PostProcess( void )
 	Barrier( post.scene.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
 
+	const float exposure = EyeAdaptation();
+
 	// the depth is read where it is
 	postInput_t depth = { post.depthView, true, true };
 	if ( ssao || shafts )
@@ -811,7 +900,7 @@ void RB_PostProcess( void )
 		postInput_t inputs[3] = { Input( &post.scene ), Input( &post.aoA ), Input( &post.bloom[0] ) };
 		if ( !ssao ) inputs[1].view = VK_NULL_HANDLE;
 		if ( !bloom ) inputs[2].view = VK_NULL_HANDLE;
-		const float push[16] = { ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f, bloom ? r_bloomIntensity->value : 0.0f };
+		const float push[16] = { ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f, bloom ? r_bloomIntensity->value : 0.0f, exposure };
 		RunPass( PASS_COMPOSITE, &post.final, false, inputs, push );
 	}
 	if ( shafts )
@@ -1121,6 +1210,12 @@ void VK_ShutdownPost( void )
 	}
 	vkDeviceWaitIdle( vk.device );
 	FreeImages();
+	if ( post.eyeBuffer )
+	{
+		vkUnmapMemory( vk.device, post.eyeMemory );
+		vkDestroyBuffer( vk.device, post.eyeBuffer, NULL );
+		vkFreeMemory( vk.device, post.eyeMemory, NULL );
+	}
 	FreeImage( &post.gammaIn );
 	FreeImage( &post.gammaOut );
 	for ( int i = 0; i < PASS_COUNT; i++ )

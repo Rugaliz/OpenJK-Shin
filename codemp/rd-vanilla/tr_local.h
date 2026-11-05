@@ -1222,6 +1222,7 @@ extern cvar_t	*r_bloomThreshold;
 extern cvar_t	*r_bloomIntensity;
 extern cvar_t	*r_sharpen;			// contrast adaptive sharpening of the 3D view, 0 (off) to 1
 extern cvar_t	*r_lightShafts;		// rays of sunlight over the 3D view, on levels with a sun: 0 (off), 1 (normal) to 2
+extern cvar_t	*r_eyeAdaptation;	// the 3D view brightens in dark places, dims in bright ones: 0 (off), 1 (normal) to 2
 extern cvar_t	*r_smaa;
 
 extern cvar_t	*r_environmentMapping;
