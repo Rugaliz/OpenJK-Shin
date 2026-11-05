@@ -46,6 +46,7 @@ typedef struct vk_s {
 	VkDevice					device;
 	uint32_t					queueFamily;
 	VkQueue						queue;
+	bool						rayTracing;			// VK_KHR_ray_query and acceleration structures are on (vk_rt.cpp)
 
 	// swapchain: what is shown. The renderer draws into colorImage and blits it here at the end of the frame
 	VkSwapchainKHR				swapchain;
@@ -124,6 +125,34 @@ void		VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum 
 void		VK_WaitIdle( void );
 float		VK_ReadDepth( int x, int y );
 void		VK_ShutdownReadback( void );
+
+// vk_rt.cpp: ray tracing for shadows
+typedef struct vkRtBuffer_s {
+	VkBuffer		buffer;
+	VkDeviceMemory	memory;
+	VkDeviceAddress	address;
+	void			*mapped;		// host visible ones
+	VkDeviceSize	size;
+} vkRtBuffer_t;
+
+typedef struct vkRtStructure_s {
+	VkAccelerationStructureKHR	handle;
+	vkRtBuffer_t				storage;
+	VkDeviceAddress				address;
+} vkRtStructure_t;
+
+bool		VK_RT_DeviceSupports( VkPhysicalDevice device );
+void		*VK_RT_AddToDevice( const char **extensions, uint32_t *count );	// the features chain to enable
+void		VK_RT_Init( void );
+void		VK_RT_Shutdown( void );
+bool		VK_RT_NewBuffer( vkRtBuffer_t *buffer, VkDeviceSize size, VkBufferUsageFlags usage, bool hostVisible );
+void		VK_RT_FreeBuffer( vkRtBuffer_t *buffer );
+void		VK_RT_FreeStructure( vkRtStructure_t *structure );
+bool		VK_RT_BuildTriangles( VkCommandBuffer cmd, vkRtStructure_t *blas, vkRtBuffer_t *scratch, VkDeviceAddress vertices,
+				uint32_t numVertices, VkDeviceAddress indexes, uint32_t numTriangles, bool fastBuild );
+bool		VK_RT_BuildInstances( VkCommandBuffer cmd, vkRtStructure_t *tlas, vkRtBuffer_t *scratch, VkDeviceAddress instances,
+				uint32_t numInstances );
+void		VK_RT_Barrier( VkCommandBuffer cmd, VkPipelineStageFlags stage );
 
 // vk_mem.cpp
 typedef struct vkAlloc_s {

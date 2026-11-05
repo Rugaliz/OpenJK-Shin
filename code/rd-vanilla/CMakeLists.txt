@@ -231,6 +231,7 @@ if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 			"${SPDir}/rd-vulkan/vk_init.cpp"
 			"${SPDir}/rd-vulkan/vk_mem.cpp"
 			"${SPDir}/rd-vulkan/vk_post.cpp"
+			"${SPDir}/rd-vulkan/vk_rt.cpp"
 			)
 		source_group("vulkan" FILES ${SPRDVulkanFiles})
 
