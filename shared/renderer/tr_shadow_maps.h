@@ -57,5 +57,6 @@ void		RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, cons
 // Ray traced (cg_shadows 5): the renderer can (Vulkan with ray tracing, r_rtAvail), and darkening the 3D view by the
 // casters with rays against the triangles of all of them (xyz: 3 floats a point, world space; indexes: 3 a triangle)
 qboolean	R_RayTracedShadows_Available( void );
+qboolean	R_DlightShadows( void );		// with them, dynamic lights do not go through walls (the shader dynamic lights' rays)
 void		RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters, const float *xyz, int numPoints,
 				const int *indexes, int numTriangles, int stencilSkip );

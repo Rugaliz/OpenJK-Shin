@@ -45,17 +45,21 @@ shaders = [("fixed.vert", "vert"), ("fixed.frag", "frag"), ("dlight.vert", "vert
 RAY_QUERY = {"post_rt_debug.frag", "post_rt_shadow.frag"}  # (ray queries need SPIR-V 1.4: Vulkan 1.2)
 shaders += [(n, "frag") for n in SMAA_MAINS]
 
-for name, stage in shaders:
+# (name, stage, the name it gets, extra arguments): the shaders built more than once
+shaders = [(name, stage, name, []) for name, stage in shaders]
+shaders.append(("dlight.frag", "frag", "dlight_rt.frag", ["-DRAY_QUERY", "--target-env=vulkan1.2"]))
+
+for name, stage, outName, extra in shaders:
     if name in SMAA_MAINS:
         source = SMAA_HEAD + SMAA_PUSH + smaa_source() + SMAA_MAINS[name]
         spv = subprocess.run(["glslc", "-O", "-fshader-stage=frag", "-x", "glsl", "-o", "-", "-"],
                              input=source.encode(), check=True, stdout=subprocess.PIPE).stdout
     else:
         env = ["--target-env=vulkan1.2"] if name in RAY_QUERY else []
-        spv = subprocess.run(["glslc", "-O"] + env + ["-fshader-stage=" + stage, "-o", "-", os.path.join(here, name)],
+        spv = subprocess.run(["glslc", "-O"] + env + extra + ["-fshader-stage=" + stage, "-o", "-", os.path.join(here, name)],
                              check=True, stdout=subprocess.PIPE).stdout
     words = struct.unpack("<%dI" % (len(spv) // 4), spv)
-    ident = "vk_spirv_" + name.replace(".", "_")
+    ident = "vk_spirv_" + outName.replace(".", "_")
     out.append("static const unsigned int %s[%d] = {\n" % (ident, len(words)))
     for i in range(0, len(words), 8):
         out.append("\t" + ", ".join("0x%08x" % w for w in words[i:i + 8]) + ",\n")

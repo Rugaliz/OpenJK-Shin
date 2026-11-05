@@ -97,7 +97,13 @@ from it), `r_rtDebug 2` shows only that. The result should match the shadows the
 The characters' shadows (`cg_shadows 5`, Shadows > Ray Traced, see [shadows](shadows.md)): every frame the
 triangles of the characters go into a bottom level structure built for speed of building, placed by the frame's top
 level structure (mask 0x04, the level is 0x01 and its brush models 0x02); `post_rt_shadow.frag` reads the casters from
-a buffer by its device address. Still to come: the shadows of dynamic lights.
+a buffer by its device address; they have a top level structure of their own, built when the shadows are drawn.
+
+The shadows of the dynamic lights (with `cg_shadows 5`): the level's top level structure is built when a view
+begins (`VK_RT_BeginView`, before anything is drawn), and the dynamic light program is drawn with
+`dlight_rt.frag` (dlight.frag built with `RAY_QUERY`), which gets the structure in a second descriptor set and the
+transform from the surface's space to the world in 64 bytes of push constants after the usual 128 (every graphics card
+with ray tracing has room for 256). Cards without ray tracing never load that shader.
 
 ## What is not there yet
 

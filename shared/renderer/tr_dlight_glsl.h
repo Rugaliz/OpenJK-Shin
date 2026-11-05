@@ -132,7 +132,7 @@ static const char *dlightFragmentSource =
 static struct {
 	int		generation;
 	GLuint	program;
-	GLint	uniforms[6];
+	GLint	uniforms[8];
 	qboolean	failed;
 } dlightGlsl;
 
@@ -164,6 +164,8 @@ static qboolean ProjectDlightGLSL( void ) {
 		dlightGlsl.uniforms[3] = qglGetUniformLocation( dlightGlsl.program, "uTextured" );
 		dlightGlsl.uniforms[4] = qglGetUniformLocation( dlightGlsl.program, "uAlphaTest" );
 		dlightGlsl.uniforms[5] = qglGetUniformLocation( dlightGlsl.program, "uBump" );
+		dlightGlsl.uniforms[6] = qglGetUniformLocation( dlightGlsl.program, "uToWorld" );	// (the Vulkan renderer's rays,
+		dlightGlsl.uniforms[7] = qglGetUniformLocation( dlightGlsl.program, "uShadow" );	// R_DlightShadows: -1 in OpenGL)
 	}
 
 	dStage = RB_DlightDiffuseStage();
@@ -208,6 +210,15 @@ static qboolean ProjectDlightGLSL( void ) {
 		qglUniform1f( dlightGlsl.uniforms[3], dStage ? 1.0f : 0.0f );
 		qglUniform1f( dlightGlsl.uniforms[4], alphaTest );
 		qglUniform1f( dlightGlsl.uniforms[5], ( r_dlightGLSL->integer >= 2 ) ? DLIGHT_BUMP_DEPTH : 0.0f );
+		if ( dlightGlsl.uniforms[7] >= 0 ) {
+			// from the space of the surface (the entity's, or the world's) to the world, for the rays to the lights
+			const float toWorld[12] = {
+				backEnd.ori.axis[0][0], backEnd.ori.axis[1][0], backEnd.ori.axis[2][0], backEnd.ori.origin[0],
+				backEnd.ori.axis[0][1], backEnd.ori.axis[1][1], backEnd.ori.axis[2][1], backEnd.ori.origin[1],
+				backEnd.ori.axis[0][2], backEnd.ori.axis[1][2], backEnd.ori.axis[2][2], backEnd.ori.origin[2] };
+			qglUniform4fv( dlightGlsl.uniforms[6], 3, toWorld );
+			qglUniform1f( dlightGlsl.uniforms[7], R_DlightShadows() ? 1.0f : 0.0f );
+		}
 	}
 	qglEnableClientState( GL_NORMAL_ARRAY );
 	qglNormalPointer( GL_FLOAT, sizeof( tess.normal[0] ), tess.normal );

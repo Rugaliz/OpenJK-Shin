@@ -233,7 +233,9 @@ static void DestroyImage( VkImage image, VkImageView view, vkAlloc_t *memory, in
 	{
 		return;
 	}
-	if ( lastUsedFrame > vk.frameCounter - 2 )
+	// A frame is known to be finished once the frame two later has started (it waits for it, VK_EnsureFrame): until
+	// the current one starts, that is only true of the one three back
+	if ( lastUsedFrame > vk.frameCounter - ( vk.frameStarted ? 2 : 3 ) )
 	{
 		// maybe still in use by a frame the GPU is working on
 		deferredImage_t item = { image, view, *memory, lastUsedFrame + 2 };

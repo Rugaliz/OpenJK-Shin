@@ -281,7 +281,15 @@ static bool EnsureImages( int width, int height )
 	{
 		return true;
 	}
-	VK_WaitIdle();
+	// (the frame being recorded may use them already, a view of another size before this one: send it and wait)
+	if ( vk.frameStarted )
+	{
+		VK_SubmitFrame( true );
+	}
+	else
+	{
+		VK_WaitIdle();
+	}
 	FreeImages();
 	bool ok = NewImage( &post.scene, width, height ) && NewImage( &post.aoA, width, height ) && NewImage( &post.aoB, width, height )
 		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height ) && NewImage( &post.shadow, width, height )
@@ -1237,6 +1245,32 @@ qboolean R_RayTracedShadows_Available( void )
 	return ( post.ready && vk.rayTracing && !post.rtShadowFailed && !post.shadowFailed ) ? qtrue : qfalse;
 }
 
+// with the ray traced shadows, the dynamic lights' rays keep them from going through walls (dlight_rt.frag)
+qboolean R_DlightShadows( void )
+{
+	return ( vk.rayTracing && r_shadows->integer == 5 && R_RayTracedShadows_Available() ) ? qtrue : qfalse;
+}
+
+/*
+=================
+VK_RT_BeginView
+
+Before a view is drawn: the level's ray tracing structure of the frame, for the dynamic lights' rays (built outside a
+render pass, so it ends the one that is open; the view's first draw opens another).
+=================
+*/
+void VK_RT_BeginView( void )
+{
+	if ( !R_DlightShadows() || ( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
+	{
+		VK_DrawSetScene( VK_NULL_HANDLE );
+		return;
+	}
+	VK_EnsureFrame();
+	VK_EndRenderPass();
+	VK_DrawSetScene( VK_RT_Scene() );
+}
+
 void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters, const float *xyz, int numPoints,
 	const int *indexes, int numTriangles, int stencilSkip )
 {
@@ -1289,11 +1323,7 @@ void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters,
 
 	VK_EndRenderPass();	// (resolves the view into the single sample colour and depth)
 	VK_FlushUploads( false );
-	if ( !VK_RT_SetCharacters( xyz, numPoints, indexes, numTriangles ) )
-	{
-		return;
-	}
-	const VkAccelerationStructureKHR scene = VK_RT_Scene();
+	const VkAccelerationStructureKHR scene = VK_RT_Characters( xyz, numPoints, indexes, numTriangles );
 	if ( !scene )
 	{
 		return;

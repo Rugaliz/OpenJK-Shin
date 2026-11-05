@@ -94,7 +94,13 @@ Cost: with seven characters in view at 1280 x 720 on a Radeon RX 7800 XT, about 
 structure of 19,500 triangles), against 0.34 ms of graphics card time for the shadow maps (which draw their maps on the
 processor instead). The rays scale with the number of pixels in the characters' shadow areas.
 
-Shadows of dynamic lights (sabers, blasters, explosions) are the next step.
+The light of sabers, blasters and explosions (the dynamic lights) gets shadows too with Ray Traced: before a lit pixel is
+lit, a ray goes from it to the light through the level and its doors and lifts, and where something is in between, the
+light stops there. So it no longer comes through walls and floors (a saber in the next room lit the floor on this side,
+an explosion above lit the room below), and pillars and crates keep it off what is behind them. The ray stops 12 units
+short of the light, so that the wall an explosion sits on is still lit by it. Characters do not block these lights:
+the lights are often in a character's hand or body. With Ray Traced, the dynamic lights are always drawn by the shader
+(as with `r_dlightGLSL` 1, or 2 if that is set). One ray for every lit pixel of every light.
 
 ## Draw distance
 
