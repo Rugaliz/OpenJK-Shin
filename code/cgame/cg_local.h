@@ -571,8 +571,8 @@ extern	vmCvar_t		cg_bobup;
 extern	vmCvar_t		cg_bobpitch;
 extern	vmCvar_t		cg_bobroll;
 extern	vmCvar_t		cg_shadows;
-// the shadows the renderer makes from the characters' own triangles: stencil volumes (2) or shadow maps (4)
-#define CG_MODEL_SHADOWS()	( cg_shadows.integer == 2 || cg_shadows.integer == 4 )
+// the shadows the renderer makes from the characters' own triangles: stencil volumes (2), shadow maps (4), ray traced (5)
+#define CG_MODEL_SHADOWS()	( cg_shadows.integer == 2 || cg_shadows.integer == 4 || cg_shadows.integer == 5 )
 extern	vmCvar_t		cg_renderToTextureFX;
 extern	vmCvar_t		cg_shadowCullDistance;
 extern	vmCvar_t		cg_paused;

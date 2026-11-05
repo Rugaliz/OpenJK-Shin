@@ -24,9 +24,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #pragma once
 
-// The shadows made from the characters' own triangles, which use the stencil buffer: the volumes (cg_shadows 2) and
-// the shadow maps (4)
-#define R_MODEL_SHADOWS( shadows )	( ( shadows ) == 2 || ( shadows ) == 4 )
+// The shadows made from the characters' own triangles, which use the stencil buffer: the volumes (cg_shadows 2), the
+// shadow maps (4) and the ray traced ones (5, the Vulkan renderer where the graphics card has ray tracing)
+#define R_MODEL_SHADOWS( shadows )	( ( shadows ) == 2 || ( shadows ) == 4 || ( shadows ) == 5 )
 
 #define SHADOWMAP_TILE			128		// texels on a side of the depth tile of one caster
 #define SHADOWMAP_TILES			4		// tiles on a side of the atlas
@@ -44,6 +44,7 @@ typedef struct {
 	float	softness;		// atlas texels of penumbra per normalized height between the caster and the point
 	float	tile[2];		// the corner of the caster's tile in the atlas (s, t): nothing outside it is the caster's
 	float	rect[4];		// where on the view its shadow can be: left, bottom, right, top, 0 to 1 from the bottom left
+	float	light[4];		// ray traced: the direction to the light (world), and how wide the rays spread around it (a tangent)
 } shadowMapCaster_t;
 
 // The renderer can draw them (it has the shaders); r_shadowMapsAvail tells the menus
@@ -52,3 +53,9 @@ qboolean	R_ShadowMaps_Available( void );
 // Darkens the 3D view with the casters (the atlas: SHADOWMAP_ATLAS square, RGBA, the depth in red). Pixels whose
 // stencil has the bit stencilSkip set (the characters) are left alone when stencilSkip is not 0.
 void		RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, const byte *atlas, int stencilSkip );
+
+// Ray traced (cg_shadows 5): the renderer can (Vulkan with ray tracing, r_rtAvail), and darkening the 3D view by the
+// casters with rays against the triangles of all of them (xyz: 3 floats a point, world space; indexes: 3 a triangle)
+qboolean	R_RayTracedShadows_Available( void );
+void		RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters, const float *xyz, int numPoints,
+				const int *indexes, int numTriangles, int stencilSkip );

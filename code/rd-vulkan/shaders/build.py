@@ -41,8 +41,8 @@ shaders = [("fixed.vert", "vert"), ("fixed.frag", "frag"), ("dlight.vert", "vert
            ("post_bloom_down.frag", "frag"), ("post_bloom_up.frag", "frag"), ("post_composite.frag", "frag"),
            ("post_gamma.frag", "frag"), ("post_sharpen.frag", "frag"),
            ("post_shadow.frag", "frag"), ("post_shafts.frag", "frag"), ("post_eye.frag", "frag"),
-           ("post_rt_debug.frag", "frag")]
-RAY_QUERY = {"post_rt_debug.frag"}  # (ray queries need SPIR-V 1.4: Vulkan 1.2)
+           ("post_rt_debug.frag", "frag"), ("post_rt_shadow.frag", "frag")]
+RAY_QUERY = {"post_rt_debug.frag", "post_rt_shadow.frag"}  # (ray queries need SPIR-V 1.4: Vulkan 1.2)
 shaders += [(n, "frag") for n in SMAA_MAINS]
 
 for name, stage in shaders:

@@ -76,6 +76,26 @@ shared by all the renderers (`shared/renderer/tr_shadow_volumes.h` for the maps,
 Cost: in Jedi Academy multiplayer at 1280 x 720 with five characters in view, about 0.9 ms a frame (0.4 ms of it on
 the CPU), against 1.2 ms for the stencil shadows.
 
+## Ray traced shadows (`cg_shadows 5`)
+
+Setup > More Video > Shadows > Ray Traced, in single player with the Vulkan renderer on a graphics card with ray
+tracing (`r_rtAvail` 1, see [the Vulkan renderer](vulkan-renderer.md#ray-tracing-for-shadows-in-progress)). Elsewhere
+`cg_shadows 5` draws the soft shadows, and where those can't be drawn either, the stencil ones.
+
+The characters are found as for the shadow maps (their light, the floor under them, how dark, the area their shadow can
+fall in), but instead of a 128 x 128 depth map each, all their triangles go into a ray tracing structure every frame,
+and from every pixel in a character's area four rays, spread around the direction of its light as wide as
+`r_shadowSoftness` says, are traced against it. So the shadow is exact at any size and distance: fingers, the hilt of a
+saber, the gap between the legs, with no blocks or grain, soft at the edges. It is done at half the size of the view in
+one pass for all the characters, and blurred along the surfaces at full size (the blur of the ambient occlusion, which
+stops at edges in depth).
+
+Cost: with seven characters in view at 1280 x 720 on a Radeon RX 7800 XT, about 1.4 ms a frame (0.5 of it building the
+structure of 19,500 triangles), against 0.34 ms of graphics card time for the shadow maps (which draw their maps on the
+processor instead). The rays scale with the number of pixels in the characters' shadow areas.
+
+Shadows of dynamic lights (sabers, blasters, explosions) are the next step.
+
 ## Draw distance
 
 * `r_surfaceSpriteRange` (default 3): grass, bushes and other "surface sprites" fade out at a distance set per

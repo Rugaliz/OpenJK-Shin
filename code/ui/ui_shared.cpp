@@ -1233,17 +1233,31 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 	}
 
 	// The shadows row offers none, simple and volumetric (stencil volumes). Add soft ones (shadow maps, cg_shadows 4)
-	// where the renderer can draw them.
-	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "cg_shadows" ) && item->typeData && DC->getCVarValue( "r_shadowMapsAvail" ) ) {
+	// and ray traced ones (5) where the renderer can draw them.
+	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "cg_shadows" ) && item->typeData ) {
+		static const struct { const char *name; float value; const char *avail; } extra[] = {
+			{ "Soft", 4, "r_shadowMapsAvail" },
+			{ "Ray Traced", 5, "r_rtAvail" },
+		};
 		multiDef_t *multiPtr = (multiDef_t *)item->typeData;
 
-		if ( !multiPtr->strDef && multiPtr->count > 0 && multiPtr->count < MAX_MULTI_CVARS && multiPtr->cvarValue[multiPtr->count - 1] != 4 )
+		for ( size_t e = 0; e < ARRAY_LEN( extra ); e++ )
 		{
-			multiPtr->cvarList[multiPtr->count] = String_Alloc( "Soft" );
-			multiPtr->cvarValue[multiPtr->count] = 4;
+			bool there = false;
+			for ( int i = 0; i < multiPtr->count; i++ )
+			{
+				there = there || multiPtr->cvarValue[i] == extra[e].value;
+			}
+			if ( multiPtr->strDef || multiPtr->count <= 0 || multiPtr->count >= MAX_MULTI_CVARS || there || !DC->getCVarValue( extra[e].avail ) )
+			{
+				continue;
+			}
+			multiPtr->cvarList[multiPtr->count] = String_Alloc( extra[e].name );
+			multiPtr->cvarValue[multiPtr->count] = extra[e].value;
 			multiPtr->count++;
-			item->descText = String_Alloc( "Shadows of the characters. Soft: shaped like the character, falling on walls and steps too, with edges that blur further from the character." );
-			Com_Printf( "Added soft shadows to the shadows field.\n" );
+			item->descText = String_Alloc( "Shadows of the characters. Soft: shaped like the character, falling on walls and steps too, "
+				"with edges that blur further from the character. Ray Traced: the same, exact, on graphics cards with ray tracing." );
+			Com_Printf( "Added %s shadows to the shadows field.\n", extra[e].name );
 		}
 	}
 

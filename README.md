@@ -85,7 +85,9 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
 - **Shadows that work** (Setup > More Video > Shadows): characters are no longer darkened by their own shadow, shadows
   have soft edges, fall away from the light, are lighter where there is little direct light, and no longer show
   through walls. The new **Soft** setting goes further: the shadow has the character's shape, falls on walls and
-  steps too, and its edge blurs the further it is from the character. See [docs/shadows.md](docs/shadows.md).
+  steps too, and its edge blurs the further it is from the character. On graphics cards with ray tracing (AMD RX 6000
+  and newer, NVIDIA RTX, Intel Arc) and the Vulkan renderer, **Ray Traced** shadows are exact, down to the fingers.
+  See [docs/shadows.md](docs/shadows.md).
 - **See further**: grass and bushes are drawn about three times further away, and characters keep their detailed look
   twice as far.
 
