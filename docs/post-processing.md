@@ -48,6 +48,13 @@ light and by the angle between its surface and the light, with the surface norma
 flat walls this looks very close to the original; the difference is on curved surfaces and characters, where the
 light no longer shows the triangles. The old look is one setting away, and also used when the shader does not build.
 
+`r_dlightGLSL 2` (Shader Dynamic Lights: Detailed) also lights the bumps of the surface. The games have no normal maps,
+so the surface texture is read as a height (its brightness, the brightest texel `DLIGHT_BUMP_DEPTH`, 1.5 units, above
+the darkest), and its slope across each pixel tilts the normal, with the surface gradient method of Mikkelsen ("Bump
+Mapping Unparametrized Surfaces on the GPU", 2010), which needs no tangents, so it works on every surface the game
+has. Rock, brick and floor tiles get relief where a saber or an explosion lights them; the overall brightness stays
+the same (within 1%). It costs three texture reads a lit pixel instead of one.
+
 ## Brightness and overbright (`r_gamma`, `r_overBrightBits`)
 
 The original games set the brightness (the Brightness slider of the video setup, `r_gamma`) with the gamma ramps of the graphics

@@ -1623,7 +1623,7 @@ void R_Register( void )
 	ri.Cvar_CheckRange( r_sampleShading, 0, 1, qfalse );
 	r_glsl = ri.Cvar_Get( "r_glsl", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// use GLSL shader programs where the renderer has them (needs OpenGL 2.0)
 	Jobs::SetThreads( ri.Cvar_Get( "com_jobThreads", "-1", CVAR_ARCHIVE_ND )->integer );	// (the renderer has a pool of its own, see docs/parallel-work.md)
-	r_dlightGLSL = ri.Cvar_Get( "r_dlightGLSL", "0", CVAR_ARCHIVE_ND );	// 1 = dynamic lights as a shader pass that lights every pixel by distance and surface angle (needs r_glsl)
+	r_dlightGLSL = ri.Cvar_Get( "r_dlightGLSL", "0", CVAR_ARCHIVE_ND );	// 1 = dynamic lights as a shader pass that lights every pixel by distance and surface angle (needs r_glsl), 2 = and by the bumps of the surface texture
 	r_postDebug = ri.Cvar_Get( "r_postDebug", "0", 0 );	// 1 = run the post processing plumbing with no effect, the picture must not change
 	r_ssao = ri.Cvar_Get( "r_ssao", "0", CVAR_ARCHIVE_ND );	// 1 = ambient occlusion, darkens corners and where things meet (needs r_glsl)
 	r_ssaoRadius = ri.Cvar_Get( "r_ssaoRadius", "48", CVAR_ARCHIVE_ND );	// how far from a pixel, in units, a surface still shades it

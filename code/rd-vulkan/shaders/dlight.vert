@@ -12,7 +12,7 @@ layout(push_constant) uniform Constants
 	mat4 mvp;
 	vec4 light;			// xyz: position in the space of the surface, w: radius
 	vec4 colorTextured;	// rgb: colour of the light, a: 1 if the surface texture is used
-	vec4 alphaTest;		// x: 0 none, 1 alpha > 0, 2 alpha < 0.5, 3 alpha >= 0.5, 4 alpha >= 0.75
+	vec4 alphaTest;		// x: 0 none, 1 alpha > 0, 2 alpha < 0.5, 3 alpha >= 0.5, 4 alpha >= 0.75; y: depth of the bumps
 	vec4 unused;
 } pc;
 

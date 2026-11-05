@@ -1294,7 +1294,7 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 		{ "ssao", "r_ssao", "r_postAvail", "Ambient Occlusion:", "Soft shading in corners and where things meet. Adds depth." },
 		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
 		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
-		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on." },
+		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on. Detailed: it picks out the bumps of the surface too." },
 		{ "sharpen", "r_sharpen", "r_postAvail", "Sharpening:", "Crisper textures, without halos. Good with SMAA or Anti-Aliasing." },
 	};
 	itemDef_t	*rows[24];
@@ -1360,6 +1360,19 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 				multiPtr->count++;
 			}
 			multiPtr->strDef = qfalse;
+		}
+		else if ( !Q_stricmp( effects[e].name, "dlightglsl" ) )
+		{
+			// off, on (copied), and on with the bumps of the surface
+			multiDef_t *multiPtr = (multiDef_t *)row->typeData;
+
+			if ( multiPtr->count == 2 )
+			{
+				multiPtr->cvarList[2] = String_Alloc( "Detailed" );
+				multiPtr->cvarValue[2] = 2.0f;
+				multiPtr->count = 3;
+				multiPtr->strDef = qfalse;
+			}
 		}
 		menu->items[menu->itemCount++] = row;
 		rows[numRows++] = row;
