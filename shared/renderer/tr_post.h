@@ -32,6 +32,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "renderer/tr_smaa_data.h"
 #include "renderer/tr_light_shafts.h"
+#include "renderer/tr_eye_adaptation.h"
 #include <string>
 #include <zlib.h>
 
@@ -49,6 +50,12 @@ static PFNGLBINDFRAMEBUFFERPROC			qglBindFramebuffer;
 static PFNGLFRAMEBUFFERTEXTURE2DPROC	qglFramebufferTexture2D;
 static PFNGLCHECKFRAMEBUFFERSTATUSPROC	qglCheckFramebufferStatus;
 static PFNGLDELETEFRAMEBUFFERSPROC		qglDeleteFramebuffers;
+static PFNGLGENBUFFERSPROC				qglGenBuffers;		// (pixel buffers, to read the eye adaptation's measurement back without waiting)
+static PFNGLBINDBUFFERPROC				qglBindBuffer;
+static PFNGLBUFFERDATAPROC				qglBufferData;
+static PFNGLMAPBUFFERPROC				qglMapBuffer;
+static PFNGLUNMAPBUFFERPROC				qglUnmapBuffer;
+static PFNGLDELETEBUFFERSPROC			qglDeleteBuffers;
 
 // a texture an effect can draw into
 typedef struct {
@@ -79,6 +86,10 @@ static struct {
 	postProgram_t	sharpen;			// contrast adaptive sharpening (r_sharpen)
 	postTarget_t	shaftsA, shaftsB;	// light shafts (r_lightShafts): the sky near the sun, then blurred towards it
 	postProgram_t	shafts;
+	postTarget_t	lum, lumAverage;	// eye adaptation (r_eyeAdaptation): the brightness of the view shrunk, then one pixel
+	postProgram_t	eye;
+	GLuint			eyeBuffers[EYE_READ_FRAMES];	// the measurements on their way back
+	int				eyeMeasured;		// how many were made
 	GLuint			smaaAreaTexture, smaaSearchTexture;
 	qboolean		smaaOk;				// GLSL 3.30 is there, which SMAA is written for
 	qboolean		smaaFailed;
@@ -228,6 +239,7 @@ static const char *postCompositeFragmentSource =
 	"uniform sampler2D uBloom;\n"
 	"uniform vec4 uRect;\n"			// x, y, width, height of the view in the window
 	"uniform vec3 uMode;\n"			// 1 if the occlusion is on, 1 to show it alone, how much bloom is added
+	"uniform float uExposure;\n"	// eye adaptation (tr_eye_adaptation.h), 1 for none
 	"void main() {\n"
 	"	vec2 uv = ( gl_FragCoord.xy - uRect.xy ) / uRect.zw;\n"
 	"	vec3 colour = texture2D( uScene, uv ).rgb;\n"
@@ -236,6 +248,9 @@ static const char *postCompositeFragmentSource =
 	"		colour = uMode.y > 0.5 ? vec3( ao ) : colour * ao;\n"
 	"	}\n"
 	"	colour += texture2D( uBloom, uv ).rgb * uMode.z * ( 1.0 - colour );\n"	// like a screen blend, it does not clip what is bright already
+	"	if ( uExposure != 1.0 ) {\n"
+	"		colour = 1.0 - pow( clamp( 1.0 - colour, 0.0, 1.0 ), vec3( uExposure ) );\n"	// (black stays black, white white)
+	"	}\n"
 	"	gl_FragColor = vec4( colour, 1.0 );\n"
 	"}\n";
 
@@ -275,6 +290,13 @@ void R_Post_Init( void ) {
 
 	post.ready = qtrue;
 	Com_Printf( "...using post processing\n" );
+
+	qglGenBuffers		= (PFNGLGENBUFFERSPROC)		ri.GL_GetProcAddress( "glGenBuffers" );
+	qglBindBuffer		= (PFNGLBINDBUFFERPROC)		ri.GL_GetProcAddress( "glBindBuffer" );
+	qglBufferData		= (PFNGLBUFFERDATAPROC)		ri.GL_GetProcAddress( "glBufferData" );
+	qglMapBuffer		= (PFNGLMAPBUFFERPROC)		ri.GL_GetProcAddress( "glMapBuffer" );
+	qglUnmapBuffer		= (PFNGLUNMAPBUFFERPROC)	ri.GL_GetProcAddress( "glUnmapBuffer" );
+	qglDeleteBuffers	= (PFNGLDELETEBUFFERSPROC)	ri.GL_GetProcAddress( "glDeleteBuffers" );
 
 	{
 		int major = 0, minor = 0;
@@ -340,6 +362,8 @@ static void Post_FreeTargets( void ) {
 	Post_FreeTarget( &post.weights );
 	Post_FreeTarget( &post.shaftsA );
 	Post_FreeTarget( &post.shaftsB );
+	Post_FreeTarget( &post.lum );
+	Post_FreeTarget( &post.lumAverage );
 	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
 		Post_FreeTarget( &post.bloom[i] );
 	}
@@ -363,6 +387,8 @@ static void Post_EnsureTargets( int width, int height ) {
 	}
 	Post_NewTarget( &post.shaftsA, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) );
 	Post_NewTarget( &post.shaftsB, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) );
+	Post_NewTarget( &post.lum, EYE_LUM_SIZE, EYE_LUM_SIZE );
+	Post_NewTarget( &post.lumAverage, 1, 1 );
 	if ( post.smaaOk ) {
 		Post_NewTarget( &post.final, width, height );
 		Post_NewTarget( &post.edges, width, height );
@@ -559,7 +585,7 @@ static qboolean Post_Wanted( void ) {
 		return qfalse;
 	}
 	return (qboolean)( r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f ||
-		r_lightShafts->value > 0.0f );
+		r_lightShafts->value > 0.0f || r_eyeAdaptation->value > 0.0f );
 }
 
 // draws the quad into a target (or the window, with 0), with the viewport set for it
@@ -798,6 +824,100 @@ static void Post_LightShafts( int x, int y, int width, int height, qboolean dept
 
 /*
 ================
+Eye adaptation (r_eyeAdaptation, see tr_eye_adaptation.h)
+
+The program measures the view in two passes (uMode): 0 the view shrunk to EYE_LUM_SIZE square, each texel the average
+of the log2 of the brightness of four pixels, as 0 to 1 over the range the measurement holds; 1 that averaged into one
+pixel (32 x 32 bilinear reads, each the average of four texels).
+================
+*/
+static const char *postEyeFragmentSource =
+	"#version 120\n"
+	"uniform sampler2D uTex;\n"
+	"uniform float uMode;\n"
+	"float encoded( vec2 uv ) {\n"
+	"	float lum = dot( texture2D( uTex, uv ).rgb, vec3( 0.2126, 0.7152, 0.0722 ) );\n"
+	"	return clamp( ( log2( lum + 0.001 ) - ( -10.0 ) ) / 12.0, 0.0, 1.0 );\n"	// (EYE_LOG_MIN, EYE_LOG_RANGE)
+	"}\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].xy;\n"
+	"	float sum = 0.0;\n"
+	"	if ( uMode < 0.5 ) {\n"
+	"		float d = 0.25 / 64.0;\n"		// (EYE_LUM_SIZE)
+	"		sum = 0.25 * ( encoded( uv + vec2( -d, -d ) ) + encoded( uv + vec2( d, -d ) ) + encoded( uv + vec2( -d, d ) ) + encoded( uv + vec2( d, d ) ) );\n"
+	"	} else {\n"
+	"		for ( int y = 0; y < 32; y++ ) {\n"
+	"			for ( int x = 0; x < 32; x++ ) {\n"
+	"				sum += texture2D( uTex, ( vec2( float( x ), float( y ) ) * 2.0 + 1.0 ) / 64.0 ).r;\n"
+	"			}\n"
+	"		}\n"
+	"		sum /= 1024.0;\n"
+	"	}\n"
+	"	gl_FragColor = vec4( sum, sum, sum, 1.0 );\n"
+	"}\n";
+
+#if EYE_LUM_SIZE != 64 || EYE_LOG_MIN != -10 || EYE_LOG_RANGE != 12
+#error "the eye adaptation shaders have its sizes written in"
+#endif
+
+// Measures the view (in post.sceneTexture), reads back the measurement of EYE_READ_FRAMES frames ago, and returns the
+// exposure for the view, 1 when there is none.
+static float Post_EyeAdaptation( void ) {
+	static const char *const uniforms[] = { "uTex", "uMode", NULL };
+	int measured = -1;
+	int i;
+
+	if ( r_eyeAdaptation->value <= 0.0f || !qglGenBuffers || !qglBindBuffer || !qglBufferData || !qglMapBuffer ||
+		 !qglUnmapBuffer ) {
+		post.eyeMeasured = 0;
+		return R_EyeAdaptation_Exposure( -1 );
+	}
+	if ( !post.eye.id && !Post_BuildProgram( &post.eye, "post eye adaptation", postEyeFragmentSource, uniforms ) ) {
+		post.failed = qtrue;
+		return 1.0f;
+	}
+	if ( !post.eyeBuffers[0] ) {
+		qglGenBuffers( EYE_READ_FRAMES, post.eyeBuffers );
+		for ( i = 0; i < EYE_READ_FRAMES; i++ ) {
+			qglBindBuffer( GL_PIXEL_PACK_BUFFER, post.eyeBuffers[i] );
+			qglBufferData( GL_PIXEL_PACK_BUFFER, 4, NULL, GL_STREAM_READ );
+		}
+		post.eyeMeasured = 0;
+	}
+
+	// the oldest measurement, before its buffer takes the new one
+	const int slot = post.eyeMeasured % EYE_READ_FRAMES;
+	qglBindBuffer( GL_PIXEL_PACK_BUFFER, post.eyeBuffers[slot] );
+	if ( post.eyeMeasured >= EYE_READ_FRAMES ) {
+		const byte *pixel = (const byte *)qglMapBuffer( GL_PIXEL_PACK_BUFFER, GL_READ_ONLY );
+		if ( pixel ) {
+			measured = pixel[0];
+			qglUnmapBuffer( GL_PIXEL_PACK_BUFFER );
+		}
+	}
+	qglBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+
+	// the new one
+	qglUseProgram( post.eye.id );
+	qglUniform1i( post.eye.uniforms[0], 0 );
+	Post_BindTexture( 0, post.sceneTexture );
+	qglUniform1f( post.eye.uniforms[1], 0.0f );
+	Post_DrawInto( &post.lum );
+	Post_BindTexture( 0, post.lum.texture );
+	qglUniform1f( post.eye.uniforms[1], 1.0f );
+	Post_DrawInto( &post.lumAverage );
+	qglBindBuffer( GL_PIXEL_PACK_BUFFER, post.eyeBuffers[slot] );
+	qglReadPixels( 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, 0 );
+	qglBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	qglUseProgram( 0 );
+	post.eyeMeasured++;
+
+	return R_EyeAdaptation_Exposure( measured );
+}
+
+/*
+================
 RB_PostProcess
 
 Called when the 3D view is finished. Leaves the GL state as it found it, so the 2D drawing after it does not
@@ -853,7 +973,7 @@ static void Post_Sharpen( int x, int y, int width, int height ) {
 }
 
 void RB_PostProcess( void ) {
-	static const char *const compositeUniforms[] = { "uScene", "uAO", "uBloom", "uRect", "uMode", NULL };
+	static const char *const compositeUniforms[] = { "uScene", "uAO", "uBloom", "uRect", "uMode", "uExposure", NULL };
 	const int	x = backEnd.viewParms.viewportX;
 	const int	y = backEnd.viewParms.viewportY;
 	const int	width = backEnd.viewParms.viewportWidth;
@@ -862,6 +982,7 @@ void RB_PostProcess( void ) {
 	const float	smaaRect[4] = { 0.0f, 0.0f, (float)width, (float)height };
 	const GLboolean	scissored = qglIsEnabled( GL_SCISSOR_TEST );
 	qboolean	ssao, bloom, smaa;
+	float		exposure;
 
 	if ( post.failed || !Post_Wanted() ) {
 		return;
@@ -891,6 +1012,8 @@ void RB_PostProcess( void ) {
 	qglDisable( GL_CLIP_PLANE0 );
 	qglDisable( GL_SCISSOR_TEST );
 
+	exposure = Post_EyeAdaptation();
+
 	ssao = (qboolean)( r_ssao->integer && Post_Ssao() );
 	if ( r_ssao->integer && !ssao ) {
 		post.failed = qtrue;
@@ -908,7 +1031,7 @@ void RB_PostProcess( void ) {
 
 	// draw the result over the view, or into the picture SMAA works on (when only sharpening is on there is nothing to
 	// draw: the view is as it was)
-	if ( ssao || bloom || smaa || r_postDebug->integer ) {
+	if ( ssao || bloom || smaa || r_postDebug->integer || exposure != 1.0f ) {
 		if ( smaa ) {
 			qglBindFramebuffer( GL_FRAMEBUFFER, post.final.fbo );
 			qglViewport( 0, 0, width, height );
@@ -926,6 +1049,7 @@ void RB_PostProcess( void ) {
 		qglUniform4fv( post.composite.uniforms[3], 1, smaa ? smaaRect : rect );
 		qglUniform3f( post.composite.uniforms[4], ssao ? 1.0f : 0.0f, r_postDebug->integer == 2 ? 1.0f : 0.0f,
 			bloom ? r_bloomIntensity->value : 0.0f );
+		qglUniform1f( post.composite.uniforms[5], exposure );
 		Post_Quad();
 		if ( smaa ) {
 			Post_Smaa( x, y, width, height );
