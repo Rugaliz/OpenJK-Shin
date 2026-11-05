@@ -8879,7 +8879,7 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		{ "ssao", "r_ssao", "r_postAvail", "Ambient Occlusion:", "Soft shading in corners and where things meet. Adds depth." },
 		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
 		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
-		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on." },
+		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on. Detailed: it picks out the bumps of the surface too." },
 		{ "sharpen", "r_sharpen", "r_postAvail", "Sharpening:", "Crisper textures, without halos. Good with SMAA or Anti-Aliasing." },
 	};
 	itemDef_t	*rows[24];
@@ -8985,6 +8985,14 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 			Item_MakeSharpenRow( row );
 		else if ( !Q_stricmp( effects[e].name, "shadows" ) )
 			Item_MakeShadowsRow( row );
+		else if ( !Q_stricmp( effects[e].name, "dlightglsl" ) && row->typeData.multi && row->typeData.multi->count == 2 )
+		{
+			// off, on (copied), and on with the bumps of the surface
+			row->typeData.multi->cvarList[2] = String_Alloc( "Detailed" );
+			row->typeData.multi->cvarValue[2] = 2.0f;
+			row->typeData.multi->count = 3;
+			row->typeData.multi->strDef = qfalse;
+		}
 		rows[numRows++] = row;
 	}
 

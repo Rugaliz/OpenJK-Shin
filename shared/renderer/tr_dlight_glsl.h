@@ -29,6 +29,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #pragma once
 
+// r_dlightGLSL 2: how deep the bumps the surface texture is read as are, in units (for the brightest texel)
+#define DLIGHT_BUMP_DEPTH	1.5f
+
 // the first opaque stage that is not a lightmap, an environment map or a fog: the surface texture that a dynamic
 // light has to be multiplied with. NULL when there is none, or without multitexture.
 static shaderStage_t *RB_DlightDiffuseStage( void ) {
@@ -81,17 +84,33 @@ static const char *dlightFragmentSource =
 	"uniform vec3 uColor;\n"
 	"uniform float uTextured;\n"
 	"uniform float uAlphaTest;\n"	// 0 none, 1 alpha > 0, 2 alpha < 0.5, 3 alpha >= 0.5, 4 alpha >= 0.75, as the stage the light goes on
+	"uniform float uBump;\n"		// how deep the bumps of the surface are (r_dlightGLSL 2), in units for the brightest texel, 0 flat
 	"varying vec3 vPos;\n"
 	"varying vec3 vNormal;\n"
+	"float height( vec2 st ) { return dot( texture2D( uDiffuse, st ).rgb, vec3( 0.299, 0.587, 0.114 ) ) * uBump; }\n"
 	"void main() {\n"
 	"	vec3 toLight = uLight.xyz - vPos;\n"
 	"	float dist2 = dot( toLight, toLight );\n"
 	"	float atten = clamp( 1.0 - dist2 / ( uLight.w * uLight.w ), 0.0, 1.0 );\n"
 	"	float facing = 1.0;\n"
 	"	float nlen2 = dot( vNormal, vNormal );\n"
+	// the bumps: the surface texture read as a height, its slope across the pixel tilting the normal (the surface
+	// gradient of Mikkelsen, "Bump Mapping Unparametrized Surfaces on the GPU", 2010: no tangents needed)
+	"	vec2 st = gl_TexCoord[0].st;\n"
+	"	vec2 stX = dFdx( st ), stY = dFdy( st );\n"
+	"	vec3 posX = dFdx( vPos ), posY = dFdy( vPos );\n"
+	"	float h = 0.0, hX = 0.0, hY = 0.0;\n"
+	"	if ( uBump > 0.0 && uTextured > 0.5 ) {\n"	// (read outside the branch below, which can differ between pixels)
+	"		h = height( st ); hX = height( st + stX ) - h; hY = height( st + stY ) - h;\n"
+	"	}\n"
 	"	if ( nlen2 > 0.0001 ) {\n"	// the terrain has no normals, it is lit like the old passes did
-	"		float ndl = dot( vNormal, toLight ) * inversesqrt( nlen2 * max( dist2, 0.0001 ) );\n"
-	"		facing = smoothstep( 0.0, 0.25, ndl ) * mix( 1.0, ndl, 0.6 );\n"
+	"		vec3 n = vNormal * inversesqrt( nlen2 );\n"
+	"		vec3 r1 = cross( posY, n ), r2 = cross( n, posX );\n"
+	"		float det = dot( posX, r1 );\n"
+	"		vec3 bumpedN = normalize( max( abs( det ), 1e-8 ) * n - sign( det ) * ( hX * r1 + hY * r2 ) );\n"
+	"		float ndl = dot( n, toLight ) * inversesqrt( max( dist2, 0.0001 ) );\n"
+	"		float bumped = dot( bumpedN, toLight ) * inversesqrt( max( dist2, 0.0001 ) );\n"
+	"		facing = smoothstep( 0.0, 0.25, ndl ) * mix( 1.0, max( bumped, 0.0 ), 0.6 );\n"
 	"	}\n"
 	"	vec3 light = uColor * ( atten * facing );\n"
 	"	if ( uTextured > 0.5 ) {\n"
@@ -113,7 +132,7 @@ static const char *dlightFragmentSource =
 static struct {
 	int		generation;
 	GLuint	program;
-	GLint	uniforms[5];
+	GLint	uniforms[6];
 	qboolean	failed;
 } dlightGlsl;
 
@@ -144,6 +163,7 @@ static qboolean ProjectDlightGLSL( void ) {
 		dlightGlsl.uniforms[2] = qglGetUniformLocation( dlightGlsl.program, "uColor" );
 		dlightGlsl.uniforms[3] = qglGetUniformLocation( dlightGlsl.program, "uTextured" );
 		dlightGlsl.uniforms[4] = qglGetUniformLocation( dlightGlsl.program, "uAlphaTest" );
+		dlightGlsl.uniforms[5] = qglGetUniformLocation( dlightGlsl.program, "uBump" );
 	}
 
 	dStage = RB_DlightDiffuseStage();
@@ -187,6 +207,7 @@ static qboolean ProjectDlightGLSL( void ) {
 		qglUniform1i( dlightGlsl.uniforms[0], 0 );
 		qglUniform1f( dlightGlsl.uniforms[3], dStage ? 1.0f : 0.0f );
 		qglUniform1f( dlightGlsl.uniforms[4], alphaTest );
+		qglUniform1f( dlightGlsl.uniforms[5], ( r_dlightGLSL->integer >= 2 ) ? DLIGHT_BUMP_DEPTH : 0.0f );
 	}
 	qglEnableClientState( GL_NORMAL_ARRAY );
 	qglNormalPointer( GL_FLOAT, sizeof( tess.normal[0] ), tess.normal );

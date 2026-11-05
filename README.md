@@ -72,7 +72,7 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   - **Sharpening** (Off, Low, Medium, High): crisper textures without halos, with AMD's contrast adaptive
     sharpening method, on any graphics card.
   - **Shader Dynamic Lights**: the light of lightsabers, blaster bolts and explosions follows the shape of what it
-    falls on, instead of blocky patches.
+    falls on, instead of blocky patches. **Detailed** also picks out the bumps of rock, brick and tiles.
 
   See [docs/post-processing.md](docs/post-processing.md).
 - **A brightness slider that works**: the Brightness slider of the video setup takes effect at once and brightens the whole
@@ -154,7 +154,7 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
 - **Play Jedi Outcast multiplayer (1.04) on a modern engine**, with the game's own modules from your copy of the game,
   so it plays exactly like the original, with the screen, graphics, sound and mouse improvements above. Because it
   runs the game's original menus, a few settings are console only: Anti-Aliasing (`r_ext_multisample 4`), the screen
-  effects (`r_ssao 1`, `r_bloom 1`, `r_smaa 1`, `r_dlightGLSL 1`), Headphone 3D (`s_hrtf 1`) and Mouse DPI
+  effects (`r_ssao 1`, `r_bloom 1`, `r_smaa 1`, `r_dlightGLSL 1` or `2`), Headphone 3D (`s_hrtf 1`) and Mouse DPI
   (`in_mouseDPI`); its Video Mode list is the original one (it still starts at your desktop resolution), and its old
   Sound Quality row is still there but every choice gives the best quality. Its HUD stays in the middle of the screen,
   while the view is widened all the same. See [Jedi Outcast multiplayer](#jedi-outcast-multiplayer).

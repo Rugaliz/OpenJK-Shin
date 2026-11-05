@@ -85,6 +85,7 @@ static struct vkglState_s {
 	float			uniformColor[3];
 	float			uniformTextured;
 	float			uniformAlphaTest;
+	float			uniformBump;
 
 	// current values
 	float			color[4];
@@ -586,8 +587,8 @@ void APIENTRY vkglUseProgram( GLuint program )
 
 GLint APIENTRY vkglGetUniformLocation( GLuint program, const GLchar *name )
 {
-	static const char *const names[] = { "uDiffuse", "uLight", "uColor", "uTextured", "uAlphaTest" };
-	for ( int i = 0; i < 5; i++ )
+	static const char *const names[] = { "uDiffuse", "uLight", "uColor", "uTextured", "uAlphaTest", "uBump" };
+	for ( int i = 0; i < 6; i++ )
 	{
 		if ( !strcmp( name, names[i] ) ) return i;
 	}
@@ -600,6 +601,7 @@ void APIENTRY vkglUniform1f( GLint location, GLfloat v0 )
 {
 	if ( location == 3 ) gl.uniformTextured = v0;
 	else if ( location == 4 ) gl.uniformAlphaTest = v0;
+	else if ( location == 5 ) gl.uniformBump = v0;
 }
 
 void APIENTRY vkglUniform3f( GLint location, GLfloat v0, GLfloat v1, GLfloat v2 )
@@ -743,6 +745,7 @@ static void PrepareDraw( vkPipelineKey_t *key, vkDynamicState_t *dynamic, vkCons
 		memcpy( constants->eyeZ, gl.uniformColor, sizeof( gl.uniformColor ) );
 		constants->eyeZ[3] = gl.uniformTextured;
 		constants->fogColorDensity[0] = gl.uniformAlphaTest;
+		constants->fogColorDensity[1] = gl.uniformBump;
 		return;
 	}
 
