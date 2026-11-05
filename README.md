@@ -71,6 +71,8 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   - **SMAA Edge Smoothing**: very clean edges without blurring the textures.
   - **Sharpening** (Off, Low, Medium, High): crisper textures without halos, with AMD's contrast adaptive
     sharpening method, on any graphics card.
+  - **Light Shafts**: rays of sunlight through windows and gratings and around the edges of roofs, on levels with a
+    sun.
   - **Shader Dynamic Lights**: the light of lightsabers, blaster bolts and explosions follows the shape of what it
     falls on, instead of blocky patches. **Detailed** also picks out the bumps of rock, brick and tiles.
 

@@ -1348,6 +1348,7 @@ void RE_LoadWorldMap_Actual( const char *name, world_t &worldData, int index ) {
 		tr.sunDirection[2] = 0.9f;
 
 		VectorNormalize( tr.sunDirection );
+		tr.levelHasSun = qfalse;
 
 		tr.worldMapLoaded = qtrue;
 

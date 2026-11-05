@@ -2254,6 +2254,7 @@ static qboolean ParseShader( const char  **text )
 			tr.sunDirection[0] = cos( a ) * cos( b );
 			tr.sunDirection[1] = sin( a ) * cos( b );
 			tr.sunDirection[2] = sin( b );
+			tr.levelHasSun = qtrue;
 
 			SkipRestOfLine( text );
 			continue;

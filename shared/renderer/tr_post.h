@@ -31,6 +31,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include "renderer/tr_smaa_data.h"
+#include "renderer/tr_light_shafts.h"
 #include <string>
 #include <zlib.h>
 
@@ -76,6 +77,8 @@ static struct {
 	postTarget_t	final, edges, weights;	// for SMAA: the view with the other effects on, the edges found in it, how to blend them
 	postProgram_t	smaaEdges, smaaWeights, smaaBlend;
 	postProgram_t	sharpen;			// contrast adaptive sharpening (r_sharpen)
+	postTarget_t	shaftsA, shaftsB;	// light shafts (r_lightShafts): the sky near the sun, then blurred towards it
+	postProgram_t	shafts;
 	GLuint			smaaAreaTexture, smaaSearchTexture;
 	qboolean		smaaOk;				// GLSL 3.30 is there, which SMAA is written for
 	qboolean		smaaFailed;
@@ -335,6 +338,8 @@ static void Post_FreeTargets( void ) {
 	Post_FreeTarget( &post.final );
 	Post_FreeTarget( &post.edges );
 	Post_FreeTarget( &post.weights );
+	Post_FreeTarget( &post.shaftsA );
+	Post_FreeTarget( &post.shaftsB );
 	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
 		Post_FreeTarget( &post.bloom[i] );
 	}
@@ -356,6 +361,8 @@ static void Post_EnsureTargets( int width, int height ) {
 	for ( i = 0; i < POST_BLOOM_LEVELS; i++ ) {
 		Post_NewTarget( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
 	}
+	Post_NewTarget( &post.shaftsA, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) );
+	Post_NewTarget( &post.shaftsB, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) );
 	if ( post.smaaOk ) {
 		Post_NewTarget( &post.final, width, height );
 		Post_NewTarget( &post.edges, width, height );
@@ -551,7 +558,8 @@ static qboolean Post_Wanted( void ) {
 	if ( backEnd.viewParms.isPortal || backEnd.viewParms.viewportWidth < 64 || backEnd.viewParms.viewportHeight < 64 ) {
 		return qfalse;
 	}
-	return (qboolean)( r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f );
+	return (qboolean)( r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f ||
+		r_lightShafts->value > 0.0f );
 }
 
 // draws the quad into a target (or the window, with 0), with the viewport set for it
@@ -705,6 +713,91 @@ static qboolean Post_Bloom( void ) {
 
 /*
 ================
+Light shafts (r_lightShafts, see tr_light_shafts.h)
+
+One program for the three passes (uMode): 0 the sky near the sun (where the depth is that of the sky, brighter parts
+counting more), 1 that blurred along the line to the sun, fading with the distance, 2 the result as it is, to be added
+over the view.
+================
+*/
+static const char *postShaftsFragmentSource =
+	"#version 120\n"
+	"uniform sampler2D uTex;\n"	// the view (0), the sky near the sun (1), the rays (2)
+	"uniform sampler2D uDepth;\n"
+	"uniform vec4 uSun;\n"		// xy: the sun on the view, z: the width of the view over its height, w: strength
+	"uniform float uMode;\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].xy;\n"
+	"	if ( uMode < 0.5 ) {\n"
+	"		float sky = texture2D( uDepth, uv ).r >= 0.99999 ? 1.0 : 0.0;\n"
+	"		vec2 d = ( uv - uSun.xy ) * vec2( uSun.z, 1.0 );\n"
+	"		float nearSun = clamp( 1.0 - length( d ) / 0.5, 0.0, 1.0 );\n"
+	"		vec3 c = max( texture2D( uTex, uv ).rgb - 0.4, 0.0 ) * 1.6667;\n"	// (only the brighter parts of the sky)
+	"		gl_FragColor = vec4( c * c * ( sky * nearSun * nearSun ), 1.0 );\n"
+	"	} else if ( uMode < 1.5 ) {\n"
+	"		vec2 stepUv = ( uSun.xy - uv ) * ( 0.85 / 48.0 );\n"
+	"		float noise = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );\n"
+	"		vec2 at = uv + stepUv * noise;\n"	// (each pixel starts a little further along, so the steps don't show)
+	"		vec3 sum = vec3( 0.0 );\n"
+	"		float weight = 1.0;\n"
+	"		for ( int i = 0; i < 48; i++ ) {\n"
+	"			if ( at.x < 0.0 || at.y < 0.0 || at.x > 1.0 || at.y > 1.0 ) break;\n"	// (the sun is off the view)
+	"			sum += texture2D( uTex, at ).rgb * weight;\n"
+	"			weight *= 0.97;\n"
+	"			at += stepUv;\n"
+	"		}\n"
+	"		gl_FragColor = vec4( sum * ( uSun.w * 0.035 ), 1.0 );\n"
+	"	} else {\n"
+	"		gl_FragColor = vec4( texture2D( uTex, uv ).rgb, 1.0 );\n"
+	"	}\n"
+	"}\n";
+
+// Leaves the rays added over the view (framebuffer 0). depthCopied: the depth of the view is in post.depthTexture
+// already (SSAO copied it).
+static void Post_LightShafts( int x, int y, int width, int height, qboolean depthCopied ) {
+	static const char *const uniforms[] = { "uTex", "uDepth", "uSun", "uMode", NULL };
+	float sun[3];
+
+	if ( !R_LightShaftsSun( sun ) ) {
+		return;
+	}
+	if ( !post.shafts.id && !Post_BuildProgram( &post.shafts, "post light shafts", postShaftsFragmentSource, uniforms ) ) {
+		post.failed = qtrue;
+		return;
+	}
+	if ( !depthCopied ) {
+		Post_BindTexture( 1, post.depthTexture );
+		qglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, x, y, width, height );
+	}
+
+	qglUseProgram( post.shafts.id );
+	qglUniform1i( post.shafts.uniforms[0], 0 );
+	qglUniform1i( post.shafts.uniforms[1], 1 );
+	qglUniform4f( post.shafts.uniforms[2], sun[0], sun[1], (float)width / height, sun[2] );
+
+	// the sky near the sun, from the view as it was before the effects
+	Post_BindTexture( 0, post.sceneTexture );
+	Post_BindTexture( 1, post.depthTexture );
+	qglUniform1f( post.shafts.uniforms[3], 0.0f );
+	Post_DrawInto( &post.shaftsA );
+
+	// blurred towards the sun
+	Post_BindTexture( 0, post.shaftsA.texture );
+	qglUniform1f( post.shafts.uniforms[3], 1.0f );
+	Post_DrawInto( &post.shaftsB );
+
+	// added over the view
+	qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	qglViewport( x, y, width, height );
+	Post_BindTexture( 0, post.shaftsB.texture );
+	qglUniform1f( post.shafts.uniforms[3], 2.0f );
+	GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+	Post_Quad();
+	GL_State( GLS_DEPTHTEST_DISABLE );
+}
+
+/*
+================
 RB_PostProcess
 
 Called when the 3D view is finished. Leaves the GL state as it found it, so the 2D drawing after it does not
@@ -837,6 +930,9 @@ void RB_PostProcess( void ) {
 		if ( smaa ) {
 			Post_Smaa( x, y, width, height );
 		}
+	}
+	if ( r_lightShafts->value > 0.0f ) {
+		Post_LightShafts( x, y, width, height, ssao );
 	}
 	if ( r_sharpen->value > 0.0f ) {
 		Post_Sharpen( x, y, width, height );
