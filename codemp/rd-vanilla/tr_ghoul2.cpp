@@ -2461,7 +2461,7 @@ void RenderSurfaces(CRenderSurface &RS) //also ended up just ripping right from 
 		// stencil shadows can't do personal models unless I polyhedron clip
 		//using z-fail now so can do personal models -rww
 		if ( /*!RS.personalModel
-			&& */r_shadows->integer == 2
+			&& */R_MODEL_SHADOWS( r_shadows->integer )
 //			&& RS.fogNum == 0
 			&& (RS.renderfx & RF_SHADOW_PLANE )
 			&& !(RS.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) )
@@ -3352,7 +3352,7 @@ void R_AddGhoulSurfaces( trRefEntity_t *ent ) {
 			// The Jedi Outcast cgame module finds the floor under a character (shadowPlane) for every kind of shadow,
 			// but asks for it to be used (RF_SHADOW_PLANE) only for the projected ones (cg_shadows 3), so its
 			// characters had no stencil shadows: use the floor it found for those too
-			if ( r_shadows->integer == 2 && ent->e.shadowPlane != 0.0f && !( ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) ) )
+			if ( R_MODEL_SHADOWS( r_shadows->integer ) && ent->e.shadowPlane != 0.0f && !( ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) ) )
 			{
 				ent->e.renderfx |= RF_SHADOW_PLANE;
 				RS.renderfx |= RF_SHADOW_PLANE;

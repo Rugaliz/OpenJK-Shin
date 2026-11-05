@@ -1210,6 +1210,7 @@ extern	cvar_t	*r_shadowSamples;				// stencil shadows: how many volumes make up 
 extern	cvar_t	*r_shadowStrength;				// stencil shadows: scales how dark they are
 extern	cvar_t	*r_shadowTilt;					// stencil shadows: how much they lean away from the light
 extern	cvar_t	*r_shadowSelf;					// stencil shadows: 1 = characters are darkened by shadows too
+extern	cvar_t	*r_shadowMaps;					// 1 = cg_shadows 2 draws shadow maps too (as cg_shadows 4 does)
 extern	cvar_t	*r_flares;						// light flares
 
 extern	cvar_t	*r_intensity;
@@ -1294,6 +1295,7 @@ void	R_GLSL_DeleteProgram( GLuint program );
 // tr_post.cpp
 void	R_Post_Init( void );
 void	RB_PostProcess( void );
+#include "renderer/tr_shadow_maps.h"	// (the shadow maps of the characters)
 qboolean	R_Post_GammaAvailable( void );
 void	RB_GammaPass( void );	// brightness and overbright for the whole picture (tr_post.h)
 

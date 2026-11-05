@@ -557,6 +557,8 @@ extern	vmCvar_t		cg_bobpitch;
 extern	vmCvar_t		cg_bobroll;
 extern	vmCvar_t		cg_swingSpeed;
 extern	vmCvar_t		cg_shadows;
+// the shadows the renderer makes from the characters' own triangles: stencil volumes (2) or shadow maps (4)
+#define CG_MODEL_SHADOWS()	( cg_shadows.integer == 2 || cg_shadows.integer == 4 )
 extern	vmCvar_t		cg_paused;
 extern	vmCvar_t		cg_drawTimer;
 extern	vmCvar_t		cg_drawFPS;

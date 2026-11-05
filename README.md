@@ -79,9 +79,10 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   picture, as on the original game's hardware, and the overbright lighting of the original (`r_overBrightBits 1`,
   light up to twice as bright as white) works again, in a window too. See
   [docs/post-processing.md](docs/post-processing.md).
-- **Shadows that work** (Setup > More Video > Shadows in single player, `cg_shadows 2` in multiplayer): characters are
-  no longer darkened by their own shadow, shadows have soft edges, fall away from the light, are lighter where there
-  is little direct light, and no longer show through walls. See [docs/shadows.md](docs/shadows.md).
+- **Shadows that work** (Setup > More Video > Shadows): characters are no longer darkened by their own shadow, shadows
+  have soft edges, fall away from the light, are lighter where there is little direct light, and no longer show
+  through walls. The new **Soft** setting goes further: the shadow has the character's shape, falls on walls and
+  steps too, and its edge blurs the further it is from the character. See [docs/shadows.md](docs/shadows.md).
 - **See further**: grass and bushes are drawn about three times further away, and characters keep their detailed look
   twice as far.
 

@@ -1661,6 +1661,8 @@ extern	markPoly_t		cg_markPolys[MAX_MARK_POLYS];
 #define XCVAR_PROTO
 	#include "cg_xcvar.h"
 #undef XCVAR_PROTO
+// the shadows the renderer makes from the characters' own triangles: stencil volumes (2) or shadow maps (4)
+#define CG_MODEL_SHADOWS()	( cg_shadows.integer == 2 || cg_shadows.integer == 4 )
 void CG_RegisterCvars( void );
 void CG_UpdateCvars( void );
 
