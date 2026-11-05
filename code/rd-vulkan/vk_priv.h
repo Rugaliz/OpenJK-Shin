@@ -153,6 +153,7 @@ bool		VK_RT_BuildTriangles( VkCommandBuffer cmd, vkRtStructure_t *blas, vkRtBuff
 bool		VK_RT_BuildInstances( VkCommandBuffer cmd, vkRtStructure_t *tlas, vkRtBuffer_t *scratch, VkDeviceAddress instances,
 				uint32_t numInstances );
 void		VK_RT_Barrier( VkCommandBuffer cmd, VkPipelineStageFlags stage );
+VkAccelerationStructureKHR	VK_RT_Scene( void );		// this frame's top level structure (the level and its brush models)
 
 // vk_mem.cpp
 typedef struct vkAlloc_s {

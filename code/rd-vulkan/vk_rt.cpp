@@ -29,6 +29,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../server/exe_headers.h"
 #include "../rd-vanilla/tr_local.h"
 #include "vk_priv.h"
+#include "../game/surfaceflags.h"
+#include <vector>
 
 static const char *const rtExtensions[] = {
 	VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -352,7 +354,304 @@ void VK_RT_Barrier( VkCommandBuffer cmd, VkPipelineStageFlags stage )
 	VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 	barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
 	barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+	if ( stage == VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR )
+	{
+		barrier.dstAccessMask |= VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;	// (a build after it may use the same scratch)
+	}
 	vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, stage, 0, 1, &barrier, 0, NULL, 0, NULL );
+}
+
+/*
+=============================================================================
+
+THE SCENE: the level and its brush models (doors, lifts, ...), each in a bottom level structure made the first time a
+frame needs it and kept until the level changes, placed every frame by a top level structure of its own frame
+
+=============================================================================
+*/
+
+// what blocks light: solid surfaces that are drawn as they are (no sky, nothing see-through or cut out by an alpha
+// test, nothing that moves its vertices)
+static bool VK_RT_Blocks( const shader_t *shader )
+{
+	if ( !shader || shader->sky || ( shader->surfaceFlags & ( SURF_SKY | SURF_NODRAW ) ) || shader->fogParms )
+	{
+		return false;
+	}
+	if ( shader->sort != SS_OPAQUE || shader->numDeforms || !shader->numUnfoggedPasses || !shader->stages )
+	{
+		return false;
+	}
+	return ( shader->stages[0].stateBits & GLS_ATEST_BITS ) == 0;
+}
+
+typedef struct {
+	const bmodel_t	*bmodel;
+	vkRtStructure_t	blas;			// (no handle: nothing in it blocks light)
+	vkRtBuffer_t	input;			// its vertices and indexes, kept while it may still be being built
+	int				triangles;
+} rtModel_t;
+
+static struct {
+	const world_t			*world;			// the level the models are of
+	std::vector<rtModel_t>	models;
+	vkRtBuffer_t			scratch;		// for the bottom level builds
+	struct {
+		vkRtStructure_t	tlas;
+		vkRtBuffer_t	instances, scratch;
+		int				frame;				// vk.frameCounter + 1 it was built for
+	} frames[VK_FRAMES_IN_FLIGHT];
+} rtScene;
+
+#define RT_MAX_INSTANCES	1024
+#define RT_MASK_WORLD		0x01			// the instance masks: the level, its brush models
+#define RT_MASK_BMODEL		0x02
+
+static void VK_RT_AddTriangle( std::vector<float> &xyz, std::vector<uint32_t> &indexes, const float *a, const float *b, const float *c )
+{
+	const uint32_t first = (uint32_t)( xyz.size() / 3 );
+	xyz.insert( xyz.end(), a, a + 3 );
+	xyz.insert( xyz.end(), b, b + 3 );
+	xyz.insert( xyz.end(), c, c + 3 );
+	indexes.push_back( first );
+	indexes.push_back( first + 1 );
+	indexes.push_back( first + 2 );
+}
+
+// the triangles of the surfaces of bmodel that block light, in its own space
+static void VK_RT_Collect( const bmodel_t *bmodel, std::vector<float> &xyz, std::vector<uint32_t> &indexes )
+{
+	for ( int s = 0; s < bmodel->numSurfaces; s++ )
+	{
+		const msurface_t *surf = bmodel->firstSurface + s;
+		if ( !VK_RT_Blocks( surf->shader ) || !surf->data )
+		{
+			continue;
+		}
+		switch ( *surf->data )
+		{
+		case SF_FACE:
+		{
+			const srfSurfaceFace_t *face = (const srfSurfaceFace_t *)surf->data;
+			const int *idx = (const int *)( (const byte *)face + face->ofsIndices );
+			for ( int i = 0; i + 2 < face->numIndices; i += 3 )
+			{
+				VK_RT_AddTriangle( xyz, indexes, face->points[idx[i]], face->points[idx[i + 1]], face->points[idx[i + 2]] );
+			}
+			break;
+		}
+		case SF_TRIANGLES:
+		{
+			const srfTriangles_t *tris = (const srfTriangles_t *)surf->data;
+			for ( int i = 0; i + 2 < tris->numIndexes; i += 3 )
+			{
+				VK_RT_AddTriangle( xyz, indexes, tris->verts[tris->indexes[i]].xyz, tris->verts[tris->indexes[i + 1]].xyz,
+					tris->verts[tris->indexes[i + 2]].xyz );
+			}
+			break;
+		}
+		case SF_GRID:
+		{
+			const srfGridMesh_t *grid = (const srfGridMesh_t *)surf->data;
+			for ( int y = 0; y + 1 < grid->height; y++ )
+			{
+				for ( int x = 0; x + 1 < grid->width; x++ )
+				{
+					const float *a = grid->verts[y * grid->width + x].xyz, *b = grid->verts[y * grid->width + x + 1].xyz;
+					const float *c = grid->verts[( y + 1 ) * grid->width + x].xyz, *d = grid->verts[( y + 1 ) * grid->width + x + 1].xyz;
+					VK_RT_AddTriangle( xyz, indexes, a, c, b );
+					VK_RT_AddTriangle( xyz, indexes, b, c, d );
+				}
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+}
+
+// the model of bmodel, its bottom level structure recorded into cmd if it is new (NULL: there is no room)
+static const rtModel_t *VK_RT_Model( VkCommandBuffer cmd, const bmodel_t *bmodel )
+{
+	for ( size_t i = 0; i < rtScene.models.size(); i++ )
+	{
+		if ( rtScene.models[i].bmodel == bmodel )
+		{
+			return &rtScene.models[i];
+		}
+	}
+
+	rtModel_t model = {};
+	model.bmodel = bmodel;
+	std::vector<float> xyz;
+	std::vector<uint32_t> indexes;
+	VK_RT_Collect( bmodel, xyz, indexes );
+	model.triangles = (int)( indexes.size() / 3 );
+	if ( model.triangles )
+	{
+		const VkDeviceSize vertexBytes = ( xyz.size() * sizeof( float ) + 15 ) & ~(VkDeviceSize)15;
+		const VkDeviceSize bytes = vertexBytes + indexes.size() * sizeof( uint32_t );
+		if ( VK_RT_NewBuffer( &model.input, bytes, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
+		{
+			memcpy( model.input.mapped, xyz.data(), xyz.size() * sizeof( float ) );
+			memcpy( (byte *)model.input.mapped + vertexBytes, indexes.data(), indexes.size() * sizeof( uint32_t ) );
+			VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );	// (the scratch may be in use)
+			if ( !VK_RT_BuildTriangles( cmd, &model.blas, &rtScene.scratch, model.input.address, (uint32_t)( xyz.size() / 3 ),
+					model.input.address + vertexBytes, (uint32_t)model.triangles, false ) )
+			{
+				VK_RT_FreeStructure( &model.blas );
+			}
+		}
+	}
+	rtScene.models.push_back( model );
+	return &rtScene.models.back();
+}
+
+static void VK_RT_FreeScene( void )
+{
+	for ( size_t i = 0; i < rtScene.models.size(); i++ )
+	{
+		VK_RT_FreeStructure( &rtScene.models[i].blas );
+		VK_RT_FreeBuffer( &rtScene.models[i].input );
+	}
+	rtScene.models.clear();
+	VK_RT_FreeBuffer( &rtScene.scratch );
+	for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
+	{
+		VK_RT_FreeStructure( &rtScene.frames[i].tlas );
+		VK_RT_FreeBuffer( &rtScene.frames[i].instances );
+		VK_RT_FreeBuffer( &rtScene.frames[i].scratch );
+		rtScene.frames[i].frame = 0;
+	}
+	rtScene.world = NULL;
+}
+
+/*
+=================
+VK_RT_NewLevel
+
+A level was loaded: the structures of the last one go (their surfaces are gone).
+=================
+*/
+void VK_RT_NewLevel( void )
+{
+	if ( !vk.rayTracing || ( !rtScene.world && rtScene.models.empty() ) )
+	{
+		return;
+	}
+	vkDeviceWaitIdle( vk.device );
+	VK_RT_FreeScene();
+}
+
+static void VK_RT_Place( VkAccelerationStructureInstanceKHR *instance, const rtModel_t *model, const float axis[3][3],
+	const float *origin, uint32_t mask )
+{
+	memset( instance, 0, sizeof( *instance ) );
+	for ( int r = 0; r < 3; r++ )
+	{
+		for ( int c = 0; c < 3; c++ )
+		{
+			instance->transform.matrix[r][c] = axis ? axis[c][r] : ( r == c ? 1.0f : 0.0f );
+		}
+		instance->transform.matrix[r][3] = origin ? origin[r] : 0.0f;
+	}
+	instance->mask = mask;
+	instance->flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+	instance->accelerationStructureReference = model->blas.address;
+}
+
+/*
+=================
+VK_RT_Scene
+
+The top level structure of this frame: the level, and the brush models among the entities of the view being drawn,
+where they are now. Built by the first call of a frame (it records into vk.cmd, outside a render pass), VK_NULL_HANDLE
+when there is no ray tracing or no level. Shaders that use it come after a VK_RT_Barrier for their stage, which this
+does for fragment shaders.
+=================
+*/
+VkAccelerationStructureKHR VK_RT_Scene( void )
+{
+	if ( !vk.rayTracing || !tr.world || ( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
+	{
+		return VK_NULL_HANDLE;
+	}
+	if ( rtScene.world != tr.world )
+	{
+		if ( rtScene.world || !rtScene.models.empty() )
+		{
+			vkDeviceWaitIdle( vk.device );
+			VK_RT_FreeScene();
+		}
+		rtScene.world = tr.world;
+	}
+
+	auto &frame = rtScene.frames[vk.frameIndex];
+	if ( frame.frame == vk.frameCounter + 1 && frame.tlas.handle )
+	{
+		return frame.tlas.handle;
+	}
+	if ( !frame.instances.buffer &&
+		 !VK_RT_NewBuffer( &frame.instances, RT_MAX_INSTANCES * sizeof( VkAccelerationStructureInstanceKHR ),
+			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
+	{
+		return VK_NULL_HANDLE;
+	}
+
+	const double start = VK_Now();
+	const size_t modelsBefore = rtScene.models.size();
+	VkCommandBuffer cmd = vk.cmd;
+	VkAccelerationStructureInstanceKHR *instances = (VkAccelerationStructureInstanceKHR *)frame.instances.mapped;
+	uint32_t count = 0;
+
+	const rtModel_t *world = VK_RT_Model( cmd, &tr.world->bmodels[0] );
+	if ( world->blas.handle )
+	{
+		VK_RT_Place( &instances[count++], world, NULL, NULL, RT_MASK_WORLD );
+	}
+	for ( int i = 0; i < backEnd.refdef.num_entities && count < RT_MAX_INSTANCES; i++ )
+	{
+		const trRefEntity_t *ent = &backEnd.refdef.entities[i];
+		if ( ent->e.reType != RT_MODEL || ( ent->e.renderfx & RF_DEPTHHACK ) )
+		{
+			continue;
+		}
+		const model_t *model = R_GetModelByHandle( ent->e.hModel );
+		if ( !model || model->type != MOD_BRUSH || !model->bmodel || model->bmodel == &tr.world->bmodels[0] )
+		{
+			continue;
+		}
+		const rtModel_t *rt = VK_RT_Model( cmd, model->bmodel );
+		if ( rt->blas.handle )
+		{
+			VK_RT_Place( &instances[count++], rt, ent->e.axis, ent->e.origin, RT_MASK_BMODEL );
+		}
+	}
+	if ( !count )
+	{
+		return VK_NULL_HANDLE;
+	}
+
+	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );
+	if ( !VK_RT_BuildInstances( cmd, &frame.tlas, &frame.scratch, frame.instances.address, count ) )
+	{
+		return VK_NULL_HANDLE;
+	}
+	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT );
+	frame.frame = vk.frameCounter + 1;
+
+	if ( rtScene.models.size() != modelsBefore )
+	{
+		int triangles = 0;
+		for ( size_t i = modelsBefore; i < rtScene.models.size(); i++ )
+		{
+			triangles += rtScene.models[i].triangles;
+		}
+		ri.Printf( PRINT_DEVELOPER, "ray tracing: %d models, %d triangles that block light, made in %.1f ms\n",
+			(int)( rtScene.models.size() - modelsBefore ), triangles, VK_Now() - start );
+	}
+	return frame.tlas.handle;
 }
 
 /*
@@ -477,5 +776,5 @@ void VK_RT_Init( void )
 
 void VK_RT_Shutdown( void )
 {
-	// (nothing kept yet: the structures of the level and the characters come with the shadows that use them)
+	VK_RT_FreeScene();	// (the device is idle)
 }

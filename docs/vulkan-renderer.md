@@ -64,6 +64,7 @@ again. Choosing the OpenGL renderer yourself shows no warning.
 | `r_vkDevice` | -1 | Which graphics card (the numbers are listed in the log at start-up); -1 takes the best one that can show the window. |
 | `r_vkValidation` | 0 | Turns on the Khronos validation layer if it is installed (for developers). |
 | `r_vkRayTracing` | 1 | Turns ray tracing on where the graphics card has it (see below); 0 never does. Needs a restart. |
+| `r_rtDebug` | 0 | Shows what the ray tracing sees (for developers, see below). |
 
 The first run of a scene builds pipelines, which can be seen as short stutters; they are kept in `vk_pipeline_cache.bin`
 (next to the config), so the next runs are smooth.
@@ -80,9 +81,19 @@ level one places them in the world). Graphics cards without it keep the soft sha
 Done so far (`code/rd-vulkan/vk_rt.cpp`): the device is made with the extensions and features where it has them (and
 again without them if that fails), buffers with device addresses, building the two kinds of structure, and a test at
 start-up that builds a one-triangle scene and waits for it; the log says `...using ray tracing (VK_KHR_ray_query)` when
-it worked, and `r_rtAvail` is 1 (the menus will look at it; the OpenGL renderers set it to 0). Nothing is drawn with
-it yet: next come the structure of the level, the characters' shadows (`cg_shadows 5`) and the shadows of dynamic
-lights.
+it worked, and `r_rtAvail` is 1 (the menus will look at it; the OpenGL renderers set it to 0).
+
+The scene (`VK_RT_Scene`): the level and each of its brush models (doors, lifts, platforms) get a bottom level
+structure the first time a frame needs them, kept until the next level loads. Only what blocks light goes in: solid
+surfaces drawn as they are, so no sky, nothing see-through, nothing cut out by an alpha test (gratings, foliage: for
+now light goes through them) and nothing whose vertices move. Each frame a top level structure of its own places the
+level and the brush models among the entities of the view where they are now. On mp/ffa3 the level is 33,708
+triangles, made in 2 ms on the first frame.
+
+`r_rtDebug 1` darkens the view where a ray from the pixel towards the level's sun is blocked (or the surface faces away
+from it), `r_rtDebug 2` shows only that. The result should match the shadows the level's own lighting has
+(`r_lightmap 1` shows that lighting alone), with hard edges. Still to come: the characters' shadows
+(`cg_shadows 5`) and the shadows of dynamic lights.
 
 ## What is not there yet
 

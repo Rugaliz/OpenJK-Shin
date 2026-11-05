@@ -1464,6 +1464,9 @@ void RE_LoadWorldMap( const char *name )
 	*(ri.gbUsingCachedMapDataRightNow()) = qtrue;	// !!!!!!!!!!!!
 
 		RE_LoadWorldMap_Actual( name, s_worldData, 0 );
+#ifdef RD_VULKAN
+		VK_RT_NewLevel();
+#endif
 
 	*(ri.gbUsingCachedMapDataRightNow()) = qfalse;	// !!!!!!!!!!!!
 }
