@@ -30,3 +30,6 @@ void VK_Shutdown( void );
 
 // A level was loaded: the ray tracing structures of the last one go (vk_rt.cpp).
 void VK_RT_NewLevel( void );
+
+// Before a view is drawn: the ray tracing structure the dynamic lights' rays use (vk_post.cpp).
+void VK_RT_BeginView( void );

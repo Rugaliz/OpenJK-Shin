@@ -32,6 +32,16 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 static VkShaderModule			vertexShader, fragmentShader;
 static VkShaderModule			dlightVertexShader, dlightFragmentShader;
+
+// the rays of the dynamic lights (ray traced shadows): their fragment shader, the set with the level's structure (one
+// for each frame in flight) and which structure it holds, valid for the frame (vk.frameCounter + 1) it was set for
+static bool						rayQueryDraws;
+static VkShaderModule			dlightRayFragmentShader;
+static VkDescriptorSetLayout	sceneSetLayout;
+static VkDescriptorPool			scenePool;
+static VkDescriptorSet			sceneSets[VK_FRAMES_IN_FLIGHT];
+static VkAccelerationStructureKHR	sceneHandles[VK_FRAMES_IN_FLIGHT];
+static int						sceneFrames[VK_FRAMES_IN_FLIGHT];
 static VkDescriptorSetLayout	descriptorSetLayout;
 static VkPipelineLayout			pipelineLayout;
 static VkDescriptorPool			descriptorPool;
@@ -82,6 +92,9 @@ static struct bound_s {
 	VkDescriptorSet		set;
 	vkConstants_t		constants;
 	bool				constantsValid;
+	VkDescriptorSet		sceneSet;
+	vkDlightShadow_t	shadow;
+	bool				shadowValid;
 	float				viewport[6];
 	bool				viewportValid;
 	int					scissor[4];
@@ -267,7 +280,7 @@ static VkPipeline CreatePipeline( const vkPipelineKey_t *key )
 	stages[0].module = key->program ? dlightVertexShader : vertexShader;
 	stages[0].pName = "main";
 	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	stages[1].module = key->program ? dlightFragmentShader : fragmentShader;
+	stages[1].module = key->program ? ( key->rayQuery ? dlightRayFragmentShader : dlightFragmentShader ) : fragmentShader;
 	stages[1].pName = "main";
 	if ( !key->program )
 	{
@@ -406,9 +419,58 @@ void VK_AllocateGeometry( vkGeometry_t *geometry, int vertexCount, int indexCoun
 VK_Draw
 =================
 */
-void VK_Draw( const vkPipelineKey_t *key, const vkDynamicState_t *dynamic, const vkConstants_t *constants,
-	const vkTexture_t *texture0, const vkTexture_t *texture1, const vkGeometry_t *geometry )
+/*
+=================
+VK_DrawSetScene
+
+The level's ray tracing structure of this frame (VK_RT_Scene), for the rays of the dynamic lights drawn after it. The
+set of this frame in flight is changed only when the structure is another one (it is the same for all of a frame's
+views, and the frame that last used the set is finished).
+=================
+*/
+void VK_DrawSetScene( VkAccelerationStructureKHR scene )
 {
+	if ( !rayQueryDraws )
+	{
+		return;
+	}
+	const int slot = vk.frameIndex;
+	if ( !scene )
+	{
+		sceneFrames[slot] = 0;
+		return;
+	}
+	if ( sceneHandles[slot] != scene )
+	{
+		VkWriteDescriptorSetAccelerationStructureKHR structure = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
+		structure.accelerationStructureCount = 1;
+		structure.pAccelerationStructures = &scene;
+		VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		write.pNext = &structure;
+		write.dstSet = sceneSets[slot];
+		write.dstBinding = 0;
+		write.descriptorCount = 1;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		vkUpdateDescriptorSets( vk.device, 1, &write, 0, NULL );
+		sceneHandles[slot] = scene;
+	}
+	sceneFrames[slot] = vk.frameCounter + 1;
+}
+
+void VK_Draw( const vkPipelineKey_t *key, const vkDynamicState_t *dynamic, const vkConstants_t *constants,
+	const vkTexture_t *texture0, const vkTexture_t *texture1, const vkGeometry_t *geometry, const vkDlightShadow_t *shadow )
+{
+	// the dynamic light program with rays, when they are asked for and this frame has the level's structure
+	vkPipelineKey_t rayKey;
+	const bool rays = key->program && shadow && shadow->shadow[0] > 0.5f && rayQueryDraws &&
+		sceneFrames[vk.frameIndex] == vk.frameCounter + 1;
+	if ( rays )
+	{
+		rayKey = *key;
+		rayKey.rayQuery = 1;
+		key = &rayKey;
+	}
+
 	if ( descriptorSetCount >= MAX_DESCRIPTOR_SETS )
 	{
 		// (the sets of textures that are gone fill the pool up: everything sent is finished, then it starts again)
@@ -509,6 +571,21 @@ void VK_Draw( const vkPipelineKey_t *key, const vkDynamicState_t *dynamic, const
 		bound.constants = *constants;
 		bound.constantsValid = true;
 	}
+	if ( rays )
+	{
+		if ( bound.sceneSet != sceneSets[vk.frameIndex] )
+		{
+			vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &sceneSets[vk.frameIndex], 0, NULL );
+			bound.sceneSet = sceneSets[vk.frameIndex];
+		}
+		if ( !bound.shadowValid || memcmp( &bound.shadow, shadow, sizeof( *shadow ) ) )
+		{
+			vkCmdPushConstants( cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof( vkConstants_t ),
+				sizeof( *shadow ), shadow );
+			bound.shadow = *shadow;
+			bound.shadowValid = true;
+		}
+	}
 
 	const VkBuffer buffers[4] = { geometryBuffer, geometryBuffer, geometryBuffer, geometryBuffer };
 	const VkDeviceSize offsets[4] = { geometry->positionOffset, geometry->colorOffset, geometry->texCoord0Offset, geometry->texCoord1Offset };
@@ -569,10 +646,49 @@ void VK_InitDraw( void )
 	layoutInfo.pBindings = layoutBindings;
 	VK_CheckResult( vkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &descriptorSetLayout ), "vkCreateDescriptorSetLayout" );
 
-	VkPushConstantRange range = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( vkConstants_t ) };
+	// with ray tracing: a second set with the level's structure, and room after the constants for the rays' own
+	rayQueryDraws = vk.rayTracing && vk.properties.limits.maxPushConstantsSize >= sizeof( vkConstants_t ) + sizeof( vkDlightShadow_t );
+	VkDescriptorSetLayout setLayouts[2] = { descriptorSetLayout, VK_NULL_HANDLE };
+	if ( rayQueryDraws )
+	{
+		shaderInfo.codeSize = sizeof( vk_spirv_dlight_rt_frag );
+		shaderInfo.pCode = vk_spirv_dlight_rt_frag;
+		VK_CheckResult( vkCreateShaderModule( vk.device, &shaderInfo, NULL, &dlightRayFragmentShader ), "vkCreateShaderModule" );
+		VkDescriptorSetLayoutBinding sceneBinding = {};
+		sceneBinding.binding = 0;
+		sceneBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		sceneBinding.descriptorCount = 1;
+		sceneBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		VkDescriptorSetLayoutCreateInfo sceneLayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+		sceneLayoutInfo.bindingCount = 1;
+		sceneLayoutInfo.pBindings = &sceneBinding;
+		VK_CheckResult( vkCreateDescriptorSetLayout( vk.device, &sceneLayoutInfo, NULL, &sceneSetLayout ), "vkCreateDescriptorSetLayout" );
+		const VkDescriptorPoolSize scenePoolSize = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, VK_FRAMES_IN_FLIGHT };
+		VkDescriptorPoolCreateInfo scenePoolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		scenePoolInfo.maxSets = VK_FRAMES_IN_FLIGHT;
+		scenePoolInfo.poolSizeCount = 1;
+		scenePoolInfo.pPoolSizes = &scenePoolSize;
+		VK_CheckResult( vkCreateDescriptorPool( vk.device, &scenePoolInfo, NULL, &scenePool ), "vkCreateDescriptorPool" );
+		VkDescriptorSetLayout sceneLayouts[VK_FRAMES_IN_FLIGHT];
+		for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
+		{
+			sceneLayouts[i] = sceneSetLayout;
+			sceneHandles[i] = VK_NULL_HANDLE;
+			sceneFrames[i] = 0;
+		}
+		VkDescriptorSetAllocateInfo sceneAllocate = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		sceneAllocate.descriptorPool = scenePool;
+		sceneAllocate.descriptorSetCount = VK_FRAMES_IN_FLIGHT;
+		sceneAllocate.pSetLayouts = sceneLayouts;
+		VK_CheckResult( vkAllocateDescriptorSets( vk.device, &sceneAllocate, sceneSets ), "vkAllocateDescriptorSets" );
+		setLayouts[1] = sceneSetLayout;
+	}
+
+	VkPushConstantRange range = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+		(uint32_t)( sizeof( vkConstants_t ) + ( rayQueryDraws ? sizeof( vkDlightShadow_t ) : 0 ) ) };
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	pipelineLayoutInfo.setLayoutCount = 1;
-	pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+	pipelineLayoutInfo.setLayoutCount = rayQueryDraws ? 2 : 1;
+	pipelineLayoutInfo.pSetLayouts = setLayouts;
 	pipelineLayoutInfo.pushConstantRangeCount = 1;
 	pipelineLayoutInfo.pPushConstantRanges = &range;
 	VK_CheckResult( vkCreatePipelineLayout( vk.device, &pipelineLayoutInfo, NULL, &pipelineLayout ), "vkCreatePipelineLayout" );
@@ -649,6 +765,13 @@ void VK_ShutdownDraw( void )
 	vkDestroyShaderModule( vk.device, fragmentShader, NULL );
 	vkDestroyShaderModule( vk.device, dlightVertexShader, NULL );
 	vkDestroyShaderModule( vk.device, dlightFragmentShader, NULL );
+	if ( rayQueryDraws )
+	{
+		vkDestroyShaderModule( vk.device, dlightRayFragmentShader, NULL );
+		vkDestroyDescriptorPool( vk.device, scenePool, NULL );
+		vkDestroyDescriptorSetLayout( vk.device, sceneSetLayout, NULL );
+		rayQueryDraws = false;
+	}
 	vkUnmapMemory( vk.device, geometryMemory );
 	vkDestroyBuffer( vk.device, geometryBuffer, NULL );
 	vkFreeMemory( vk.device, geometryMemory, NULL );

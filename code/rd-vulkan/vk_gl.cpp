@@ -86,6 +86,8 @@ static struct vkglState_s {
 	float			uniformTextured;
 	float			uniformAlphaTest;
 	float			uniformBump;
+	float			uniformToWorld[12];	// the shadows of the dynamic light program (vkDlightShadow_t)
+	float			uniformShadow;
 
 	// current values
 	float			color[4];
@@ -587,8 +589,8 @@ void APIENTRY vkglUseProgram( GLuint program )
 
 GLint APIENTRY vkglGetUniformLocation( GLuint program, const GLchar *name )
 {
-	static const char *const names[] = { "uDiffuse", "uLight", "uColor", "uTextured", "uAlphaTest", "uBump" };
-	for ( int i = 0; i < 6; i++ )
+	static const char *const names[] = { "uDiffuse", "uLight", "uColor", "uTextured", "uAlphaTest", "uBump", "uToWorld", "uShadow" };
+	for ( int i = 0; i < 8; i++ )
 	{
 		if ( !strcmp( name, names[i] ) ) return i;
 	}
@@ -602,6 +604,7 @@ void APIENTRY vkglUniform1f( GLint location, GLfloat v0 )
 	if ( location == 3 ) gl.uniformTextured = v0;
 	else if ( location == 4 ) gl.uniformAlphaTest = v0;
 	else if ( location == 5 ) gl.uniformBump = v0;
+	else if ( location == 7 ) gl.uniformShadow = v0;
 }
 
 void APIENTRY vkglUniform3f( GLint location, GLfloat v0, GLfloat v1, GLfloat v2 )
@@ -617,6 +620,7 @@ void APIENTRY vkglUniform3f( GLint location, GLfloat v0, GLfloat v1, GLfloat v2 
 void APIENTRY vkglUniform4fv( GLint location, GLsizei count, const GLfloat *value )
 {
 	if ( location == 1 ) memcpy( gl.uniformLight, value, sizeof( gl.uniformLight ) );
+	else if ( location == 6 ) memcpy( gl.uniformToWorld, value, Q_min( count, 3 ) * 4 * sizeof( float ) );
 }
 
 PFNGLUSEPROGRAMPROC				qglUseProgram = vkglUseProgram;
@@ -998,7 +1002,14 @@ static void Emit( GLenum mode, const source_t &position, const source_t &color, 
 
 	vkTexture_t *texture0 = gl.texture2D[0] ? VK_TextureForId( gl.bound[0], false ) : NULL;
 	vkTexture_t *texture1 = gl.texture2D[1] ? VK_TextureForId( gl.bound[1], false ) : NULL;
-	VK_Draw( &key, &dynamic, &constants, texture0, texture1, &geometry );
+	vkDlightShadow_t shadow;
+	if ( gl.program )
+	{
+		memcpy( shadow.toWorld, gl.uniformToWorld, sizeof( shadow.toWorld ) );
+		shadow.shadow[0] = gl.uniformShadow;
+		shadow.shadow[1] = shadow.shadow[2] = shadow.shadow[3] = 0.0f;
+	}
+	VK_Draw( &key, &dynamic, &constants, texture0, texture1, &geometry, gl.program ? &shadow : NULL );
 }
 
 void vkglDrawElements( GLenum mode, GLsizei count, GLenum type, const GLvoid *indices )

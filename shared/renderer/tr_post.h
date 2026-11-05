@@ -1209,6 +1209,10 @@ qboolean R_RayTracedShadows_Available( void ) {
 	return qfalse;
 }
 
+qboolean R_DlightShadows( void ) {
+	return qfalse;
+}
+
 void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters, const float *xyz, int numPoints,
 							   const int *indexes, int numTriangles, int stencilSkip ) {
 }

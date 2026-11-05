@@ -461,6 +461,10 @@ to actually render the visible surfaces for this view
 static void RB_BeginDrawingView (void) {
 	int clearBits = GL_DEPTH_BUFFER_BIT;
 
+#ifdef RD_VULKAN
+	VK_RT_BeginView();
+#endif
+
 	// sync with gl if needed
 	if ( r_finish->integer == 1 && !glState.finishCalled ) {
 		qglFinish ();
