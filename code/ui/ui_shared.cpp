@@ -1280,6 +1280,7 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
 		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
 		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on." },
+		{ "sharpen", "r_sharpen", "r_postAvail", "Sharpening:", "Crisper textures, without halos. Good with SMAA or Anti-Aliasing." },
 	};
 	itemDef_t	*rows[24];
 	int			numRows = 0;
@@ -1327,6 +1328,24 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 		row->descText = String_Alloc( effects[e].desc );
 		row->cvarTest = NULL;
 		row->cvarFlags = 0;
+		if ( !Q_stricmp( effects[e].name, "sharpen" ) )
+		{
+			// four steps instead of off and on: the "off" of the row it was copied from (already in the language of
+			// the game), then three strengths
+			static const char *const names[] = { "Low", "Medium", "High" };
+			static const float values[] = { 0.3f, 0.6f, 1.0f };
+			multiDef_t *multiPtr = (multiDef_t *)row->typeData;
+
+			multiPtr->cvarValue[0] = 0.0f;
+			multiPtr->count = 1;
+			for ( size_t k = 0; k < ARRAY_LEN( names ) && multiPtr->count < MAX_MULTI_CVARS; k++ )
+			{
+				multiPtr->cvarList[multiPtr->count] = String_Alloc( names[k] );
+				multiPtr->cvarValue[multiPtr->count] = values[k];
+				multiPtr->count++;
+			}
+			multiPtr->strDef = qfalse;
+		}
 		menu->items[menu->itemCount++] = row;
 		rows[numRows++] = row;
 	}
@@ -1335,23 +1354,15 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 
 	// The rows, from the top: the slider for the brightness, then every row, then the driver info
 #ifdef JK2_MODE
-	const float x = 305, w = 300, brightnessY = 244, firstY = 264, pitch = 15, barHeight = 17, panelExtra = 0;
+	const float x = 305, w = 300, brightnessY = 244, firstY = 264, pitch = 15, barHeight = 17, panelGrows = 0;
 	const char *bar = "highlight10";	// the one bar for all the rows, put where the row is
 #else
-	// (there is no room above the rows, so the panel they are on is made taller instead)
-	const float x = 260, w = 340, brightnessY = 0, firstY = 287, pitch = 13, barHeight = 14, panelExtra = 30;
+	// (there is no room above the rows, so the panel they are on is made taller instead, as far as they need)
+	const float x = 260, w = 340, brightnessY = 0, firstY = 287, pitch = 13, barHeight = 14, panelGrows = 1;
 	const char *bar = "button_glow";
 #endif
 	if ( brightnessY > 0 )
 		brightness->window.rectClient.y = brightnessY;
-	if ( panelExtra > 0 )
-	{
-		for ( int i = 0; i < menu->itemCount; i++ )
-		{
-			if ( menu->items[i]->window.name && !Q_stricmp( menu->items[i]->window.name, "setup_background" ) )
-				menu->items[i]->window.rectClient.h += panelExtra;
-		}
-	}
 	for ( int i = 0; i < numRows; i++ )
 	{
 		const float y = firstY + i * pitch;
@@ -1364,6 +1375,16 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 
 	const float driverY = firstY + numRows * pitch + 2;
 	driverButton->window.rectClient.y = driverY;
+	if ( panelGrows )
+	{
+		for ( int i = 0; i < menu->itemCount; i++ )
+		{
+			itemDef_t *panel = menu->items[i];
+			if ( panel->window.name && !Q_stricmp( panel->window.name, "setup_background" ) &&
+				 panel->window.rectClient.y + panel->window.rectClient.h < driverY + barHeight + 4 )
+				panel->window.rectClient.h = driverY + barHeight + 4 - panel->window.rectClient.y;
+		}
+	}
 #ifdef JK2_MODE
 	if ( glow )
 		glow->window.rectClient.y = driverY;

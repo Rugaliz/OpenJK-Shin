@@ -9,12 +9,12 @@ nothing else changes. All of it is off by default, nothing changes unless you tu
 console (the key left of 1, or Shift+Esc) or put in your config file, and they are saved.
 
 You do not need the console: **Setup > More Video** has a row for each of them (Ambient Occlusion, Bloom, SMAA Edge
-Smoothing, Shader Dynamic Lights), which take effect at once. A row only shows up if what it needs is there (SMAA needs
-OpenGL 3.3, the rest OpenGL 2.0). To make room, the rows of that page are a little closer together than before, and
-in Jedi Academy the panel is taller. Jedi Academy multiplayer has the rows on the More Video page of Setup both in the
-main menu (where the slider for the brightness moves up a little to make room) and in the game menu. Jedi Outcast
-multiplayer uses the menus that came with the game, which can't be changed: there it is the console or the config
-file. (The other Jedi Academy multiplayer renderer, `rd-rend2`, has effects of its own and does not use these.)
+Smoothing, Shader Dynamic Lights, Sharpening), which take effect at once. A row only shows up if what it needs is there
+(SMAA needs OpenGL 3.3, the rest OpenGL 2.0). To make room, the rows of that page are a little closer together than
+before, and in Jedi Academy the panel is taller. Jedi Academy multiplayer has the rows on the More Video page of Setup
+both in the main menu (where the slider for the brightness moves up a little to make room) and in the game menu. Jedi
+Outcast multiplayer uses the menus that came with the game, which can't be changed: there it is the console or the
+config file. (The other Jedi Academy multiplayer renderer, `rd-rend2`, has effects of its own and does not use these.)
 
 `r_glsl 0` (then `vid_restart`) turns all of it off. The start-up log says what was found: `...using GLSL`,
 `...using post processing`.
@@ -34,7 +34,7 @@ out of the occlusion. Needs OpenGL 2.0 and framebuffer objects (every graphics c
 | `r_bloomThreshold` | 0.8 | How bright (0 to 1) a pixel has to be to glow. Lower makes more of the picture glow. |
 | `r_bloomIntensity` | 0.5 | How strong the glow is. |
 | `r_smaa` | 0 | **SMAA**, a high quality edge smoothing that works on what the multisampling (the Anti-Aliasing setting) leaves behind, like the edges that textures and shaders make. Unlike FXAA it only touches the edges it finds, so textures stay as sharp as they are. Needs OpenGL 3.3. Use it with or without multisampling. |
-| `r_sharpen` | 0 | **Sharpening** (contrast adaptive sharpening, the method of AMD's FidelityFX CAS), 0 (off) to 1 (strongest). Brings out the detail of the textures, especially with SMAA or multisampling, without halos: each pixel is sharpened by as much as the pixels around it leave room for before they would clip, so flat and busy areas get the most and edges that are already sharp the least. Console only for now. |
+| `r_sharpen` | 0 | **Sharpening** (contrast adaptive sharpening, the method of AMD's FidelityFX CAS), 0 (off) to 1 (strongest). Brings out the detail of the textures, especially with SMAA or multisampling, without halos: each pixel is sharpened by as much as the pixels around it leave room for before they would clip, so flat and busy areas get the most and edges that are already sharp the least. Setup > More Video > Sharpening: Off, Low (0.3), Medium (0.6), High (1). |
 | `r_postDebug` | 0 | For testing: 1 runs the effects' plumbing with nothing in it (the picture must not change), 2 shows the occlusion alone. |
 
 The effects run one after the other: occlusion, bloom, SMAA, then sharpening. Cost on a Radeon RX 7800 XT at 3440x1440 with 8x
