@@ -267,6 +267,7 @@ void R_Post_Init( void ) {
 	ShadowMaps_Reset();
 	Post_SetAvailable( "r_postAvail", qfalse );
 	Post_SetAvailable( "r_smaaAvail", qfalse );
+	Post_SetAvailable( "r_rtAvail", qfalse );	// (ray tracing is the Vulkan renderer's)
 
 	if ( !R_GLSL_Available() || !qglActiveTextureARB || !qglMultiTexCoord2fARB ) {
 		return;

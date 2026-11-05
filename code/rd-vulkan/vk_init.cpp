@@ -28,6 +28,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 vk_t vk;
 
 static cvar_t	*r_vkValidation;
+static cvar_t	*r_vkRayTracing;
 static cvar_t	*r_vkDevice;
 
 void APIENTRY vkglActiveTextureARB( GLenum texture );
@@ -304,14 +305,34 @@ static bool VK_CreateDevice( void )
 	queueInfo.queueCount = 1;
 	queueInfo.pQueuePriorities = &priority;
 
-	const char *extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	// ray tracing (for shadows, vk_rt.cpp) where the device has it: its extensions, and its features in a chain
+	const char *extensions[8] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	uint32_t extensionCount = 1;
+	VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	features2.features = enabled;
+	vk.rayTracing = r_vkRayTracing->integer && VK_RT_DeviceSupports( vk.physicalDevice );
+	if ( vk.rayTracing )
+	{
+		features2.pNext = VK_RT_AddToDevice( extensions, &extensionCount );
+	}
+
 	VkDeviceCreateInfo info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	info.queueCreateInfoCount = 1;
 	info.pQueueCreateInfos = &queueInfo;
-	info.enabledExtensionCount = 1;
+	info.enabledExtensionCount = extensionCount;
 	info.ppEnabledExtensionNames = extensions;
-	info.pEnabledFeatures = &enabled;
-	const VkResult created = vkCreateDevice( vk.physicalDevice, &info, NULL, &vk.device );
+	info.pNext = vk.rayTracing ? &features2 : NULL;
+	info.pEnabledFeatures = vk.rayTracing ? NULL : &enabled;
+	VkResult created = vkCreateDevice( vk.physicalDevice, &info, NULL, &vk.device );
+	if ( created != VK_SUCCESS && vk.rayTracing )
+	{
+		Com_Printf( "...the device could not be made with ray tracing (VkResult %d), trying without\n", (int)created );
+		vk.rayTracing = false;
+		info.enabledExtensionCount = 1;
+		info.pNext = NULL;
+		info.pEnabledFeatures = &enabled;
+		created = vkCreateDevice( vk.physicalDevice, &info, NULL, &vk.device );
+	}
 	if ( created != VK_SUCCESS )
 	{
 		vk.device = VK_NULL_HANDLE;
@@ -873,6 +894,7 @@ bool VK_Init( glconfig_t *glConfig )
 	r_vkValidation = ri.Cvar_Get( "r_vkValidation", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_vkDevice = ri.Cvar_Get( "r_vkDevice", "-1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_vkProfile = ri.Cvar_Get( "r_vkProfile", "0", 0 );
+	r_vkRayTracing = ri.Cvar_Get( "r_vkRayTracing", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 0: never turn ray tracing on, even where the device has it
 
 	memset( &vk, 0, sizeof( vk ) );
 	vk.width = glConfig->vidWidth;
@@ -901,6 +923,7 @@ bool VK_Init( glconfig_t *glConfig )
 	VK_InitImages();
 	VK_InitDraw();
 	VK_InitPost();
+	VK_RT_Init();
 	VK_ResetGLState();
 
 	Com_Printf( "...using %s\n", vk.properties.deviceName );
@@ -959,6 +982,7 @@ void VK_Shutdown( void )
 	}
 	vkDeviceWaitIdle( vk.device );
 	VK_ShutdownReadback();
+	VK_RT_Shutdown();
 	VK_ShutdownPost();
 	VK_ShutdownDraw();
 	VK_ShutdownImages();

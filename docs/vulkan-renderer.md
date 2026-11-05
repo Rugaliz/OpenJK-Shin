@@ -63,9 +63,26 @@ again. Choosing the OpenGL renderer yourself shows no warning.
 | `r_swapInterval`, `r_adaptiveVsync` | as in OpenGL | Vertical sync; 0 shows frames as soon as they are done, 1 waits for the display (with `r_adaptiveVsync` a late frame tears instead of waiting a whole refresh). |
 | `r_vkDevice` | -1 | Which graphics card (the numbers are listed in the log at start-up); -1 takes the best one that can show the window. |
 | `r_vkValidation` | 0 | Turns on the Khronos validation layer if it is installed (for developers). |
+| `r_vkRayTracing` | 1 | Turns ray tracing on where the graphics card has it (see below); 0 never does. Needs a restart. |
 
 The first run of a scene builds pipelines, which can be seen as short stutters; they are kept in `vk_pipeline_cache.bin`
 (next to the config), so the next runs are smooth.
+
+## Ray tracing (for shadows, in progress)
+
+Where the graphics card has ray tracing, the Vulkan renderer turns it on: the standard Khronos extensions
+`VK_KHR_acceleration_structure` and `VK_KHR_ray_query` (with `VK_KHR_deferred_host_operations` and buffer device
+addresses), which the ray tracing hardware of every vendor has: AMD RX 6000 and newer, NVIDIA RTX, Intel Arc, on
+Windows and on Linux (Mesa's RADV and ANV, NVIDIA's driver). They are used for shadows: shaders ask whether the line
+from a point to a light is blocked, searching acceleration structures (a bottom level one holds triangles, a top
+level one places them in the world). Graphics cards without it keep the soft shadows of the shadow maps.
+
+Done so far (`code/rd-vulkan/vk_rt.cpp`): the device is made with the extensions and features where it has them (and
+again without them if that fails), buffers with device addresses, building the two kinds of structure, and a test at
+start-up that builds a one-triangle scene and waits for it; the log says `...using ray tracing (VK_KHR_ray_query)` when
+it worked, and `r_rtAvail` is 1 (the menus will look at it; the OpenGL renderers set it to 0). Nothing is drawn with
+it yet: next come the structure of the level, the characters' shadows (`cg_shadows 5`) and the shadows of dynamic
+lights.
 
 ## What is not there yet
 
