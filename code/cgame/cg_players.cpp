@@ -3447,7 +3447,7 @@ static qboolean _PlayerShadow( const vec3_t origin, const float orientation, flo
 	// send a trace down from the player to the ground
 	// (stencil shadows are not faded with height, so let them reach further)
 	VectorCopy( origin, end );
-	end[2] -= ( cg_shadows.integer == 2 ) ? SHADOW_STENCIL_DISTANCE : SHADOW_DISTANCE;
+	end[2] -= CG_MODEL_SHADOWS() ? SHADOW_STENCIL_DISTANCE : SHADOW_DISTANCE;
 
 	cgi_CM_BoxTrace( &trace, origin, end, mins, maxs, 0, MASK_PLAYERSOLID );
 
@@ -3460,7 +3460,7 @@ static qboolean _PlayerShadow( const vec3_t origin, const float orientation, flo
 
 	// no mark for stencil or projection shadows
 	if ( cg_shadows.integer == 1
-		|| (in_camera && cg_shadows.integer == 2) )//don't want stencil shadows during a cinematic
+		|| (in_camera && CG_MODEL_SHADOWS()) )//don't want stencil shadows during a cinematic
 	{
 		// fade the shadow out with height
 		alpha = 1.0 - trace.fraction;
@@ -4736,7 +4736,7 @@ void CG_AddRefEntityWithPowerups( refEntity_t *ent, int powerups, centity_t *cen
 		}
 		else
 		{
-			if (cg_renderToTextureFX.integer && cg_shadows.integer != 2 && cgs.glconfig.stencilBits >= 4)
+			if (cg_renderToTextureFX.integer && !CG_MODEL_SHADOWS() && cgs.glconfig.stencilBits >= 4)
 			{
 				cgi_R_SetRefractProp(1.0f, 0.0f, qfalse, qfalse); //don't need to do this every frame.. but..
 				ent->customShader = 2; //crazy "refractive" shader
@@ -6926,12 +6926,12 @@ Ghoul2 Insert Start
 		{//ghost!
 			ent.renderfx = RF_THIRD_PERSON;			// only draw in mirrors
 		}
-		else if (cg_shadows.integer == 2 && (ent.renderfx & RF_THIRD_PERSON))
+		else if (CG_MODEL_SHADOWS() && (ent.renderfx & RF_THIRD_PERSON))
 		{ //show stencil shadow in first person now because we can -rww
 			ent.renderfx |= RF_SHADOW_ONLY;
 		}
 
-		if ( ((cg_shadows.integer == 2 && !in_camera) || cg_shadows.integer == 3) && shadow )
+		if ( ((CG_MODEL_SHADOWS() && !in_camera) || cg_shadows.integer == 3) && shadow )
 		{
 			ent.renderfx |= RF_SHADOW_PLANE;
 		}
@@ -8018,7 +8018,7 @@ Ghoul2 Insert End
 		}
 	}
 
-	if ( (cg_shadows.integer == 2 || cg_shadows.integer == 3) && shadow )
+	if ( (CG_MODEL_SHADOWS() || cg_shadows.integer == 3) && shadow )
 	{
 		renderfx |= RF_SHADOW_PLANE;
 	}

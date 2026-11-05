@@ -1232,6 +1232,21 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 		Com_Printf( "Replaced anisotropic filter field with %d levels.\n", multiPtr->count );
 	}
 
+	// The shadows row offers none, simple and volumetric (stencil volumes). Add soft ones (shadow maps, cg_shadows 4)
+	// where the renderer can draw them.
+	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "cg_shadows" ) && item->typeData && DC->getCVarValue( "r_shadowMapsAvail" ) ) {
+		multiDef_t *multiPtr = (multiDef_t *)item->typeData;
+
+		if ( !multiPtr->strDef && multiPtr->count > 0 && multiPtr->count < MAX_MULTI_CVARS && multiPtr->cvarValue[multiPtr->count - 1] != 4 )
+		{
+			multiPtr->cvarList[multiPtr->count] = String_Alloc( "Soft" );
+			multiPtr->cvarValue[multiPtr->count] = 4;
+			multiPtr->count++;
+			item->descText = String_Alloc( "Shadows of the characters. Soft: shaped like the character, falling on walls and steps too, with edges that blur further from the character." );
+			Com_Printf( "Added soft shadows to the shadows field.\n" );
+		}
+	}
+
 	// The stock video menu has a row for compressed textures that is not shown any more. Use it for antialiasing.
 	if ( item->type == ITEM_TYPE_MULTI && item->window.name && !Q_stricmp( item->window.name, "compress_textures") && item->cvar && !Q_stricmp( item->cvar, "ui_r_ext_compress_textures" ) ) {
 		multiDef_t *multiPtr = (multiDef_t *)item->typeData;

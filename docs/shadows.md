@@ -44,8 +44,37 @@ Cost in multiplayer: with 15 bots fighting, uncapped, about 440 frames per secon
 (the scene moves), so well under a millisecond a frame.
 
 Not done: shadows do not fall on walls or higher steps than the floor under the character (the volume ends at the
-floor), and characters do not shadow each other (they are excluded from the darkening). Both would come from shadow
-maps, which need a shader based renderer.
+floor), and characters do not shadow each other (they are excluded from the darkening). The soft shadows below do the
+first.
+
+## Soft shadows (`cg_shadows 4`)
+
+Setup > More Video > Shadows > Soft, in all the menus of single player and of Jedi Academy multiplayer (whose menus
+had no row for the shadows, it is added there). Jedi Outcast multiplayer runs the original game modules, which only
+know the values up to 3: `r_shadowMaps 1` makes its `cg_shadows 2` soft instead. The value is only offered where the
+renderer can draw them (OpenGL with shaders, or Vulkan); where it can't, `cg_shadows 4` draws the stencil shadows.
+
+These are shadow maps: every character is drawn as seen from its light into a small depth map (128 x 128, how high
+towards the light the character is at each point), and every pixel of the view is compared with it. A point that is
+below the character, seen from the light, is in its shadow. So:
+
+* the shadow has the shape the character has from the light, and falls on the floor, on walls, on steps higher than
+  the floor under the character and on slopes;
+* its edge is soft, and softer the further the point is from the character (sharp at the feet, blurred at the head's
+  shadow), as with a real light of some size (`r_shadowSoftness` is the width, as for the stencil shadows);
+* darkness, light direction and the floor limit are the same as for the stencil shadows (`r_shadowStrength`,
+  `r_shadowTilt`), characters are still not darkened by shadows.
+
+How: the triangles of a character that face its light are the ones the stencil shadows already collect. They are
+drawn on the CPU into the depth maps, 16 of them in one 512 x 512 texture (the 16 characters nearest to you get a
+shadow), because the Vulkan renderer can only draw into the picture. Each character then takes one pass over the part
+of the view its shadow can reach, which finds the position of each pixel from the depth buffer, searches the map for
+what is above it (5 samples) and filters the edge with 12 samples over a radius from that distance. The code is
+shared by all the renderers (`shared/renderer/tr_shadow_volumes.h` for the maps, `tr_post.h` for the OpenGL pass,
+`code/rd-vulkan/shaders/post_shadow.frag` for the Vulkan one). The views in mirrors and portals have no soft shadows.
+
+Cost: in Jedi Academy multiplayer at 1280 x 720 with five characters in view, about 0.9 ms a frame (0.4 ms of it on
+the CPU), against 1.2 ms for the stencil shadows.
 
 ## Draw distance
 

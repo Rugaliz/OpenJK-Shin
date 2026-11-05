@@ -145,6 +145,7 @@ cvar_t	*r_shadowSamples;
 cvar_t	*r_shadowStrength;
 cvar_t	*r_shadowTilt;
 cvar_t	*r_shadowSelf;
+cvar_t	*r_shadowMaps;
 cvar_t	*r_flares;
 cvar_t	*r_nobind;
 cvar_t	*r_singleShader;
@@ -1771,6 +1772,7 @@ void R_Register( void )
 	r_shadowStrength					= ri.Cvar_Get( "r_shadowStrength",					"1",						CVAR_ARCHIVE_ND, "Stencil shadows: scales how dark they are" );
 	r_shadowTilt						= ri.Cvar_Get( "r_shadowTilt",						"1",						CVAR_ARCHIVE_ND, "Stencil shadows: how much they lean away from the light" );
 	r_shadowSelf						= ri.Cvar_Get( "r_shadowSelf",						"0",						CVAR_ARCHIVE_ND, "Stencil shadows: 1 = characters are darkened by shadows too" );
+	r_shadowMaps						= ri.Cvar_Get( "r_shadowMaps",						"0",						CVAR_ARCHIVE_ND, "1 = cg_shadows 2 draws shadow maps too (as cg_shadows 4 does)" );
 	r_marksOnTriangleMeshes				= ri.Cvar_Get( "r_marksOnTriangleMeshes",			"0",						CVAR_ARCHIVE_ND, "" );
 	r_aspectCorrectFonts				= ri.Cvar_Get( "r_aspectCorrectFonts",				"0",						CVAR_ARCHIVE, "" );
 	r_maxpolys							= ri.Cvar_Get( "r_maxpolys",						XSTRING( DEFAULT_MAX_POLYS ),		CVAR_NONE, "" );

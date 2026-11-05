@@ -8831,10 +8831,41 @@ static void Item_MakeSharpenRow( itemDef_t *row )
 
 /*
 ===============
+Item_MakeShadowsRow
+
+The stock menus of multiplayer have no row for the shadows of the characters (cg_shadows). This one is a copy of an off
+and on row too: its "off", then the simple blobs, the stencil volumes, and the shadow maps where the renderer can draw
+them.
+===============
+*/
+static void Item_MakeShadowsRow( itemDef_t *row )
+{
+	static const char *const names[] = { "Simple", "Volumetric", "Soft" };
+	static const float values[] = { 1.0f, 2.0f, 4.0f };
+	const int count = DC->getCVarValue( "r_shadowMapsAvail" ) ? 3 : 2;
+	multiDef_t *multiPtr = row->typeData.multi;
+	int i;
+
+	if ( !multiPtr || multiPtr->count < 1 )
+		return;
+	multiPtr->cvarValue[0] = 0.0f;
+	multiPtr->count = 1;
+	for ( i = 0; i < count && multiPtr->count < MAX_MULTI_CVARS; i++ )
+	{
+		multiPtr->cvarList[multiPtr->count] = String_Alloc( names[i] );
+		multiPtr->cvarValue[multiPtr->count] = values[i];
+		multiPtr->count++;
+	}
+	multiPtr->strDef = qfalse;
+}
+
+/*
+===============
 Menu_AddEffectRows
 
-The "More Video" page of Setup (main menu and in game) has no room for more rows. Make room for one row for each of
-the screen effects and the shader dynamic lights the renderer can do, by bringing the rows closer, with one highlight
+The "More Video" page of Setup (main menu and in game) has no room for more rows. Make room for one row for the
+shadows of the characters and one for each of the screen effects and the shader dynamic lights the renderer can do,
+by bringing the rows closer, with one highlight
 bar for all of them that is put where the row is. In the main menu, the slider for the brightness moves up a little
 and the button for the driver info down to the end. Does nothing if the page is not the one of the stock menus.
 ===============
@@ -8844,6 +8875,7 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 	static const struct {
 		const char	*name, *cvar, *avail, *text, *desc;
 	} effects[] = {
+		{ "shadows", "cg_shadows", NULL, "Shadows:", "Shadows of the characters. Soft: shaped like the character, falling on walls and steps too, with edges that blur further from the character." },
 		{ "ssao", "r_ssao", "r_postAvail", "Ambient Occlusion:", "Soft shading in corners and where things meet. Adds depth." },
 		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
 		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
@@ -8938,7 +8970,7 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 	{
 		itemDef_t *row;
 
-		if ( !DC->getCVarValue( effects[e].avail ) )
+		if ( effects[e].avail && !DC->getCVarValue( effects[e].avail ) )
 			continue;
 		row = Menu_CloneRow( menu, marks, 0, NULL );
 		if ( !row )
@@ -8951,6 +8983,8 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		row->cvarFlags = 0;
 		if ( !Q_stricmp( effects[e].name, "sharpen" ) )
 			Item_MakeSharpenRow( row );
+		else if ( !Q_stricmp( effects[e].name, "shadows" ) )
+			Item_MakeShadowsRow( row );
 		rows[numRows++] = row;
 	}
 
@@ -8998,7 +9032,7 @@ Menu_AddShinRows
 Rows the stock menus have no place for:
 - Setup > Video: Anti-Aliasing, below Video Sync (ui_r_ext_multisample, applied with the other video settings)
 - Setup > Controls > Mouse (main menu): Mouse DPI, in the gap under Sensitivity
-- Setup > More Video (main menu and in game): the screen effects (Menu_AddEffectRows)
+- Setup > More Video (main menu and in game): the shadows and the screen effects (Menu_AddEffectRows)
 - Setup > Sound (main menu and in game): Room Echo (s_reverb), in the row that was for the sound quality (the sound
   system always mixes at the rate of the output device, so that row is of no use), above the row that was for EAX
   and is now for HRTF (Item_ApplyHacks)

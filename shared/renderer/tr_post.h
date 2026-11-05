@@ -58,7 +58,7 @@ typedef struct {
 
 typedef struct {
 	GLuint	id;
-	GLint	uniforms[8];
+	GLint	uniforms[12];
 } postProgram_t;
 
 #define POST_BLOOM_LEVELS	5
@@ -241,10 +241,12 @@ static void Post_SetAvailable( const char *name, qboolean available ) {
 }
 
 static void Gamma_Reset( void );
+static void ShadowMaps_Reset( void );
 
 void R_Post_Init( void ) {
 	memset( &post, 0, sizeof( post ) );
 	Gamma_Reset();
+	ShadowMaps_Reset();
 	Post_SetAvailable( "r_postAvail", qfalse );
 	Post_SetAvailable( "r_smaaAvail", qfalse );
 
@@ -953,4 +955,175 @@ void RB_GammaPass( void ) {
 	qglPopMatrix();
 	qglMatrixMode( GL_MODELVIEW );
 	qglPopMatrix();
+}
+
+/*
+=============================================================================
+
+SHADOW MAPS OF THE CHARACTERS (cg_shadows 4, see tr_shadow_volumes.h)
+
+For every caster, a pass over the 3D view: the position of each pixel from the depth, where it is in the caster's tile,
+and how many of a few samples around that place have the caster above the point; the pixel is darkened by that share
+of the caster's darkness (multiplied into the picture, so where shadows overlap they darken more). The samples spread
+the wider the further the point is below the caster, which makes the soft edge. Pixels of the characters are left
+alone through the stencil.
+
+=============================================================================
+*/
+
+static struct {
+	qboolean		failed;
+	postProgram_t	program;
+	GLuint			atlas, depth;
+	int				width, height;
+} shadowPass;
+
+static void ShadowMaps_Reset( void ) {
+	memset( &shadowPass, 0, sizeof( shadowPass ) );
+	ri.Cvar_Set( "r_shadowMapsAvail", R_ShadowMaps_Available() ? "1" : "0" );	// (what the menus look at)
+}
+
+qboolean R_ShadowMaps_Available( void ) {
+	return (qboolean)( R_GLSL_Available() && qglActiveTextureARB && qglMultiTexCoord2fARB && !shadowPass.failed );
+}
+
+#if SHADOWMAP_ATLAS != 512 || SHADOWMAP_TILES != 4 || SHADOWMAP_TILE != 128
+#error "the shadow map shaders have the sizes of the atlas written in"
+#endif
+static const char *shadowMapFragmentSource =
+	"#version 120\n"
+	POST_VIEWPOS_SOURCE
+	"uniform sampler2D uAtlas;\n"
+	"uniform vec4 uRowS, uRowT, uRowN, uRowZ;\n"
+	"uniform vec4 uParams;\n"		// the floor, darkness, bias, softness (texels per normalized height)
+	"uniform vec2 uTile;\n"		// the corner of the caster's tile
+	"const float texel = 1.0 / 512.0;\n"		// (SHADOWMAP_ATLAS, SHADOWMAP_TILES, SHADOWMAP_TILE)
+	"float casterAt( vec2 st, vec2 lo, vec2 hi ) {\n"		// the normalized height of the caster there, -1 if none
+	"	float r = texture2D( uAtlas, clamp( st, lo, hi ) ).r * 255.0;\n"
+	"	return r < 0.5 ? -1.0 : ( r - 1.0 ) / 254.0;\n"
+	"}\n"
+	"void main() {\n"
+	"	vec2 uv = gl_TexCoord[0].xy;\n"
+	"	float depth = texture2D( uDepth, uv ).r;\n"
+	"	if ( depth >= 1.0 || depth < 0.3 ) { gl_FragColor = vec4( 1.0 ); return; }\n"	// the sky, the weapon
+	"	vec4 e = vec4( viewPos( uv ), 1.0 );\n"
+	"	if ( dot( uRowZ, e ) < uParams.x ) { gl_FragColor = vec4( 1.0 ); return; }\n"
+	"	vec2 st = vec2( dot( uRowS, e ), dot( uRowT, e ) );\n"
+	"	vec2 lo = uTile + 0.5 * texel;\n"
+	"	vec2 hi = uTile + ( 128.0 - 0.5 ) * texel;\n"
+	"	if ( st.x < lo.x || st.y < lo.y || st.x > hi.x || st.y > hi.y ) { gl_FragColor = vec4( 1.0 ); return; }\n"
+	"	float n = dot( uRowN, e );\n"
+	// how far below the caster the point is, from a few samples of what is above it
+	"	float blocker = 0.0, found = 0.0;\n"
+	"	for ( int i = 0; i < 5; i++ ) {\n"
+	"		vec2 o = vec2( float( i == 1 ) - float( i == 2 ), float( i == 3 ) - float( i == 4 ) ) * 6.0;\n"
+	"		float c = casterAt( st + o * texel, lo, hi );\n"
+	"		if ( c >= 0.0 && n < c - uParams.z ) { blocker += c; found += 1.0; }\n"
+	"	}\n"
+	"	if ( found < 0.5 ) { gl_FragColor = vec4( 1.0 ); return; }\n"
+	"	float radius = clamp( 0.75 + ( blocker / found - n ) * uParams.w, 0.75, 10.0 );\n"
+	"	float shadow = 0.0;\n"
+	"	for ( int i = 0; i < 12; i++ ) {\n"		// a spiral of samples
+	"		float a = float( i ) * 2.39996323, r = sqrt( ( float( i ) + 0.5 ) / 12.0 ) * radius;\n"
+	"		float c = casterAt( st + vec2( cos( a ), sin( a ) ) * r * texel, lo, hi );\n"
+	"		if ( c >= 0.0 && n < c - uParams.z ) shadow += 1.0;\n"
+	"	}\n"
+	"	float f = 1.0 - uParams.y * shadow / 12.0;\n"
+	"	gl_FragColor = vec4( f, f, f, 1.0 );\n"
+	"}\n";
+
+void RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, const byte *atlas, int stencilSkip ) {
+	static const char *const uniforms[] = { "uDepth", "uProjA", "uProjB", "uAtlas", "uRowS", "uRowT", "uRowN", "uRowZ", "uParams", "uTile", NULL };
+	postProgram_t	*program = &shadowPass.program;
+	const float		*proj = backEnd.viewParms.projectionMatrix;
+	const int		x = backEnd.viewParms.viewportX;
+	const int		y = backEnd.viewParms.viewportY;
+	const int		width = backEnd.viewParms.viewportWidth;
+	const int		height = backEnd.viewParms.viewportHeight;
+	int				i;
+
+	if ( shadowPass.failed || numCasters <= 0 ) {
+		return;
+	}
+	if ( !program->id && !Post_BuildProgram( program, "shadow maps", shadowMapFragmentSource, uniforms ) ) {
+		shadowPass.failed = qtrue;
+		return;
+	}
+
+	// the atlas, and the depth of the view
+	if ( !shadowPass.atlas ) {
+		shadowPass.atlas = Post_NewTexture( GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, SHADOWMAP_ATLAS, SHADOWMAP_ATLAS );
+	}
+	Post_BindTexture( 1, shadowPass.atlas );
+	qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, SHADOWMAP_ATLAS, SHADOWMAP_ATLAS, GL_RGBA, GL_UNSIGNED_BYTE, atlas );
+	if ( !shadowPass.depth || shadowPass.width != width || shadowPass.height != height ) {
+		if ( shadowPass.depth ) {
+			qglDeleteTextures( 1, &shadowPass.depth );
+		}
+		shadowPass.depth = Post_NewTexture( GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, width, height );
+		shadowPass.width = width;
+		shadowPass.height = height;
+	}
+	Post_BindTexture( 0, shadowPass.depth );
+	qglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, x, y, width, height );
+
+	qglMatrixMode( GL_PROJECTION );
+	qglPushMatrix();
+	qglLoadIdentity();
+	qglMatrixMode( GL_MODELVIEW );
+	qglPushMatrix();
+	qglLoadIdentity();
+	qglViewport( x, y, width, height );
+	const GLboolean scissored = qglIsEnabled( GL_SCISSOR_TEST );
+	const GLboolean clipped = qglIsEnabled( GL_CLIP_PLANE0 );
+	qglEnable( GL_SCISSOR_TEST );	// (each caster only where its shadow can be)
+	qglDisable( GL_CLIP_PLANE0 );
+	GL_Cull( CT_TWO_SIDED );
+	GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ZERO | GLS_DSTBLEND_SRC_COLOR );	// (multiplied into the picture)
+	if ( stencilSkip ) {
+		qglEnable( GL_STENCIL_TEST );
+		qglStencilMask( 0 );
+		qglStencilFunc( GL_EQUAL, 0, stencilSkip );
+		qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+	} else {
+		qglDisable( GL_STENCIL_TEST );
+	}
+
+	qglUseProgram( program->id );
+	qglUniform1i( program->uniforms[0], 0 );
+	qglUniform4f( program->uniforms[1], proj[0], proj[5], proj[8], proj[9] );
+	qglUniform2f( program->uniforms[2], proj[10], proj[14] );
+	qglUniform1i( program->uniforms[3], 1 );
+	for ( i = 0; i < numCasters; i++ ) {
+		const shadowMapCaster_t *c = &casters[i];
+		const int left = (int)floorf( c->rect[0] * width ), bottom = (int)floorf( c->rect[1] * height );
+		const int right = (int)ceilf( c->rect[2] * width ), top = (int)ceilf( c->rect[3] * height );
+		if ( right <= left || top <= bottom ) {
+			continue;
+		}
+		qglScissor( x + left, y + bottom, right - left, top - bottom );
+		qglUniform4fv( program->uniforms[4], 1, c->rowS );
+		qglUniform4fv( program->uniforms[5], 1, c->rowT );
+		qglUniform4fv( program->uniforms[6], 1, c->rowN );
+		qglUniform4fv( program->uniforms[7], 1, c->rowZ );
+		qglUniform4f( program->uniforms[8], c->floorZ, c->darkness, c->bias, c->softness );
+		qglUniform2f( program->uniforms[9], c->tile[0], c->tile[1] );
+		Post_Quad();
+	}
+	qglUseProgram( 0 );
+
+	Post_BindTexture( 1, 0 );
+	Post_BindTexture( 0, 0 );
+	glState.currenttextures[0] = glState.currenttextures[1] = 0;	// (the engine caches what is bound)
+	if ( !scissored ) {
+		qglDisable( GL_SCISSOR_TEST );
+	}
+	if ( clipped ) {
+		qglEnable( GL_CLIP_PLANE0 );
+	}
+	qglMatrixMode( GL_PROJECTION );
+	qglPopMatrix();
+	qglMatrixMode( GL_MODELVIEW );
+	qglPopMatrix();
+	SetViewportAndScissor();
 }

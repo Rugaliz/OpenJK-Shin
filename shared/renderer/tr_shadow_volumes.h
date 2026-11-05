@@ -30,6 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include <vector>
+#include <algorithm>
 
 #ifndef R_SHADOWS_IN_ONE_DRAWCALL
 #error "define R_SHADOWS_IN_ONE_DRAWCALL before including tr_shadow_volumes.h"
@@ -71,6 +72,17 @@ static std::vector<int>			shCaps;		// the triangles facing the light
 static std::vector<int>			shWalls;	// directed edges, 2 point indices each
 static float					shStrengthSum;
 static int						shCasters;
+
+// For the shadow maps (cg_shadows 4): every recorded surface, with the entity it belongs to
+typedef struct {
+	const trRefEntity_t	*ent;
+	int					capsStart, capsEnd;	// its triangles in shCaps
+	vec3_t				lightAxis;			// towards the light (tilted as for the volumes)
+	float				shadowPlane;
+	float				strength;			// share of the light that comes from one direction
+} shadowSurf_t;
+
+static std::vector<shadowSurf_t>	shSurfs;
 
 // a caster whose shadow plane is further below it than this has no floor under it that a cgame module would have
 // found (they look 512 units down at most): its volume would reach down through everything, so it casts nothing
@@ -116,6 +128,22 @@ static void RB_ShadowClear( void )
 	shWalls.clear();
 	shStrengthSum = 0.0f;
 	shCasters = 0;
+	shSurfs.clear();
+}
+
+// 2 = stencil volumes, 4 = shadow maps (cg_shadows 4, or 2 with r_shadowMaps 1; volumes where the renderer can't
+// draw maps), 0 = neither
+static int RB_ShadowMode( void )
+{
+	const int shadows = r_shadows->integer;
+
+	if ( glConfig.stencilBits < 4 || !R_MODEL_SHADOWS( shadows ) ) {
+		return 0;
+	}
+	if ( ( shadows == 4 || r_shadowMaps->integer ) && R_ShadowMaps_Available() ) {
+		return 4;
+	}
+	return 2;
 }
 
 static inline int RB_ShadowCell( float v )
@@ -223,7 +251,8 @@ void RB_ShadowTessEnd( void )
 	int			i, numUsed = 0;
 	float		tx, ty;
 
-	if ( glConfig.stencilBits < 4 || r_shadows->integer != 2 || !ent || numVerts < 3 || numTris < 1 ) {
+	const int mode = RB_ShadowMode();
+	if ( !mode || !ent || numVerts < 3 || numTris < 1 ) {
 		return;
 	}
 	if ( shPts.size() > SHADOW_MAX_POINTS ) {
@@ -242,6 +271,7 @@ void RB_ShadowTessEnd( void )
 	const vec3_t lightAxis = { tx, ty, 1.0f };
 
 	shStamp++;
+	const int capsStart = (int)shCaps.size();
 
 	// weld the vertices at the same position, working in world space
 	for ( i = 0 ; i < numVerts ; i++ ) {
@@ -306,6 +336,9 @@ void RB_ShadowTessEnd( void )
 		shCaps.push_back( p2 );
 		shCaps.push_back( p3 );
 
+		if ( mode == 4 ) {
+			continue;	// (the shadow maps only need the triangles)
+		}
 		RB_ShadowCountEdge( r1, r2, &numUsed );
 		RB_ShadowCountEdge( r2, r3, &numUsed );
 		RB_ShadowCountEdge( r3, r1, &numUsed );
@@ -327,8 +360,20 @@ void RB_ShadowTessEnd( void )
 	// how much of the light comes from a direction, which is what a shadow takes away
 	const float directed = Q_max( ent->directedLight[0], Q_max( ent->directedLight[1], ent->directedLight[2] ) );
 	const float ambient = Q_max( ent->ambientLight[0], Q_max( ent->ambientLight[1], ent->ambientLight[2] ) );
-	shStrengthSum += ( directed + ambient > 1.0f ) ? directed / ( directed + ambient ) : 0.5f;
+	const float strength = ( directed + ambient > 1.0f ) ? directed / ( directed + ambient ) : 0.5f;
+	shStrengthSum += strength;
 	shCasters++;
+
+	if ( mode == 4 && (int)shCaps.size() > capsStart ) {
+		shadowSurf_t surf;
+		surf.ent = ent;
+		surf.capsStart = capsStart;
+		surf.capsEnd = (int)shCaps.size();
+		VectorCopy( lightAxis, surf.lightAxis );
+		surf.shadowPlane = shadowPlane;
+		surf.strength = strength;
+		shSurfs.push_back( surf );
+	}
 }
 
 static void RB_ShadowEmitVolumes( const float *bottom )
@@ -432,9 +477,15 @@ because otherwise shadows from different body parts would
 overlap and double darken.
 =================
 */
+static void RB_ShadowMapsFinish( void );
+
 void RB_ShadowFinish( void )
 {
-	if ( r_shadows->integer != 2 || glConfig.stencilBits < 4 || shCaps.empty() ) {
+	if ( RB_ShadowMode() == 4 ) {
+		RB_ShadowMapsFinish();
+		return;
+	}
+	if ( RB_ShadowMode() != 2 || shCaps.empty() ) {
 		RB_ShadowClear();
 		return;
 	}
@@ -542,6 +593,302 @@ void RB_ShadowFinish( void )
 	qglColor4f( 1, 1, 1, 1 );
 	qglPopMatrix();
 	qglDepthRange( oldDepthRange[0], oldDepthRange[1] );
+
+	RB_ShadowClear();
+}
+
+/*
+=============================================================================
+
+SHADOW MAPS (cg_shadows 4)
+
+The casters are the same as for the volumes, and their triangles that face the light are recorded the same way
+(RB_ShadowTessEnd). Instead of being swept down to the floor, each caster is seen from its light: its triangles are
+drawn, on the CPU, into a small depth tile (how high towards the light the caster is at each point), and every pixel of
+the view is then compared with it (RB_ShadowMapsApply): a point lower than the caster above it is in its shadow. So the
+shadow falls on the floor, on walls, on steps higher than the floor and on slopes, in the shape the caster has from its
+light, and its edge is soft, the softer the further the point is from the caster (as with a real light of some size).
+The characters themselves are not darkened, as with the volumes (r_shadowSelf).
+
+The tiles are drawn on the CPU because the Vulkan renderer only draws into the picture; a character is a few thousand
+triangles, of which about half face the light, into 128 x 128 texels. The nearest SHADOWMAP_MAX_CASTERS casters to the
+view get a shadow.
+
+=============================================================================
+*/
+
+typedef struct {
+	const trRefEntity_t	*ent;
+	int					firstSurf;		// in the order list
+	int					numSurfs;
+	float				dist2;
+} shadowCaster_t;
+
+static float	shTile[SHADOWMAP_TILE * SHADOWMAP_TILE];
+static byte		shAtlas[SHADOWMAP_ATLAS * SHADOWMAP_ATLAS * 4];
+
+// Draws the triangle (x, y in texels, n the normalized height) into shTile, keeping the highest n
+static void RB_ShadowMapTriangle( const float *a, const float *b, const float *c )
+{
+	const float area = ( b[0] - a[0] ) * ( c[1] - a[1] ) - ( b[1] - a[1] ) * ( c[0] - a[0] );
+	if ( fabsf( area ) < 1e-6f ) {
+		return;
+	}
+	const int x0 = Q_max( 0, (int)floorf( Q_min( a[0], Q_min( b[0], c[0] ) ) ) );
+	const int y0 = Q_max( 0, (int)floorf( Q_min( a[1], Q_min( b[1], c[1] ) ) ) );
+	const int x1 = Q_min( SHADOWMAP_TILE - 1, (int)ceilf( Q_max( a[0], Q_max( b[0], c[0] ) ) ) );
+	const int y1 = Q_min( SHADOWMAP_TILE - 1, (int)ceilf( Q_max( a[1], Q_max( b[1], c[1] ) ) ) );
+	const float inv = 1.0f / area;
+
+	for ( int y = y0; y <= y1; y++ ) {
+		const float py = y + 0.5f;
+		for ( int x = x0; x <= x1; x++ ) {
+			const float px = x + 0.5f;
+			// barycentric weights; a texel whose centre is inside the triangle (either winding) is covered
+			const float wa = ( ( b[0] - px ) * ( c[1] - py ) - ( b[1] - py ) * ( c[0] - px ) ) * inv;
+			const float wb = ( ( c[0] - px ) * ( a[1] - py ) - ( c[1] - py ) * ( a[0] - px ) ) * inv;
+			const float wc = 1.0f - wa - wb;
+			if ( wa < 0.0f || wb < 0.0f || wc < 0.0f ) {
+				continue;
+			}
+			const float n = wa * a[2] + wb * b[2] + wc * c[2];
+			float *texel = &shTile[y * SHADOWMAP_TILE + x];
+			if ( n > *texel ) {
+				*texel = n;
+			}
+		}
+	}
+}
+
+// A row of the caster: what a world position gives (dot( a, world ) + b), as a row on the view's eye space
+static void RB_ShadowMapEyeRow( const vec3_t a, float b, float row[4] )
+{
+	const float *m = backEnd.viewParms.world.modelMatrix;	// world to eye, column major: eye = R * world + t
+
+	for ( int i = 0; i < 3; i++ ) {
+		row[i] = m[i] * a[0] + m[4 + i] * a[1] + m[8 + i] * a[2];		// (R a)[i]
+	}
+	row[3] = b - ( row[0] * m[12] + row[1] * m[13] + row[2] * m[14] );
+}
+
+// Where on the view the shadow of a caster can be (rect: left, bottom, right, top, 0 to 1 from the bottom left corner):
+// around the corners of its tile, from the top of the caster down along the light to the floor. All of the view if
+// one of them is behind the eye.
+static void RB_ShadowMapRect( const vec3_t U, const vec3_t V, const vec3_t L, const float uv[4], float hmax, float floorZ, float rect[4] )
+{
+	const float *m = backEnd.viewParms.world.modelMatrix;
+	const float *p = backEnd.viewParms.projectionMatrix;
+
+	rect[0] = rect[1] = 1.0f;
+	rect[2] = rect[3] = 0.0f;
+	for ( int k = 0; k < 8; k++ ) {
+		vec3_t w, e;
+		const float u = uv[k & 1], v = uv[2 + ( ( k >> 1 ) & 1 )];
+
+		for ( int i = 0; i < 3; i++ ) {
+			w[i] = u * U[i] + v * V[i] + hmax * L[i];
+		}
+		if ( k & 4 ) {
+			VectorMA( w, -( w[2] - floorZ ) / Q_max( L[2], 0.05f ), L, w );
+		}
+		for ( int i = 0; i < 3; i++ ) {
+			e[i] = m[i] * w[0] + m[4 + i] * w[1] + m[8 + i] * w[2] + m[12 + i];
+		}
+		const float cw = p[3] * e[0] + p[7] * e[1] + p[11] * e[2] + p[15];
+		if ( cw < 1.0f ) {
+			rect[0] = rect[1] = 0.0f;
+			rect[2] = rect[3] = 1.0f;
+			return;
+		}
+		const float x = 0.5f + 0.5f * ( p[0] * e[0] + p[4] * e[1] + p[8] * e[2] + p[12] ) / cw;
+		const float y = 0.5f + 0.5f * ( p[1] * e[0] + p[5] * e[1] + p[9] * e[2] + p[13] ) / cw;
+		rect[0] = Q_min( rect[0], x ); rect[1] = Q_min( rect[1], y );
+		rect[2] = Q_max( rect[2], x ); rect[3] = Q_max( rect[3], y );
+	}
+	for ( int i = 0; i < 4; i++ ) {
+		rect[i] = Com_Clamp( 0.0f, 1.0f, rect[i] );
+	}
+}
+
+static void RB_ShadowMapsFinish( void )
+{
+	static std::vector<int>				order;
+	static std::vector<shadowCaster_t>	casters;
+	shadowMapCaster_t	maps[SHADOWMAP_MAX_CASTERS];
+	int					numMaps = 0;
+
+	if ( backEnd.viewParms.isPortal || shSurfs.empty() ) {
+		RB_ShadowClear();
+		return;
+	}
+
+	// the surfaces by caster
+	casters.clear();
+	order.clear();
+	for ( size_t i = 0; i < shSurfs.size(); i++ ) {
+		size_t c;
+		for ( c = 0; c < casters.size() && casters[c].ent != shSurfs[i].ent; c++ ) {
+		}
+		if ( c == casters.size() ) {
+			shadowCaster_t caster;
+			vec3_t d;
+			caster.ent = shSurfs[i].ent;
+			caster.firstSurf = 0;
+			caster.numSurfs = 0;
+			VectorSubtract( caster.ent->e.origin, backEnd.viewParms.ori.origin, d );
+			caster.dist2 = DotProduct( d, d );
+			casters.push_back( caster );
+		}
+		casters[c].numSurfs++;
+	}
+	for ( size_t c = 0, first = 0; c < casters.size(); c++ ) {
+		casters[c].firstSurf = (int)first;
+		first += casters[c].numSurfs;
+		casters[c].numSurfs = 0;
+	}
+	order.resize( shSurfs.size() );
+	for ( size_t i = 0; i < shSurfs.size(); i++ ) {
+		size_t c;
+		for ( c = 0; casters[c].ent != shSurfs[i].ent; c++ ) {
+		}
+		order[casters[c].firstSurf + casters[c].numSurfs++] = (int)i;
+	}
+	std::sort( casters.begin(), casters.end(), []( const shadowCaster_t &a, const shadowCaster_t &b ) { return a.dist2 < b.dist2; } );
+
+	memset( shAtlas, 0, sizeof( shAtlas ) );
+
+	for ( size_t c = 0; c < casters.size() && numMaps < SHADOWMAP_MAX_CASTERS; c++ ) {
+		const shadowCaster_t	*caster = &casters[c];
+		const shadowSurf_t		*first = &shSurfs[order[caster->firstSurf]];
+		vec3_t					L, U, V;
+		float					umin = 1e9f, umax = -1e9f, vmin = 1e9f, vmax = -1e9f, hmin = 1e9f, hmax = -1e9f;
+
+		// the light's frame: L towards it, U and V across
+		VectorCopy( first->lightAxis, L );
+		VectorNormalize( L );
+		const vec3_t ref = { 1.0f, 0.0f, 0.0f };
+		VectorMA( ref, -DotProduct( ref, L ), L, U );
+		VectorNormalize( U );
+		CrossProduct( L, U, V );
+
+		for ( int s = 0; s < caster->numSurfs; s++ ) {
+			const shadowSurf_t *surf = &shSurfs[order[caster->firstSurf + s]];
+			for ( int k = surf->capsStart; k < surf->capsEnd; k++ ) {
+				const float *p = shPts[shCaps[k]].xyz;
+				const float u = DotProduct( p, U ), v = DotProduct( p, V ), h = DotProduct( p, L );
+				umin = Q_min( umin, u ); umax = Q_max( umax, u );
+				vmin = Q_min( vmin, v ); vmax = Q_max( vmax, v );
+				hmin = Q_min( hmin, h ); hmax = Q_max( hmax, h );
+			}
+		}
+		const float pad = 4.0f + 24.0f * r_shadowSoftness->value;	// (room for the soft edge)
+		const float size = Q_max( umax - umin, vmax - vmin ) + 2.0f * pad;
+		const float uc = 0.5f * ( umin + umax ), vc = 0.5f * ( vmin + vmax );
+		const float hrange = Q_max( hmax - hmin, 1.0f );
+		const float toTexels = SHADOWMAP_TILE / size;
+
+		// the tile
+		for ( int i = 0; i < SHADOWMAP_TILE * SHADOWMAP_TILE; i++ ) {
+			shTile[i] = -1.0f;
+		}
+		for ( int s = 0; s < caster->numSurfs; s++ ) {
+			const shadowSurf_t *surf = &shSurfs[order[caster->firstSurf + s]];
+			for ( int k = surf->capsStart; k + 2 < surf->capsEnd; k += 3 ) {
+				float tri[3][3];
+				for ( int j = 0; j < 3; j++ ) {
+					const float *p = shPts[shCaps[k + j]].xyz;
+					tri[j][0] = ( DotProduct( p, U ) - uc ) * toTexels + 0.5f * SHADOWMAP_TILE;
+					tri[j][1] = ( DotProduct( p, V ) - vc ) * toTexels + 0.5f * SHADOWMAP_TILE;
+					tri[j][2] = ( DotProduct( p, L ) - hmin ) / hrange;
+				}
+				RB_ShadowMapTriangle( tri[0], tri[1], tri[2] );
+			}
+		}
+		const int tx = numMaps % SHADOWMAP_TILES, ty = numMaps / SHADOWMAP_TILES;
+		for ( int y = 0; y < SHADOWMAP_TILE; y++ ) {
+			byte *dst = shAtlas + ( ( ty * SHADOWMAP_TILE + y ) * SHADOWMAP_ATLAS + tx * SHADOWMAP_TILE ) * 4;
+			for ( int x = 0; x < SHADOWMAP_TILE; x++, dst += 4 ) {
+				const float n = shTile[y * SHADOWMAP_TILE + x];
+				dst[0] = ( n < 0.0f ) ? 0 : (byte)( 1.5f + Com_Clamp( 0.0f, 1.0f, n ) * 254.0f );
+				dst[3] = 255;
+			}
+		}
+
+		// how to find a point of the view in it
+		shadowMapCaster_t *map = &maps[numMaps];
+		vec3_t a;
+		VectorScale( U, toTexels / SHADOWMAP_ATLAS, a );
+		RB_ShadowMapEyeRow( a, ( -uc * toTexels + 0.5f * SHADOWMAP_TILE + tx * SHADOWMAP_TILE ) / SHADOWMAP_ATLAS, map->rowS );
+		VectorScale( V, toTexels / SHADOWMAP_ATLAS, a );
+		RB_ShadowMapEyeRow( a, ( -vc * toTexels + 0.5f * SHADOWMAP_TILE + ty * SHADOWMAP_TILE ) / SHADOWMAP_ATLAS, map->rowT );
+		VectorScale( L, 1.0f / hrange, a );
+		RB_ShadowMapEyeRow( a, -hmin / hrange, map->rowN );
+		const vec3_t up = { 0.0f, 0.0f, 1.0f };
+		RB_ShadowMapEyeRow( up, 0.0f, map->rowZ );
+
+		float darkness = Com_Clamp( 0.2f, 0.75f, first->strength ) * r_shadowStrength->value;
+		map->darkness = Com_Clamp( 0.0f, 0.9f, darkness );
+		map->floorZ = first->shadowPlane - 24.0f;
+		map->bias = 3.0f / hrange;
+		map->softness = hrange * r_shadowSoftness->value * 0.12f * toTexels;
+		map->tile[0] = (float)tx / SHADOWMAP_TILES;
+		map->tile[1] = (float)ty / SHADOWMAP_TILES;
+		const float uv[4] = { uc - 0.5f * size, uc + 0.5f * size, vc - 0.5f * size, vc + 0.5f * size };
+		RB_ShadowMapRect( U, V, L, uv, hmax, map->floorZ, map->rect );
+		numMaps++;
+	}
+
+	if ( numMaps ) {
+		const bool skipCasters = !r_shadowSelf->integer && !shTris.empty();
+		float oldDepthRange[2];
+
+		qglGetFloatv( GL_DEPTH_RANGE, oldDepthRange );
+		qglDepthRange( 0, 1 );
+		qglPushMatrix();
+		GL_Bind( tr.whiteImage );
+		qglEnable( GL_STENCIL_TEST );
+
+		// the characters, which are not to be darkened, marked in the stencil
+		if ( skipCasters ) {
+			qglLoadMatrixf( backEnd.viewParms.world.modelMatrix );
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+			qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			RB_ShadowMarkCasters();
+			qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+		}
+
+		qglLoadIdentity();
+		RB_ShadowMapsApply( maps, numMaps, shAtlas, skipCasters ? SHADOW_STENCIL_SKIP : 0 );
+
+		// and the marks cleared again
+		if ( skipCasters ) {
+			const bool planeZeroBack = qglIsEnabled( GL_CLIP_PLANE0 ) != 0;
+			if ( planeZeroBack ) {
+				qglDisable( GL_CLIP_PLANE0 );
+			}
+			GL_Bind( tr.whiteImage );
+			GL_Cull( CT_TWO_SIDED );
+			qglEnable( GL_STENCIL_TEST );
+			qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			qglStencilMask( 0xFF );
+			qglStencilFunc( GL_ALWAYS, 0, 0xFF );
+			qglStencilOp( GL_ZERO, GL_ZERO, GL_ZERO );
+			GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+			RB_ShadowScreenQuad();
+			qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+			if ( planeZeroBack ) {
+				qglEnable( GL_CLIP_PLANE0 );
+			}
+		}
+
+		qglStencilMask( 0xFF );
+		qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+		qglStencilFunc( GL_ALWAYS, 0, 0xFF );
+		qglDisable( GL_STENCIL_TEST );
+		qglColor4f( 1, 1, 1, 1 );
+		qglPopMatrix();
+		qglDepthRange( oldDepthRange[0], oldDepthRange[1] );
+	}
 
 	RB_ShadowClear();
 }

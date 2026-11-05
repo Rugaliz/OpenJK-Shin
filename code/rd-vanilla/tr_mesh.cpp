@@ -409,7 +409,7 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 
 		// stencil shadows can't do personal models unless I polyhedron clip
 		if ( !personalModel
-			&& r_shadows->integer == 2
+			&& R_MODEL_SHADOWS( r_shadows->integer )
 			&& fogNum == 0
 			&& (ent->e.renderfx & RF_SHADOW_PLANE )
 			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) )

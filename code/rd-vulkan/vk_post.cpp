@@ -38,16 +38,19 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define POST_SEARCH_ID		0x7ffe0002u
 #define POST_RESULT_ID		0x7ffe0003u
 #define POST_GAMMA_ID		0x7ffe0004u	// (the picture through the brightness table, RB_GammaPass)
+#define POST_SHADOW_ID		0x7ffe0005u	// (the darkening of the shadow maps, RB_ShadowMapsApply)
+#define POST_ATLAS_ID		0x7ffe0006u	// (the atlas of the shadow maps)
 
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
-	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_COUNT
+	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_SHADOW, PASS_SHADOW_MUL, PASS_COUNT
 };
 
 typedef struct {
 	const unsigned int	*code;
 	size_t				size;
 	bool				additive;	// blended on top of what the target holds
+	bool				multiply;	// multiplied into what the target holds
 } passInfo_t;
 
 static const passInfo_t passInfos[PASS_COUNT] = {
@@ -61,6 +64,8 @@ static const passInfo_t passInfos[PASS_COUNT] = {
 	{ vk_spirv_smaa_blend_frag, sizeof( vk_spirv_smaa_blend_frag ), false },
 	{ vk_spirv_post_gamma_frag, sizeof( vk_spirv_post_gamma_frag ), false },
 	{ vk_spirv_post_sharpen_frag, sizeof( vk_spirv_post_sharpen_frag ), false },
+	{ vk_spirv_post_shadow_frag, sizeof( vk_spirv_post_shadow_frag ), false },
+	{ vk_spirv_post_shadow_frag, sizeof( vk_spirv_post_shadow_frag ), false, true },
 };
 
 typedef struct {
@@ -95,6 +100,8 @@ static struct {
 	int					width, height;				// size of the view the images are made for
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
 	postImage_t			sharp;						// the view sharpened (r_sharpen)
+	postImage_t			shadow;						// the darkening of the shadow maps
+	bool				atlasMade, shadowFailed;
 	postImage_t			bloom[POST_BLOOM_LEVELS];
 	bool				smaaTextures;
 
@@ -227,6 +234,7 @@ static void FreeImages( void )
 	FreeImage( &post.weights );
 	FreeImage( &post.result );
 	FreeImage( &post.sharp );
+	FreeImage( &post.shadow );
 	for ( int i = 0; i < POST_BLOOM_LEVELS; i++ )
 	{
 		FreeImage( &post.bloom[i] );
@@ -244,7 +252,7 @@ static bool EnsureImages( int width, int height )
 	VK_WaitIdle();
 	FreeImages();
 	bool ok = NewImage( &post.scene, width, height ) && NewImage( &post.aoA, width, height ) && NewImage( &post.aoB, width, height )
-		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height );
+		&& NewImage( &post.final, width, height ) && NewImage( &post.sharp, width, height ) && NewImage( &post.shadow, width, height );
 	for ( int i = 0; ok && i < POST_BLOOM_LEVELS; i++ )
 	{
 		ok = NewImage( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
@@ -352,7 +360,15 @@ static VkPipeline GetPipeline( int pass )
 	VkPipelineDepthStencilStateCreateInfo depthStencil = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 	VkPipelineColorBlendAttachmentState attachment = {};
 	attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-	if ( passInfos[pass].additive )
+	if ( passInfos[pass].multiply )
+	{
+		attachment.blendEnable = VK_TRUE;
+		attachment.srcColorBlendFactor = attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		attachment.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_COLOR;
+		attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		attachment.colorBlendOp = attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+	}
+	else if ( passInfos[pass].additive )
 	{
 		attachment.blendEnable = VK_TRUE;
 		attachment.srcColorBlendFactor = attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -385,7 +401,8 @@ static VkPipeline GetPipeline( int pass )
 }
 
 // draws the fullscreen triangle of a pass into the target; load: add to what the target holds
-static void RunPass( int pass, const postImage_t *target, bool load, const postInput_t inputs[3], const float push[16] )
+static void RunPass( int pass, const postImage_t *target, bool load, const postInput_t inputs[3], const float *push, int numPush = 16,
+	const VkRect2D *area = NULL )
 {
 	VkCommandBuffer cmd = vk.cmd;
 	const VkClearValue clear = {};
@@ -422,10 +439,10 @@ static void RunPass( int pass, const postImage_t *target, bool load, const postI
 	}
 	vkUpdateDescriptorSets( vk.device, 3, writes, 0, NULL );
 	vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, post.pipelineLayout, 0, 1, &set, 0, NULL );
-	vkCmdPushConstants( cmd, post.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16 * sizeof( float ), push );
+	vkCmdPushConstants( cmd, post.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, numPush * sizeof( float ), push );
 
 	const VkViewport viewport = { 0.0f, 0.0f, (float)target->width, (float)target->height, 0.0f, 1.0f };
-	const VkRect2D scissor = { { 0, 0 }, { (uint32_t)target->width, (uint32_t)target->height } };
+	const VkRect2D scissor = area ? *area : VkRect2D{ { 0, 0 }, { (uint32_t)target->width, (uint32_t)target->height } };
 	vkCmdSetViewport( cmd, 0, 1, &viewport );
 	vkCmdSetScissor( cmd, 0, 1, &scissor );
 	vkCmdDraw( cmd, 3, 1, 0, 0 );
@@ -621,9 +638,17 @@ static void Smaa( void )
 }
 
 // draws the finished view over the view, with the renderer's own drawing
-static void DrawBack( int x, int y, int width, int height, GLuint texture )
+static void DrawBack( int x, int y, int width, int height, GLuint texture, unsigned int state = GLS_DEPTHTEST_DISABLE, int stencilSkip = 0 )
 {
-	GL_State( GLS_DEPTHTEST_DISABLE );
+	GL_State( state );
+	if ( stencilSkip )
+	{
+		// (the pixels with the bit set are left alone)
+		qglEnable( GL_STENCIL_TEST );
+		qglStencilMask( 0 );
+		qglStencilFunc( GL_EQUAL, 0, stencilSkip );
+		qglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+	}
 	GL_Cull( CT_TWO_SIDED );
 	qglDisable( GL_CLIP_PLANE0 );
 	qglDisable( GL_SCISSOR_TEST );
@@ -854,6 +879,102 @@ void RB_GammaPass( void )
 }
 
 /*
+================
+RB_ShadowMapsApply
+
+The shadow maps of the characters (see tr_shadow_volumes.h, and the same in tr_post.h for OpenGL): a pass per caster
+into an image of the view (the first writes it, the others are multiplied into it), which is then multiplied into the
+picture, leaving the pixels of the characters alone through the stencil.
+================
+*/
+qboolean R_ShadowMaps_Available( void )
+{
+	return ( post.ready && !post.shadowFailed ) ? qtrue : qfalse;
+}
+
+void RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, const byte *atlas, int stencilSkip )
+{
+	const int x = backEnd.viewParms.viewportX;
+	const int y = backEnd.viewParms.viewportY;
+	const int width = backEnd.viewParms.viewportWidth;
+	const int height = backEnd.viewParms.viewportHeight;
+	if ( !post.ready || post.shadowFailed || numCasters <= 0 || x < 0 || y < 0 || x + width > vk.width || y + height > vk.height )
+	{
+		return;
+	}
+	if ( !EnsureImages( width, height ) )
+	{
+		post.shadowFailed = true;
+		return;
+	}
+
+	if ( !post.atlasMade )
+	{
+		VK_TexImage2D( POST_ATLAS_ID, 0, 4, SHADOWMAP_ATLAS, SHADOWMAP_ATLAS, GL_RGBA, GL_UNSIGNED_BYTE, atlas );
+		VK_TexParameter( POST_ATLAS_ID, GL_TEXTURE_MIN_FILTER, (GLfloat)GL_NEAREST );
+		VK_TexParameter( POST_ATLAS_ID, GL_TEXTURE_MAG_FILTER, (GLfloat)GL_NEAREST );
+		VK_TexParameter( POST_ATLAS_ID, GL_TEXTURE_WRAP_S, (GLfloat)GL_CLAMP_TO_EDGE );
+		VK_TexParameter( POST_ATLAS_ID, GL_TEXTURE_WRAP_T, (GLfloat)GL_CLAMP_TO_EDGE );
+		post.atlasMade = true;
+	}
+	else
+	{
+		VK_TexSubImage2D( POST_ATLAS_ID, 0, 0, 0, SHADOWMAP_ATLAS, SHADOWMAP_ATLAS, GL_RGBA, GL_UNSIGNED_BYTE, atlas );
+	}
+
+	VK_EnsureFrame();
+	VK_EndRenderPass();	// (resolves the view into the single sample colour and depth)
+	VK_FlushUploads( false );
+
+	const VkImageAspectFlags depthAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+		VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+
+	const float *proj = backEnd.viewParms.projectionMatrix;
+	postInput_t inputs[3] = { { post.depthView, true, true }, { VK_TextureForId( POST_ATLAS_ID, false )->view, true, false }, {} };
+	for ( int i = 0; i < numCasters; i++ )
+	{
+		const shadowMapCaster_t *c = &casters[i];
+		float push[32] = {
+			proj[0], proj[5], proj[8], proj[9],
+			proj[10], proj[14], (float)width / vk.width, (float)height / vk.height,
+			(float)x / vk.width, (float)( vk.height - ( y + height ) ) / vk.height, c->floorZ, c->darkness };
+		memcpy( push + 12, c->rowS, sizeof( c->rowS ) );
+		memcpy( push + 16, c->rowT, sizeof( c->rowT ) );
+		memcpy( push + 20, c->rowN, sizeof( c->rowN ) );
+		memcpy( push + 24, c->rowZ, sizeof( c->rowZ ) );
+		push[28] = c->bias;
+		push[29] = c->softness;
+		push[30] = c->tile[0];
+		push[31] = c->tile[1];
+
+		// the first caster writes all of the image (white where it has no shadow), the others multiply into it only
+		// where their shadow can be (the image is from the top left corner)
+		const int left = (int)floorf( c->rect[0] * width ), right = (int)ceilf( c->rect[2] * width );
+		const int top = (int)floorf( ( 1.0f - c->rect[3] ) * height ), bottom = (int)ceilf( ( 1.0f - c->rect[1] ) * height );
+		const VkRect2D area = { { left, top }, { (uint32_t)Q_max( right - left, 0 ), (uint32_t)Q_max( bottom - top, 0 ) } };
+		if ( i && ( area.extent.width == 0 || area.extent.height == 0 ) )
+		{
+			continue;
+		}
+		RunPass( i ? PASS_SHADOW_MUL : PASS_SHADOW, &post.shadow, i > 0, inputs, push, 32, i ? &area : NULL );
+	}
+
+	Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
+
+	VK_SetExternalTexture( POST_SHADOW_ID, post.shadow.image, post.shadow.view, width, height );
+	const GLboolean scissored = qglIsEnabled( GL_SCISSOR_TEST );
+	DrawBack( x, y, width, height, POST_SHADOW_ID, GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ZERO | GLS_DSTBLEND_SRC_COLOR, stencilSkip );
+	if ( scissored )
+	{
+		qglEnable( GL_SCISSOR_TEST );
+	}
+	SetViewportAndScissor();
+}
+
+/*
 =============================================================================
 
 START AND END
@@ -868,6 +989,8 @@ void R_Post_Init( void )
 	ri.Cvar_Set( "r_postAvail", post.ready ? "1" : "0" );
 	ri.Cvar_Get( "r_smaaAvail", "0", 0 );
 	ri.Cvar_Set( "r_smaaAvail", post.ready && post.smaaOk ? "1" : "0" );
+	ri.Cvar_Get( "r_shadowMapsAvail", "0", 0 );
+	ri.Cvar_Set( "r_shadowMapsAvail", R_ShadowMaps_Available() ? "1" : "0" );
 	if ( post.ready )
 	{
 		Com_Printf( "...using post processing\n" );
@@ -892,7 +1015,7 @@ void VK_InitPost( void )
 	layoutInfo.bindingCount = 3;
 	layoutInfo.pBindings = bindings;
 	VK_CheckResult( vkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &post.setLayout ), "vkCreateDescriptorSetLayout" );
-	VkPushConstantRange range = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16 * sizeof( float ) };
+	VkPushConstantRange range = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 * sizeof( float ) };	// (128 bytes, what every device has)
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	pipelineLayoutInfo.setLayoutCount = 1;
 	pipelineLayoutInfo.pSetLayouts = &post.setLayout;
