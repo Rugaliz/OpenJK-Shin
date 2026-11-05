@@ -40,7 +40,9 @@ shaders = [("fixed.vert", "vert"), ("fixed.frag", "frag"), ("dlight.vert", "vert
            ("post.vert", "vert"), ("post_ssao.frag", "frag"), ("post_ssao_blur.frag", "frag"),
            ("post_bloom_down.frag", "frag"), ("post_bloom_up.frag", "frag"), ("post_composite.frag", "frag"),
            ("post_gamma.frag", "frag"), ("post_sharpen.frag", "frag"),
-           ("post_shadow.frag", "frag"), ("post_shafts.frag", "frag"), ("post_eye.frag", "frag")]
+           ("post_shadow.frag", "frag"), ("post_shafts.frag", "frag"), ("post_eye.frag", "frag"),
+           ("post_rt_debug.frag", "frag")]
+RAY_QUERY = {"post_rt_debug.frag"}  # (ray queries need SPIR-V 1.4: Vulkan 1.2)
 shaders += [(n, "frag") for n in SMAA_MAINS]
 
 for name, stage in shaders:
@@ -49,7 +51,8 @@ for name, stage in shaders:
         spv = subprocess.run(["glslc", "-O", "-fshader-stage=frag", "-x", "glsl", "-o", "-", "-"],
                              input=source.encode(), check=True, stdout=subprocess.PIPE).stdout
     else:
-        spv = subprocess.run(["glslc", "-O", "-fshader-stage=" + stage, "-o", "-", os.path.join(here, name)],
+        env = ["--target-env=vulkan1.2"] if name in RAY_QUERY else []
+        spv = subprocess.run(["glslc", "-O"] + env + ["-fshader-stage=" + stage, "-o", "-", os.path.join(here, name)],
                              check=True, stdout=subprocess.PIPE).stdout
     words = struct.unpack("<%dI" % (len(spv) // 4), spv)
     ident = "vk_spirv_" + name.replace(".", "_")

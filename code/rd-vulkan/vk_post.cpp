@@ -46,7 +46,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
 	PASS_SMAA_EDGES, PASS_SMAA_WEIGHTS, PASS_SMAA_BLEND, PASS_GAMMA, PASS_SHARPEN, PASS_SHADOW, PASS_SHADOW_MUL,
-	PASS_SHAFTS, PASS_SHAFTS_ADD, PASS_EYE, PASS_COUNT
+	PASS_SHAFTS, PASS_SHAFTS_ADD, PASS_EYE, PASS_RT_DEBUG, PASS_COUNT
 };
 
 typedef struct {
@@ -54,6 +54,7 @@ typedef struct {
 	size_t				size;
 	bool				additive;	// blended on top of what the target holds
 	bool				multiply;	// multiplied into what the target holds
+	bool				rayQuery;	// reads the ray tracing structure of the frame (binding 3)
 } passInfo_t;
 
 static const passInfo_t passInfos[PASS_COUNT] = {
@@ -72,6 +73,7 @@ static const passInfo_t passInfos[PASS_COUNT] = {
 	{ vk_spirv_post_shafts_frag, sizeof( vk_spirv_post_shafts_frag ), false },
 	{ vk_spirv_post_shafts_frag, sizeof( vk_spirv_post_shafts_frag ), true },
 	{ vk_spirv_post_eye_frag, sizeof( vk_spirv_post_eye_frag ), false },
+	{ vk_spirv_post_rt_debug_frag, sizeof( vk_spirv_post_rt_debug_frag ), false, false, true },
 };
 
 typedef struct {
@@ -102,6 +104,9 @@ static struct {
 	VkSampler			linear, nearest;
 	VkDescriptorPool	pools[VK_FRAMES_IN_FLIGHT];
 	VkImageView			depthView;					// the depth of the view alone, for sampling
+	VkDescriptorSetLayout	rtSetLayout;			// the passes that use ray queries: the three images and the structure
+	VkPipelineLayout	rtPipelineLayout;
+	VkDescriptorPool	rtPools[VK_FRAMES_IN_FLIGHT];
 
 	int					width, height;				// size of the view the images are made for
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
@@ -345,6 +350,49 @@ static VkRenderPass NewRenderPass( bool load )
 	return pass;
 }
 
+// the set and pipeline layouts of the passes with ray queries, made the first time one is run
+static bool EnsureRtLayout( void )
+{
+	if ( post.rtPipelineLayout )
+	{
+		return true;
+	}
+	if ( !vk.rayTracing )
+	{
+		return false;
+	}
+	VkDescriptorSetLayoutBinding bindings[4] = {};
+	for ( uint32_t i = 0; i < 4; i++ )
+	{
+		bindings[i].binding = i;
+		bindings[i].descriptorType = i < 3 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		bindings[i].descriptorCount = 1;
+		bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	}
+	VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	layoutInfo.bindingCount = 4;
+	layoutInfo.pBindings = bindings;
+	VK_CheckResult( vkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &post.rtSetLayout ), "vkCreateDescriptorSetLayout" );
+	VkPushConstantRange range = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 * sizeof( float ) };
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &post.rtSetLayout;
+	pipelineLayoutInfo.pushConstantRangeCount = 1;
+	pipelineLayoutInfo.pPushConstantRanges = &range;
+	VK_CheckResult( vkCreatePipelineLayout( vk.device, &pipelineLayoutInfo, NULL, &post.rtPipelineLayout ), "vkCreatePipelineLayout" );
+
+	const VkDescriptorPoolSize poolSizes[2] = { { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 * 3 }, { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 } };
+	VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	poolInfo.maxSets = 16;
+	poolInfo.poolSizeCount = 2;
+	poolInfo.pPoolSizes = poolSizes;
+	for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
+	{
+		VK_CheckResult( vkCreateDescriptorPool( vk.device, &poolInfo, NULL, &post.rtPools[i] ), "vkCreateDescriptorPool" );
+	}
+	return true;
+}
+
 static VkPipeline GetPipeline( int pass )
 {
 	if ( post.pipelines[pass] )
@@ -417,7 +465,7 @@ static VkPipeline GetPipeline( int pass )
 	info.pDepthStencilState = &depthStencil;
 	info.pColorBlendState = &blend;
 	info.pDynamicState = &dynamic;
-	info.layout = post.pipelineLayout;
+	info.layout = passInfos[pass].rayQuery ? post.rtPipelineLayout : post.pipelineLayout;
 	info.renderPass = post.passClear;
 	VK_CheckResult( vkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &info, NULL, &post.pipelines[pass] ), "vkCreateGraphicsPipelines" );
 	return post.pipelines[pass];
@@ -425,8 +473,10 @@ static VkPipeline GetPipeline( int pass )
 
 // draws the fullscreen triangle of a pass into the target; load: add to what the target holds
 static void RunPass( int pass, const postImage_t *target, bool load, const postInput_t inputs[3], const float *push, int numPush = 16,
-	const VkRect2D *area = NULL )
+	const VkRect2D *area = NULL, VkAccelerationStructureKHR scene = VK_NULL_HANDLE )
 {
+	const bool rayQuery = passInfos[pass].rayQuery;
+	const VkPipelineLayout layout = rayQuery ? post.rtPipelineLayout : post.pipelineLayout;
 	VkCommandBuffer cmd = vk.cmd;
 	const VkClearValue clear = {};
 	VkRenderPassBeginInfo begin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -441,9 +491,9 @@ static void RunPass( int pass, const postImage_t *target, bool load, const postI
 	vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, GetPipeline( pass ) );
 
 	VkDescriptorSetAllocateInfo allocate = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-	allocate.descriptorPool = post.pools[vk.frameIndex];
+	allocate.descriptorPool = rayQuery ? post.rtPools[vk.frameIndex] : post.pools[vk.frameIndex];
 	allocate.descriptorSetCount = 1;
-	allocate.pSetLayouts = &post.setLayout;
+	allocate.pSetLayouts = rayQuery ? &post.rtSetLayout : &post.setLayout;
 	VkDescriptorSet set;
 	VK_CheckResult( vkAllocateDescriptorSets( vk.device, &allocate, &set ), "vkAllocateDescriptorSets" );
 	VkDescriptorImageInfo images[3];
@@ -461,8 +511,21 @@ static void RunPass( int pass, const postImage_t *target, bool load, const postI
 		writes[i].pImageInfo = &images[i];
 	}
 	vkUpdateDescriptorSets( vk.device, 3, writes, 0, NULL );
-	vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, post.pipelineLayout, 0, 1, &set, 0, NULL );
-	vkCmdPushConstants( cmd, post.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, numPush * sizeof( float ), push );
+	if ( rayQuery )
+	{
+		VkWriteDescriptorSetAccelerationStructureKHR structure = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
+		structure.accelerationStructureCount = 1;
+		structure.pAccelerationStructures = &scene;
+		VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		write.pNext = &structure;
+		write.dstSet = set;
+		write.dstBinding = 3;
+		write.descriptorCount = 1;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		vkUpdateDescriptorSets( vk.device, 1, &write, 0, NULL );
+	}
+	vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, NULL );
+	vkCmdPushConstants( cmd, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, numPush * sizeof( float ), push );
 
 	const VkViewport viewport = { 0.0f, 0.0f, (float)target->width, (float)target->height, 0.0f, 1.0f };
 	const VkRect2D scissor = area ? *area : VkRect2D{ { 0, 0 }, { (uint32_t)target->width, (uint32_t)target->height } };
@@ -585,6 +648,8 @@ static void Barrier( VkImage image, VkImageAspectFlags aspect, VkImageLayout fro
 	VK_ImageBarrier( vk.cmd, image, aspect, from, to, srcStage, srcAccess, dstStage, dstAccess );
 }
 
+static cvar_t *r_rtDebug;	// 1: the view darkened where rays to the sun are blocked (vk_rt.cpp), 2: that alone
+
 static bool PostWanted( void )
 {
 	if ( !post.ready || post.failed )
@@ -600,7 +665,7 @@ static bool PostWanted( void )
 		return false;
 	}
 	return r_ssao->integer || r_bloom->integer || r_smaa->integer || r_postDebug->integer || r_sharpen->value > 0.0f ||
-		r_lightShafts->value > 0.0f || r_eyeAdaptation->value > 0.0f;
+		r_lightShafts->value > 0.0f || r_eyeAdaptation->value > 0.0f || ( vk.rayTracing && r_rtDebug->integer );
 }
 
 // ambient occlusion, blurred, into post.aoA
@@ -696,6 +761,33 @@ static float EyeAdaptation( void )
 
 	post.eyeExposure = R_EyeAdaptation_Exposure( measured );
 	return post.eyeExposure;
+}
+
+// r_rtDebug: rays towards the sun from every pixel through the level's ray tracing structure, into post.shadow
+static void RayTracingDebug( int x, int y, int width, int height, const postInput_t &depth, VkAccelerationStructureKHR scene )
+{
+	const float *proj = backEnd.viewParms.projectionMatrix;
+	const float *m = backEnd.viewParms.world.modelMatrix;	// world to eye; its inverse, from the eye to the world, below
+	float push[32] = {
+		proj[0], proj[5], proj[8], proj[9],
+		proj[10], proj[14], (float)width / vk.width, (float)height / vk.height,
+		(float)x / vk.width, (float)( vk.height - ( y + height ) ) / vk.height, 0.0f, 0.0f };
+	for ( int j = 0; j < 3; j++ )
+	{
+		float *row = push + 12 + j * 4;
+		row[3] = 0.0f;
+		for ( int i = 0; i < 3; i++ )
+		{
+			row[i] = m[j * 4 + i];
+			row[3] -= m[j * 4 + i] * m[12 + i];
+		}
+	}
+	push[24] = tr.sunDirection[0];
+	push[25] = tr.sunDirection[1];
+	push[26] = tr.sunDirection[2];
+	push[28] = (float)r_rtDebug->integer;
+	postInput_t inputs[3] = { depth, {}, {} };
+	RunPass( PASS_RT_DEBUG, &post.shadow, false, inputs, push, 32, NULL, scene );
 }
 
 // light shafts (see tr_light_shafts.h): the sky near the sun into post.shaftsA (while the depth can be read)
@@ -851,6 +943,7 @@ void RB_PostProcess( void )
 	VK_FlushUploads( false );
 
 	const VkImageAspectFlags depthAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	const VkAccelerationStructureKHR rtScene = ( vk.rayTracing && r_rtDebug->integer && EnsureRtLayout() ) ? VK_RT_Scene() : VK_NULL_HANDLE;
 
 	// the colour of the view into an image of its own
 	Barrier( vk.colorImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -874,7 +967,7 @@ void RB_PostProcess( void )
 
 	// the depth is read where it is
 	postInput_t depth = { post.depthView, true, true };
-	if ( ssao || shafts )
+	if ( ssao || shafts || rtScene )
 	{
 		Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
 			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
@@ -885,6 +978,10 @@ void RB_PostProcess( void )
 		if ( shafts )
 		{
 			LightShaftsSky( x, y, width, height, sun, depth );
+		}
+		if ( rtScene )
+		{
+			RayTracingDebug( x, y, width, height, depth, rtScene );
 		}
 		Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
@@ -933,6 +1030,12 @@ void RB_PostProcess( void )
 
 	const GLboolean scissored = qglIsEnabled( GL_SCISSOR_TEST );
 	DrawBack( x, y, width, height, POST_RESULT_ID );
+	if ( rtScene )
+	{
+		VK_SetExternalTexture( POST_SHADOW_ID, post.shadow.image, post.shadow.view, width, height );
+		DrawBack( x, y, width, height, POST_SHADOW_ID, r_rtDebug->integer >= 2 ? GLS_DEPTHTEST_DISABLE
+			: GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ZERO | GLS_DSTBLEND_SRC_COLOR );
+	}
 	if ( scissored )
 	{
 		qglEnable( GL_SCISSOR_TEST );
@@ -1134,6 +1237,7 @@ void R_Post_Init( void )
 void VK_InitPost( void )
 {
 	memset( &post, 0, sizeof( post ) );
+	r_rtDebug = ri.Cvar_Get( "r_rtDebug", "0", 0 );
 	post.passClear = NewRenderPass( false );
 	post.passLoad = NewRenderPass( true );
 
@@ -1199,6 +1303,10 @@ void VK_BeginFramePost( void )
 	if ( post.ready )
 	{
 		vkResetDescriptorPool( vk.device, post.pools[vk.frameIndex], 0 );
+		if ( post.rtPools[vk.frameIndex] )
+		{
+			vkResetDescriptorPool( vk.device, post.rtPools[vk.frameIndex], 0 );
+		}
 	}
 }
 
@@ -1226,7 +1334,10 @@ void VK_ShutdownPost( void )
 	for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
 	{
 		vkDestroyDescriptorPool( vk.device, post.pools[i], NULL );
+		if ( post.rtPools[i] ) vkDestroyDescriptorPool( vk.device, post.rtPools[i], NULL );
 	}
+	if ( post.rtPipelineLayout ) vkDestroyPipelineLayout( vk.device, post.rtPipelineLayout, NULL );
+	if ( post.rtSetLayout ) vkDestroyDescriptorSetLayout( vk.device, post.rtSetLayout, NULL );
 	vkDestroyImageView( vk.device, post.depthView, NULL );
 	vkDestroySampler( vk.device, post.linear, NULL );
 	vkDestroySampler( vk.device, post.nearest, NULL );

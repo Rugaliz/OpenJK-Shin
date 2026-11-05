@@ -27,3 +27,6 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // glConfig the renderer reads (strings, limits, which optional features exist).
 bool VK_Init( glconfig_t *glConfig );
 void VK_Shutdown( void );
+
+// A level was loaded: the ray tracing structures of the last one go (vk_rt.cpp).
+void VK_RT_NewLevel( void );
