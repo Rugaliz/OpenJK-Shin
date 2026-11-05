@@ -8803,6 +8803,34 @@ static itemDef_t *Menu_CloneRow( menuDef_t *menu, const itemDef_t *src, float dy
 
 /*
 ===============
+Item_MakeSharpenRow
+
+The row for the sharpening (r_sharpen) is a copy of an off and on row; it gets four steps instead (the "off" of the
+row it was copied from, already in the language of the game, then three strengths).
+===============
+*/
+static void Item_MakeSharpenRow( itemDef_t *row )
+{
+	static const char *const names[] = { "Low", "Medium", "High" };
+	static const float values[] = { 0.3f, 0.6f, 1.0f };
+	multiDef_t *multiPtr = row->typeData.multi;
+	int i;
+
+	if ( !multiPtr || multiPtr->count < 1 )
+		return;
+	multiPtr->cvarValue[0] = 0.0f;
+	multiPtr->count = 1;
+	for ( i = 0; i < (int)ARRAY_LEN( names ) && multiPtr->count < MAX_MULTI_CVARS; i++ )
+	{
+		multiPtr->cvarList[multiPtr->count] = String_Alloc( names[i] );
+		multiPtr->cvarValue[multiPtr->count] = values[i];
+		multiPtr->count++;
+	}
+	multiPtr->strDef = qfalse;
+}
+
+/*
+===============
 Menu_AddEffectRows
 
 The "More Video" page of Setup (main menu and in game) has no room for more rows. Make room for one row for each of
@@ -8820,6 +8848,7 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		{ "bloom", "r_bloom", "r_postAvail", "Bloom:", "A soft glow around the brightest lights." },
 		{ "smaa", "r_smaa", "r_smaaAvail", "SMAA Edge Smoothing:", "Smooths edges without blurring textures. Works with or without Anti-Aliasing." },
 		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on." },
+		{ "sharpen", "r_sharpen", "r_postAvail", "Sharpening:", "Crisper textures, without halos. Good with SMAA or Anti-Aliasing." },
 	};
 	itemDef_t	*rows[24];
 	int			numRows = 0;
@@ -8868,7 +8897,8 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 	}
 	else if ( !driverButton && !Q_stricmp( menu->window.name, "ingame_setup" ) )
 	{
-		// in game: rows 20 apart from 183 under the slider for the brightness (which ends at 161), the panel ends at 291
+		// in game: rows 20 apart from 183 under the slider for the brightness (which ends at 161), the panel ends at 291:
+		// 16 apart, closer if there are more than fit
 		x = 220; w = 300; firstY = 174; pitch = 16; barHeight = 16;
 	}
 	else
@@ -8919,7 +8949,16 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		row->descText = String_Alloc( effects[e].desc );
 		row->cvarTest = NULL;
 		row->cvarFlags = 0;
+		if ( !Q_stricmp( effects[e].name, "sharpen" ) )
+			Item_MakeSharpenRow( row );
 		rows[numRows++] = row;
+	}
+
+	if ( !driverButton )
+	{
+		const float rowsFit = ( 291 - 4 - firstY ) / numRows;
+		if ( pitch > rowsFit )
+			pitch = barHeight = floorf( rowsFit );
 	}
 
 	if ( driverButton )
