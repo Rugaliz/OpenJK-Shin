@@ -880,11 +880,26 @@ void R_Images_DeleteImage(image_t *pImage)
 	}
 }
 
+// The glow images R_CreateBuiltinImages made last. Kept here as tr is cleared before it runs again (by R_Init, and as a
+// level loads before RE_SVModelInit), which lost the ones in tr: each load left three behind, two of the window's size.
+static GLuint glowImages[3];
+
+static void R_DeleteGlowImages( void )
+{
+	if ( glowImages[0] )
+	{
+		qglDeleteTextures( 3, glowImages );
+		memset( glowImages, 0, sizeof( glowImages ) );
+	}
+}
+
 // called only at app startup, vid_restart, app-exit
 //
 void R_Images_Clear(void)
 {
 	image_t *pImage;
+
+	R_DeleteGlowImages();
 	//	int iNumImages =
 	   				  R_Images_StartIteration();
 	while ( (pImage = R_Images_GetNextIteration()) != NULL)
@@ -1362,6 +1377,7 @@ void R_CreateBuiltinImages( void ) {
 
 	tr.screenImage = R_CreateImage("*screen", (byte *)data, 8, 8, GL_RGBA, qfalse, qfalse, qfalse, GL_REPEAT );
 
+	R_DeleteGlowImages();
 
 	// Create the scene glow image. - AReis
 	tr.screenGlow = 1024 + giTextureBindNum++;
@@ -1401,6 +1417,9 @@ void R_CreateBuiltinImages( void ) {
 	qglTexParameteri( GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 	qglDisable( GL_TEXTURE_RECTANGLE_ARB );
 	qglEnable( GL_TEXTURE_2D );
+	glowImages[0] = tr.screenGlow;
+	glowImages[1] = tr.sceneImage;
+	glowImages[2] = tr.blurImage;
 
 
 	// with overbright bits active, we need an image which is some fraction of full color,
