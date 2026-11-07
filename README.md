@@ -1,216 +1,217 @@
 # OpenJK Shin
 
-**Star Wars Jedi Knight II: Jedi Outcast** and **Star Wars Jedi Knight: Jedi Academy**, rebuilt for the PC on your
-desk today.
+OpenJK Shin is an updated engine for **Star Wars Jedi Knight II: Jedi Outcast** and **Star Wars Jedi Knight: Jedi
+Academy**. It replaces the game's program files and keeps everything else (the levels, characters, story and
+gameplay) as it was. You need your own copy of the games.
 
-Your copy of the game, the levels and saber duels you remember, now at your monitor's own resolution and refresh rate,
-on a modern Vulkan renderer, with smooth edges, soft shadows, sound that comes from all around you and the echo of
-every room you walk into. Drop the files into your game folder and play: there is nothing to tweak.
+What it changes, in short: the games run at your screen's resolution and refresh rate, look cleaner (smoother edges,
+better shadows, optional lighting effects), sound better (3D sound on headphones, room echo), and handle modern mice
+and connections properly. Every visual addition can be turned off, and most are off until you turn them on, so out of
+the box the games look as they always did, only sharper.
 
-OpenJK Shin is based on [OpenJK](https://github.com/JACoders/OpenJK), the community project that keeps these games
-running on modern systems. OpenJK keeps the games as close to the originals as it can; Shin goes further and adds what a
-game made today would have. Everything below is new compared with OpenJK.
+Shin is based on [OpenJK](https://github.com/JACoders/OpenJK), the community project that keeps these games running on
+modern systems. OpenJK aims to stay as close to the originals as possible; Shin adds improvements on top of it.
 
-> **No game data is included.** You need your own copy of the game (Steam, GOG or the CD). See [Playing](#playing).
+> **No game data is included.** You need Jedi Outcast and/or Jedi Academy from Steam, GOG or the original CDs.
 
-## At a glance
+## Contents
 
-- **Native resolution and real widescreen**, ultrawide included: you see more to the sides, nothing is stretched.
-- **Vulkan renderer** for the single player games, with automatic fallback to OpenGL.
-- **As smooth as your monitor** in single player: the frame rate follows your refresh rate (144, 165, 240 Hz...)
-  without tearing.
-- **Anti-aliasing, ambient occlusion, bloom, SMAA, per-pixel saber and blaster light**, all from the menus.
-- **Shadows that finally work**, grass and detail drawn much further away.
-- **Headphone 3D sound and real room echo**, worked out live in every level, mods included.
-- **128 sounds at once**, crackle-free, at your sound card's own quality, with less delay.
-- **Mouse settings for today's mice**: a Mouse DPI setting and a sensible sensitivity range.
-- **Smoother online play**: other players no longer stutter when the connection is uneven.
-- **Faster level loading** in single player.
-- **Jedi Outcast multiplayer** on a modern engine, which OpenJK doesn't have.
+- [Installing](#installing)
+- [What is different](#what-is-different)
+- [Graphics settings](#graphics-settings)
+- [Supported games and systems](#supported-games-and-systems)
+- [Jedi Outcast multiplayer](#jedi-outcast-multiplayer)
+- [Building from source](#building-from-source)
+- [License](#license) and [Credits](#credits)
 
-## Supported games
+## Installing
 
-| Game | Single player | Multiplayer |
-| - | - | - |
-| Jedi Academy | Yes, everything below | Yes, everything below not marked "single player" |
-| Jedi Outcast | Yes, everything below | Yes (version 1.04), everything below not marked "single player"; some settings only in the console, see [Jedi Outcast multiplayer](#jedi-outcast-multiplayer) |
-
-Shin is developed and played on Linux. Windows builds are supported by the build scripts and the platform code, but
-are not yet tested by the author as much as Linux. macOS code still compiles, but nothing is packaged for it.
-
-## What's new
-
-Everything works out of the box. Where there is a setting, the menu entry is given; for the curious, the console
-variable is in brackets (open the console with Shift+Escape or the key above Tab, and type it).
-
-### Your screen, used properly
-- **Starts at your screen's own resolution**, filling the screen in a borderless window, so Alt+Tab is instant and
-  nothing switches display modes.
-- **Setup > Video > Video Mode** lists the resolutions your screen really supports, plus "Desktop resolution".
-- **Real widescreen**: on a wide screen you see more to the sides instead of less above and below. Menus and the HUD
-  keep their shape instead of being stretched, videos get black bars, the mouse pointer reaches the whole screen, and
-  the HUD sits in the corners (health and armour on the left, force and ammo on the right).
-
-### Graphics
-- **Vulkan renderer** (single player): a modern graphics backend, used by default. If your system can't run it, the
-  game switches to OpenGL by itself and tells you why with a red note on screen. To use OpenGL anyway, set
-  `cl_renderer rdsp-vanilla` (Jedi Academy) or `rdjosp-vanilla` (Jedi Outcast) and start the game again. Multiplayer
-  uses OpenGL. See
-  [docs/vulkan-renderer.md](docs/vulkan-renderer.md).
-- **Smooth edges**: Setup > Video > **Anti-Aliasing** (Off, 2x, 4x, 8x) removes the jagged "staircase" from the edges
-  of everything, including leaves, fences and grates. The quality presets set it for you, and if your graphics card
-  can't do the level you picked, it uses the highest it can.
-- **Sharp textures**: Setup > More Video > **Anisotropic Filtering** from Off to 16x keeps floors and walls sharp when
-  you look along them, and textures stay sharper in the distance. See [docs/antialiasing.md](docs/antialiasing.md).
-- **Smoother lighting**: the lighting of the levels is stored at a few dots per metre, which shows as creases and
-  steps along the edges of shadows and pools of light. Levels now load it smoothed (`r_smoothLightmaps`), with the
-  light itself exactly as it was made. See [docs/antialiasing.md](docs/antialiasing.md).
-- **Screen effects**, each with its own row in Setup > More Video (off by default):
-  - **Ambient Occlusion**: soft shading in corners and where things meet, for a sense of depth.
-  - **Bloom**: a soft glow around the brightest lights.
-  - **SMAA Edge Smoothing**: very clean edges without blurring the textures.
-  - **Sharpening** (Off, Low, Medium, High): crisper textures without halos, with AMD's contrast adaptive
-    sharpening method, on any graphics card.
-  - **Light Shafts**: rays of sunlight through windows and gratings and around the edges of roofs, on levels with a
-    sun.
-  - **Eye Adaptation**: dark places brighten as your eyes get used to them, without washing out the bright parts.
-  - **Shader Dynamic Lights**: the light of lightsabers, blaster bolts and explosions follows the shape of what it
-    falls on, instead of blocky patches. **Detailed** also picks out the bumps of rock, brick and tiles. Lightsabers
-    glow along the whole blade, wider and brighter, and blaster bolts light the walls they fly past and flash where they
-    hit, as in the films.
-
-  See [docs/post-processing.md](docs/post-processing.md).
-- **A brightness slider that works**: the Brightness slider of the video setup takes effect at once and brightens the whole
-  picture, as on the original game's hardware, and the overbright lighting of the original (`r_overBrightBits 1`,
-  light up to twice as bright as white) works again, in a window too. See
-  [docs/post-processing.md](docs/post-processing.md).
-- **Shadows that work** (Setup > More Video > Shadows): characters are no longer darkened by their own shadow, shadows
-  have soft edges, fall away from the light, are lighter where there is little direct light, and no longer show
-  through walls. The new **Soft** setting goes further: the shadow has the character's shape, falls on walls and
-  steps too, and its edge blurs the further it is from the character. On graphics cards with ray tracing (AMD RX 6000
-  and newer, NVIDIA RTX, Intel Arc) and the Vulkan renderer, **Ray Traced** shadows are exact, down to the fingers,
-  and the light of sabers and explosions no longer shines through walls (grates and leaves throw their pattern); the
-  fighters in a duel throw their shadows on the walls.
-  See [docs/shadows.md](docs/shadows.md).
-- **See further**: grass and bushes are drawn about three times further away, and characters keep their detailed look
-  twice as far.
-
-### Smooth at any frame rate
-- **Single player follows your monitor**: vsync is on, so a 144 Hz monitor gets 144 frames per second with no tearing.
-  If a frame comes late, it is shown a little torn instead of the game dropping to half the frame rate (where your
-  graphics driver allows it). On a G-Sync or FreeSync monitor you can set a limit just under the refresh rate
-  (`com_maxfps`).
-- **Multiplayer stays at 125 frames per second** with vsync off, as players expect: on most servers how high you jump
-  and how fast you run depend on the frame rate, and 125 is the standard. The limit is now exact in every game (144
-  used to give 166).
-- **The same game at any frame rate** (single player): footsteps, the bobbing of the view, leaning and other things
-  no longer speed up or slow down with the frame rate, and the slight wobble when running is gone.
-- **Big fights are drawn whole**: a scene can now hold 8191 things (players, weapons, effects) instead of 2047; past
-  that, the original stopped drawing whatever came next.
-- **Effects keep their density at any frame rate**: at high frame rates some effects (saber sparks, the glow under
-  pickups) used to multiply until other things stopped being drawn in big fights.
-- **Faster loading** (single player): the work of loading a level is shared between your processor's cores, and the
-  loading screen no longer waits for the monitor. In tests a big level loaded in 1.45 seconds instead of 2.1. See
-  [docs/parallel-work.md](docs/parallel-work.md).
-- Old settings files that held the game at 125 frames per second with tearing are corrected once, the first time you
-  play.
-
-### Sound
-- **Headphone 3D** (Setup > Sound > Headphone 3D, off by default): with headphones you hear sounds from behind, above
-  and below, not only left and right. On speakers leave it off. See [docs/hrtf.md](docs/hrtf.md).
-- **Room echo** (Setup > Sound > Room Echo, on by default): a hangar rings, a corridor doesn't, sounds behind a wall
-  are muffled, and everything is muffled under water. It is worked out from the level as you play, so it works in
-  every level, mods included. Dialogue in cutscenes stays clear. See [docs/reverb.md](docs/reverb.md).
-- **128 sounds at once** instead of 32, so big fights no longer cut sounds off (with 31 bots fighting, the old limit
-  dropped about 25 sounds every second).
-- **Clearer sound**: the old low quality sound effects are converted carefully so they no longer sound harsh, loud
-  moments are gently held back instead of distorting, and everything plays at your sound card's own quality (usually
-  48 kHz). The old Sound Quality setting is gone: it is always the best.
-- **Sounds come sooner**: about half the delay between something happening and hearing it.
-- **No crackling or stutter**: the crackle when music and a video play together is gone, and when the game freezes for
-  a moment (saving, a slow disk) the sound carries on smoothly instead of repeating or cutting out.
-- **Mouths move with the words** again, and combat music changes land on the beat (single player).
-- **Alt+Tab**: the game goes quiet in the background and comes back cleanly (`s_muteWhenUnfocused 0` keeps it
-  playing).
-- **A third of the processor time** for mixing sound, which helps the frame rate in big fights.
-- Broken sound files in mods no longer crash the game.
-
-### Mouse
-- **A sensitivity slider for today's mice**: from 0.05 to 30, finer at the slow end where you need it (it used to start
-  at 2, already too fast for a modern mouse). The default is 1.5.
-- **Setup > Controls > Mouse/Joystick > Mouse DPI**: tell the game your mouse's DPI (on the box or in the mouse's
-  software) and a sensitivity feels the same on any mouse. See [docs/mouse.md](docs/mouse.md).
-
-### Online play
-- **Other players move smoothly on any connection**: when a server update comes late, the original game had to guess
-  where everyone went, and they stuttered and jumped when the update came. The game now measures your connection
-  and waits just long enough for the next update: in tests it went from guessing in 4 to 13% of frames to under 1%,
-  with no extra delay on a steady connection (`cl_timeSync`). See [docs/network.md](docs/network.md).
-- **Hit what you see** (Jedi Academy multiplayer, on servers running Shin): with lag compensation the server checks
-  your shot against where the other players were on your screen when you fired, not where they got to while the shot
-  travelled to the server. No more aiming ahead of moving targets to make up for your ping, for instant-hit weapons
-  and blaster bolts alike (`g_lagCompensation`). Saber combat is unchanged.
-- **Network settings for today's connections**: your inputs go out every frame, the server may send you up to
-  100000 bytes a second, and the modem-era Data Rate choices are gone. Old settings files are updated once.
-
-### Gameplay (single player)
-- **Realistic saber combat is on by default**: more precise saber hits and higher damage. To play with the original
-  rules: `g_saberMoreRealistic 0` (Jedi Academy) or `g_saberRealisticCombat 0`
-  (Jedi Outcast).
-- **Escape skips cutscenes**, both videos and the ones the game plays itself. Handy on a second playthrough.
-
-### Jedi Outcast multiplayer is back
-- **Play Jedi Outcast multiplayer (1.04) on a modern engine**, with the game's own modules from your copy of the game,
-  so it plays exactly like the original, with the screen, graphics, sound and mouse improvements above. Because it
-  runs the game's original menus, a few settings are console only: Anti-Aliasing (`r_ext_multisample 4`), the screen
-  effects (`r_ssao 1`, `r_bloom 1`, `r_smaa 1`, `r_dlightGLSL 1` or `2`), Headphone 3D (`s_hrtf 1`) and Mouse DPI
-  (`in_mouseDPI`); its Video Mode list is the original one (it still starts at your desktop resolution), and its old
-  Sound Quality row is still there but every choice gives the best quality. Its HUD stays in the middle of the screen,
-  while the view is widened all the same. See [Jedi Outcast multiplayer](#jedi-outcast-multiplayer).
-
-### Behind the scenes
-- **Settings and saves always have a home**: if your user folder can't be written (a locked down Windows account, for
-  example), the game says why and uses the game folder instead of failing to start.
-- Window, input and sound run on **SDL3**.
-- **One command builds everything**, after checking that your system has what it needs and telling you how to install
-  what is missing. See [Building](#building).
-- The old OpenAL/EAX sound backend, the macOS application bundles and the leftovers of old Visual Studio projects are
-  removed.
-
-## Playing
-
-Shin comes as source code; there are no ready-made downloads yet. [Build it](#building) (one command), which gives you
-a folder per game, then:
-
-1. Copy everything in `dist/JediOutcast/` (or `dist/JediAcademy/`) into the `GameData/` folder of that game, next to
-   its `base/` folder. With Steam that is `<Steam folder>/steamapps/common/Jedi Academy/GameData/` (or
-   `.../Jedi Outcast/GameData/`).
-1. Start the game you want:
+1. Download the archive for your system from the
+   [Releases page](https://github.com/Rugaliz/OpenJK-Shin/releases): `windows` or `linux`.
+1. Unpack it. It has a `JediOutcast` folder and a `JediAcademy` folder.
+1. Copy the **contents** of `JediOutcast` into the `GameData` folder of Jedi Outcast, next to its `base` folder, and
+   the contents of `JediAcademy` into the `GameData` folder of Jedi Academy. With Steam these are
+   `<Steam folder>/steamapps/common/Jedi Outcast/GameData/` and `.../Jedi Academy/GameData/`.
+   Nothing of the original game is overwritten, so to go back to the original, start its own program again.
+1. Start the game with one of these:
 
    | | Single player | Multiplayer | Dedicated server |
    | - | - | - | - |
    | Jedi Outcast | `openjo_sp` | `openjo` | `openjoded` |
    | Jedi Academy | `openjk_sp` | `openjk` | `openjkded` |
 
-   On Linux the files end in `.x86_64`, on Windows in `.x86_64.exe`.
+   On Windows the files end in `.x86_64.exe`, on Linux in `.x86_64`. With Steam you can add them to your library as
+   non-Steam games.
 
-Your settings and saves go to `~/.local/share/openjo` and `~/.local/share/openjk` on Linux, and to
-`Documents\My Games\OpenJO` and `Documents\My Games\OpenJK` on Windows.
+Your settings and saves are kept apart from the original game's: in `Documents\My Games\OpenJO` and
+`Documents\My Games\OpenJK` on Windows, and `~/.local/share/openjo` and `~/.local/share/openjk` on Linux.
 
 Don't have the games? Jedi Academy is on [Steam](https://store.steampowered.com/app/6020/) and
 [GOG](https://www.gog.com/game/star_wars_jedi_knight_jedi_academy), Jedi Outcast on
 [Steam](https://store.steampowered.com/app/6030/) and [GOG](https://www.gog.com/game/star_wars_jedi_knight_ii_jedi_outcast).
 
-On Linux, to download the Windows version of the game data without a Windows machine:
+## What is different
 
-1. Install [SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD#Linux).
-1. In SteamCMD: `force_install_dir /path/to/install/jka/`, then `@sSteamCmdForcePlatformType windows`, then
-   `login <your Steam user>`, then `app_update 6020` (Jedi Academy) or `app_update 6030` (Jedi Outcast).
+Settings are named as they appear in the game's menus. The console command is given in brackets for those who want it
+(open the console with Shift+Escape or the key above Tab).
 
-## Building
+### Screen and resolution
+- The game **starts at your screen's own resolution**, in a borderless window that covers the screen, so switching to
+  other programs with Alt+Tab is instant.
+- **Setup > Video > Video Mode** lists the resolutions your screen supports, plus "Desktop resolution".
+- **Widescreen and ultrawide screens** show more to the sides, as they should, instead of cutting off the top and
+  bottom. Menus and the HUD keep their proportions, videos get black bars, and the HUD sits in the corners of the
+  screen.
 
-The build scripts do the work: they check what is installed, say exactly what is missing and how to install it, build
-all four games and copy them to `dist/`, laid out like the game folders.
+### Frame rate
+- **Single player runs at your monitor's refresh rate** (60, 144, 240 Hz...) without tearing. On a G-Sync or FreeSync
+  monitor you can set a frame rate limit just under the refresh rate (`com_maxfps`).
+- **The game behaves the same at any frame rate**: in the original, footsteps, the bobbing of the view and some other
+  movements sped up or slowed down with the frame rate.
+- **Multiplayer stays at 125 frames per second**, the rate the multiplayer community plays at, because on most
+  servers how far you jump depends on it. The limit is now exact (asking for 144 used to give 166).
+- **Big fights are drawn completely**: a scene can hold four times as many things (players, weapons, effects) as
+  before. The original stopped drawing whatever went over its limit, and at high frame rates some effects multiplied
+  until it did.
+- **Levels load faster** in single player, using all of your processor's cores.
+
+### Graphics
+- **Vulkan renderer** in single player: a modern graphics interface, used automatically. If your system can't run it,
+  the game uses OpenGL instead and shows a short note saying why. Multiplayer uses OpenGL.
+- **Anti-aliasing and texture filtering** for clean edges and sharp textures at an angle, from the menus.
+- **Smoother level lighting**: the lighting baked into the levels is stored coarsely and showed steps along the edges
+  of shadows; it is now smoothed as the level loads, without changing the lighting itself.
+- **Grass and small details are drawn further away**, and characters keep their detailed models twice as far.
+- **The Brightness slider works at once** and in a window too, and the original's brighter-than-white lighting
+  (`r_overBrightBits 1`) works again.
+- **Better shadows** for the characters: they no longer darken the character itself or show through walls, and a new
+  **Soft** setting gives shadows the character's shape.
+- **Ray tracing** on graphics cards that support it: exact character shadows, and light from sabers, blasters and
+  explosions that stops at walls and casts shadows.
+- **Optional effects**: ambient occlusion, bloom, edge smoothing, more detailed saber and blaster light, light shafts
+  and eye adaptation.
+
+All of these are described in [Graphics settings](#graphics-settings) below.
+
+### Sound
+- **Headphone 3D** (Setup > Sound > Headphone 3D, off by default): with headphones, sounds come from behind, above and
+  below you, not only from the left and right. Leave it off with speakers.
+- **Room echo** (Setup > Sound > Room Echo, on by default): large halls ring, small rooms don't, sounds behind a wall
+  are muffled, and so is everything under water. It is worked out from the level as you play, so it works in mods too.
+  Dialogue in cutscenes stays clear.
+- **Up to 128 sounds at once** instead of 32, so sounds are no longer cut off in big fights.
+- **Cleaner sound**: played at your sound card's own quality, with the harshness of the old low-quality sound files
+  removed and loud moments kept from distorting. The crackling some systems had when music and a video played together
+  is fixed. The old Sound Quality setting is gone, as it is always at the best quality.
+- **Less delay** between something happening and hearing it (about half of the original).
+- When you switch to another program the game goes quiet, and the sound comes back cleanly when you return
+  (`s_muteWhenUnfocused 0` keeps it playing).
+- Characters' mouths move with their words again, and the combat music changes on the beat (single player).
+
+### Mouse
+- **Sensitivity range for modern mice**: from 0.05 to 30 (the original started at 2, already too fast for most of
+  today's mice). The default is 1.5.
+- **Setup > Controls > Mouse/Joystick > Mouse DPI**: enter your mouse's DPI and the same sensitivity feels the same on
+  any mouse.
+
+### Online play
+- **Other players move smoothly** even on an uneven connection. The original had to guess where players went whenever
+  an update from the server came late, and they jumped when it arrived; the game now waits just long enough for the
+  next update instead. On a steady connection this adds no delay.
+- **Lag compensation** (Jedi Academy multiplayer, on servers running Shin): the server checks your shots against where
+  the other players were on your screen when you fired, so you no longer need to aim ahead of moving players to make up
+  for your ping. It covers guns and blaster bolts; saber combat is unchanged.
+- **Network settings suited to today's connections**: the old modem-era Data Rate choices are replaced by settings that
+  suit broadband, and old settings files are updated once.
+
+### Single player
+- **More realistic saber combat is on by default**: more precise saber hits and higher damage. For the original rules:
+  `g_saberRealisticCombat 0` (Jedi Outcast) or `g_saberMoreRealistic 0` (Jedi Academy).
+- **Escape skips cutscenes**, both the videos and the scenes played in the game engine.
+
+### Other
+- If your user folder can't be written to (a locked-down Windows account, for example), the game keeps your settings
+  and saves in the game folder instead of failing to start, and says so.
+- Broken sound files in mods no longer crash the game.
+
+## Graphics settings
+
+The graphics settings are in **Setup > Video** and **Setup > More Video**. A row only appears if your graphics card
+and the renderer in use support it.
+
+| Setting | Where | What it does |
+| - | - | - |
+| Anti-Aliasing (Off, 2x, 4x, 8x) | Video | Smooths the jagged edges of everything, including leaves, fences and grates. Higher is smoother and slower. The quality presets set it for you. |
+| Anisotropic Filtering (Off to 16x) | More Video | Keeps floors and walls sharp when seen at a slant. Costs almost nothing on modern cards. |
+| Shadows (None, Simple, Volumetric, Soft) | More Video | The characters' shadows. Simple is a round patch under the feet. Volumetric has the character's shape, on the ground. **Soft** also falls on walls and steps, with edges that blur further from the character. |
+| Ray Tracing (Off, Medium, High) | More Video | Needs a graphics card with ray tracing, in single player. See below. |
+| Ambient Occlusion | More Video | Soft shading in corners and where objects meet, which adds depth. |
+| Bloom | More Video | A soft glow around the brightest lights. |
+| SMAA Edge Smoothing | More Video | Smooths edges without blurring textures; works with or without Anti-Aliasing. |
+| Shader Dynamic Lights (Off, On, Detailed) | More Video | The light of sabers, blaster bolts and explosions follows the shape of what it falls on instead of making square patches. Sabers light along the whole blade, and blaster bolts light the walls they pass and flash where they hit. **Detailed** also brings out the bumps of rock, brick and tiles. |
+| Light Shafts | More Video | Rays of sunlight through windows and gratings and around roof edges, on levels with a sun. |
+| Eye Adaptation | More Video | Dark places slowly brighten as if your eyes were adjusting, without washing out the bright parts. |
+
+### Ray Tracing
+
+Ray tracing works out light and shadow by tracing the path of light through the level, which makes shadows exact. It
+needs the Vulkan renderer (the default in single player) and a graphics card with ray tracing: AMD Radeon RX 6000 or
+newer, NVIDIA GeForce RTX, or Intel Arc. It is not available in multiplayer.
+
+With Ray Tracing on:
+
+- **The characters' shadows are exact**, down to the fingers and the hilt of a saber, whenever Shadows is set to
+  Volumetric or Soft.
+- **Light no longer passes through walls.** In the original, a saber in the next room lit the floor on your side of
+  the wall, and an explosion upstairs lit the room below. Now pillars, crates and doors cast shadows from sabers,
+  blaster bolts and explosions, and grates and leaves cast their pattern.
+- **Characters block that light too**, including the one holding the saber, so a duel throws the fighters' shadows
+  onto the walls and floor around them.
+
+**Medium** is the efficient setting: on a Radeon RX 7800 XT at 3440x1440 it costs less than the Soft shadows do.
+**High** traces more rays and works at the full resolution of the screen, for smoother shadow edges with less grain,
+at a higher cost; it traces its extra rays only where they make a difference, along the edges of shadows.
+
+More detail on the effects and what each costs: [docs/post-processing.md](docs/post-processing.md),
+[docs/shadows.md](docs/shadows.md), [docs/antialiasing.md](docs/antialiasing.md).
+
+## Supported games and systems
+
+| Game | Single player | Multiplayer |
+| - | - | - |
+| Jedi Academy | Yes | Yes |
+| Jedi Outcast | Yes | Yes (version 1.04), see [Jedi Outcast multiplayer](#jedi-outcast-multiplayer) |
+
+- **Windows** 10 or 11, 64-bit.
+- **Linux**, 64-bit (x86_64). Shin is developed and played on Linux, so it is the most tested.
+- **macOS** is not supported.
+- **Graphics**: any card with OpenGL works. The Vulkan renderer, used by default in single player, needs Vulkan 1.2,
+  which most cards from the last ten years have with current drivers. Ray tracing needs a card with ray tracing
+  (see above).
+
+The Windows version is built and tested less often than the Linux one. If something doesn't work, please
+[open an issue](https://github.com/Rugaliz/OpenJK-Shin/issues).
+
+## Jedi Outcast multiplayer
+
+OpenJK only plays Jedi Outcast single player. Shin adds Jedi Outcast multiplayer (version 1.04), using the game
+modules from your own copy of the game, so it plays the same as the original. You get the screen, graphics, sound and
+mouse improvements above, with a few differences, because it runs the game's original menus:
+
+- Some settings are only available from the console: Anti-Aliasing (`r_ext_multisample 4`), the effects (`r_ssao 1`,
+  `r_bloom 1`, `r_smaa 1`, `r_dlightGLSL 1` or `2`), Headphone 3D (`s_hrtf 1`) and Mouse DPI (`in_mouseDPI`).
+- The Video Mode list is the original one (the game still starts at your desktop resolution), and the old Sound
+  Quality row is still there, though every choice gives the best quality.
+- The HUD stays in the middle of the screen, while the view itself is widened.
+
+To play on servers running other versions of Jedi Outcast (1.02, 1.03), use [JK2MV](https://jk2mv.org). How Jedi
+Outcast multiplayer works here: [docs/jk2-multiplayer.md](docs/jk2-multiplayer.md).
+
+## Building from source
+
+Most players don't need this: the [Releases page](https://github.com/Rugaliz/OpenJK-Shin/releases) has ready-made
+downloads. To build the games yourself, the build scripts check what is installed, say what is missing and how to
+install it, build all four games and copy them to `dist/`, laid out like the game folders.
 
 ### Linux
 
@@ -250,11 +251,10 @@ Then, from the folder of this repository:
 
 What you need (the script checks all of it):
 
-- Microsoft's C++ compiler. The free **Build Tools for Visual Studio** (2019, 2022 or 2026) are enough: you don't
-  need the Visual Studio editor, only its **"Desktop development with C++"** workload and a Windows 10/11 SDK. One
-  command installs them:
+- Microsoft's C++ compiler. The free **Build Tools for Visual Studio** (2019, 2022 or 2026) are enough: you only need
+  the **"Desktop development with C++"** workload and a Windows 10/11 SDK. One command installs them:
   `winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`.
-  If you already have Visual Studio (Community is free) with that workload, it is used.
+  An existing Visual Studio (Community is free) with that workload works too.
 - CMake 3.16 or newer (`winget install Kitware.CMake`)
 - an internet connection the first time (SDL3 is downloaded and built)
 - the [Vulkan SDK](https://vulkan.lunarg.com/) (optional: without it the single player games have no Vulkan renderer
@@ -271,28 +271,15 @@ Get-Help .\build.ps1 -Detailed
 
 If scripts are blocked on your system: `powershell -ExecutionPolicy Bypass -File .\build.ps1`.
 
-### Result
-
-The games are copied to `dist/JediOutcast/` and `dist/JediAcademy/`; the build files go in `build/`. To build again
-after updating the source, run the same command: only what changed is compiled.
-
-If you would rather call CMake yourself, the options are the usual OpenJK ones (`BuildJK2SP*` for Jedi Outcast single
-player, `BuildSP*` for Jedi Academy single player, `BuildMP*` and `BuildJK2MP*` for multiplayer), plus
-`BuildSPRdVulkan` and `BuildJK2SPRdVulkan` for the Vulkan renderers. They are explained at the top of
-`CMakeLists.txt`. On Windows SDL3 is always downloaded; on Linux `-DUseInternalSDL3=ON` does the same.
-
 ### The Windows version, built on Linux
 
-No Windows machine and no Microsoft compiler needed: the MinGW compiler on Linux builds the Windows programs. They
-need nothing but Windows itself (10 or newer) to run. They have no Vulkan renderer: the single player games use
-OpenGL.
-
-What you need: CMake, Ninja and a MinGW-w64 compiler for 64-bit Windows. Shin is tested with
-[llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases): unpack it and put its `bin` folder on your `PATH`.
-The MinGW of your distribution should work too: `mingw-w64-gcc` on Arch, `mingw64-gcc-c++` on Fedora, and
-`g++-mingw-w64-x86-64` on Debian/Ubuntu, where you also have to pick its "posix" variant (the default one can't build
-Shin's worker threads): `sudo update-alternatives --config x86_64-w64-mingw32-g++` and the same for
-`x86_64-w64-mingw32-gcc`. zlib, libpng, libjpeg and SDL3 are built from source; SDL3 is downloaded the first time.
+The MinGW compiler on Linux can build the Windows version, including the Vulkan renderer: it needs only the Vulkan
+headers, as the import library for Windows' Vulkan loader is made during the build. Shin is tested with
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases) (unpack it and put its `bin` folder on your `PATH`). The
+MinGW of your distribution should work too: `mingw-w64-gcc` on Arch, `mingw64-gcc-c++` on Fedora, and
+`g++-mingw-w64-x86-64` on Debian/Ubuntu, where you also have to pick its "posix" variant
+(`sudo update-alternatives --config x86_64-w64-mingw32-g++`, and the same for `x86_64-w64-mingw32-gcc`). zlib, libpng,
+libjpeg and SDL3 are built from source; SDL3 is downloaded the first time.
 
 ```sh
 cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -303,26 +290,29 @@ cmake --build build-win
 cmake --install build-win --prefix dist/windows
 ```
 
-The games end up in `dist/windows/JediOutcast/` and `dist/windows/JediAcademy/`, laid out like the game folders. (The
-experimental rend2 renderer is left out: building it runs a Windows tool, which needs Wine.)
+The games end up in `dist/windows/JediOutcast/` and `dist/windows/JediAcademy/`. (The experimental rend2 renderer is
+left out: building it runs a Windows tool, which needs Wine.)
 
-More about the code: [renderer architecture](docs/renderer-architecture.md), [library loading](docs/libraries.md),
-[save games](docs/save%20games.md), [language strings](docs/language%20strings.md). Upstream's
+### Result
+
+The games are copied to `dist/JediOutcast/` and `dist/JediAcademy/`; the build files go in `build/`. Running the same
+command again after updating the source only compiles what changed.
+
+If you would rather call CMake yourself, the options are the usual OpenJK ones (`BuildJK2SP*` for Jedi Outcast single
+player, `BuildSP*` for Jedi Academy single player, `BuildMP*` and `BuildJK2MP*` for multiplayer), plus
+`BuildSPRdVulkan` and `BuildJK2SPRdVulkan` for the Vulkan renderers. They are explained at the top of
+`CMakeLists.txt`. On Windows SDL3 is always downloaded; on Linux `-DUseInternalSDL3=ON` does the same.
+
+More about the code: [Vulkan renderer](docs/vulkan-renderer.md), [renderer architecture](docs/renderer-architecture.md),
+[library loading](docs/libraries.md), [save games](docs/save%20games.md),
+[language strings](docs/language%20strings.md), [sound: HRTF](docs/hrtf.md) and [reverb](docs/reverb.md),
+[mouse](docs/mouse.md), [network](docs/network.md), [parallel loading](docs/parallel-work.md). Upstream's
 [debugging guide](https://github.com/JACoders/OpenJK/wiki/Debugging) still applies.
-
-## Jedi Outcast multiplayer
-
-`openjo` (client) and `openjoded` (dedicated server) play the multiplayer of Jedi Outcast 1.04 with the game's own
-game modules from your copy of the game, so it plays like the original. It is the Jedi Academy multiplayer engine
-built for Jedi Outcast (`./build.sh --only jo-mp`); how, and what is not done yet (Outcast 1.02 and 1.03, rend2), is
-in [docs/jk2-multiplayer.md](docs/jk2-multiplayer.md). It would not exist without
-[JK2MV](https://jk2mv.org), the multi-version Outcast engine, which it was written against, and which is still the
-way to play on servers of the other versions of the game.
 
 ## Contributing
 
-Open an issue or a pull request on this repository. Changes that don't depend on anything Shin-specific are welcome
-to go to upstream too: [JACoders/OpenJK](https://github.com/JACoders/OpenJK).
+Open an issue or a pull request on this repository. Changes that don't depend on anything specific to Shin are welcome
+upstream too: [JACoders/OpenJK](https://github.com/JACoders/OpenJK).
 
 To use this as the base of a new mod, fork it, and change the `JK_VERSION` define in `codemp/qcommon/game_version.h`
 from "OpenJK" to your project's name.
@@ -330,8 +320,8 @@ from "OpenJK" to your project's name.
 ## License
 
 OpenJK Shin is free software, licensed under the **GNU General Public License version 2 only**, like OpenJK. See
-[LICENSE.txt](LICENSE.txt). You are free to use, modify and redistribute it under those terms; a modified version
-must come with its source under the same license.
+[LICENSE.txt](LICENSE.txt). You may use, modify and redistribute it under those terms; a modified version must come
+with its source code under the same license.
 
 - The code of Jedi Outcast and Jedi Academy is copyright Activision and Raven Software, and was released by them
   under the GPLv2 in 2013. Their notice is kept in [rv-readme.txt](rv-readme.txt). That code is in turn based on the
@@ -348,9 +338,9 @@ must come with its source under the same license.
 
 OpenJK Shin is made by [Ricardo Fernandes](https://github.com/Rugaliz).
 
-It stands on the work of the [OpenJK](https://github.com/JACoders/OpenJK) project, whose community took the released
-source and made it work on modern systems. Its [upstream support channels](https://discord.gg/dPNCfeQ) and
-[forum](https://jkhub.org/forums/forum/49-openjk/) are where to ask about things that are not specific to Shin.
+It builds on the work of the [OpenJK](https://github.com/JACoders/OpenJK) project, whose community took the released
+source and made it work on modern systems. Its [support channels](https://discord.gg/dPNCfeQ) and
+[forum](https://jkhub.org/forums/forum/49-openjk/) are the place to ask about things that are not specific to Shin.
 
 OpenJK leads, from the original README (full list: [@JACoders](https://github.com/orgs/JACoders/people)):
 
@@ -375,7 +365,7 @@ Significant OpenJK contributors ([full list](https://github.com/JACoders/OpenJK/
 - [smcv](https://github.com/smcv) (debian packaging)
 - [Tristamus](https://tristamus.com) (icon)
 
-[JK2MV](https://github.com/mvdevs/jk2mv) (ouned, fau, Daggolin and its other contributors, GPLv2), whose work on running Jedi
-Outcast multiplayer on a modern engine the Outcast multiplayer here was written against.
+[JK2MV](https://github.com/mvdevs/jk2mv) (ouned, fau, Daggolin and its other contributors, GPLv2), whose work on running
+Jedi Outcast multiplayer on a modern engine the Outcast multiplayer here was written against.
 
-And of course Raven Software and Activision, who made the games and released their source.
+And Raven Software and Activision, who made the games and released their source code.
