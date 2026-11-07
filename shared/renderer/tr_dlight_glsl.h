@@ -33,7 +33,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define DLIGHT_BUMP_DEPTH	1.5f
 
 // the first opaque stage that is not a lightmap, an environment map or a fog: the surface texture that a dynamic
-// light has to be multiplied with. NULL when there is none, or without multitexture.
+// light has to be multiplied with. Also one that multiplies what is drawn before it (a texture over a lightmap drawn
+// first, "blendFunc GL_DST_COLOR GL_ZERO": most walls of some levels), which makes the same colour. NULL when there is
+// none, or without multitexture.
 static shaderStage_t *RB_DlightDiffuseStage( void ) {
 	int i;
 
@@ -44,11 +46,12 @@ static shaderStage_t *RB_DlightDiffuseStage( void ) {
 	for ( i = 0; i < tess.shader->numUnfoggedPasses; i++ ) {
 		const int blendBits = (GLS_SRCBLEND_BITS+GLS_DSTBLEND_BITS);
 		shaderStage_t *stage = &tess.shader->stages[i];
+		const int blend = stage->stateBits & blendBits;
 
 		if ( ((stage->bundle[0].image && !stage->bundle[0].isLightmap && !stage->bundle[0].numTexMods && stage->bundle[0].tcGen != TCGEN_ENVIRONMENT_MAPPED && stage->bundle[0].tcGen != TCGEN_FOG) ||
 			 (stage->bundle[1].image && !stage->bundle[1].isLightmap && !stage->bundle[1].numTexMods && stage->bundle[1].tcGen != TCGEN_ENVIRONMENT_MAPPED && stage->bundle[1].tcGen != TCGEN_FOG)) &&
-			(stage->stateBits & blendBits) == 0 )
-		{ //only use non-lightmap opaque stages
+			( blend == 0 || blend == (GLS_SRCBLEND_DST_COLOR|GLS_DSTBLEND_ZERO) || blend == (GLS_SRCBLEND_ZERO|GLS_DSTBLEND_SRC_COLOR) ) )
+		{ //only use non-lightmap opaque stages, or ones that multiply
 			return stage;
 		}
 	}
