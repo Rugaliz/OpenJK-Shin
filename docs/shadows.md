@@ -102,8 +102,11 @@ short of the light, so that the wall an explosion sits on is still lit by it, an
 hide the blade. With Ray Traced, the dynamic lights are always drawn by the shader (as with `r_dlightGLSL` 1, or 2 if
 that is set).
 
-A lightsaber or a blaster bolt is a light along a line (see [post-processing](post-processing.md)): four rays go to
-points spread along it, so its shadows are soft, as a long light makes them. Characters block these lights too, the
+A lightsaber or a blaster bolt is a light along a line (see [post-processing](post-processing.md)): rays go to points
+spread along it, so its shadows are soft, as a long light makes them. Two go first, half the line apart; only where they
+disagree, at the edge of a shadow, do two more go between them (elsewhere the whole line is seen, or hidden, from the
+pixel). At 3440x1440 with nine characters in view, one lit saber costs 1.0 ms a frame on a Radeon RX 7800 XT (it was
+1.45 ms with four rays everywhere), a blaster firing about 0.2 ms. Characters block these lights too, the
 one holding the saber as well: a duel throws the fighters' shadows on the walls and the floor. The characters are
 known only after the dynamic lights are drawn, so these rays see them as they were the frame before (at 60 frames a
 second and more that is not to be seen); from a character's own skin the rays start 8 units out, so that the frame
