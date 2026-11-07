@@ -11,6 +11,10 @@ layout(push_constant) uniform P { vec4 a; vec4 b; vec4 c; vec4 row0; vec4 row1; 
 
 layout(set = 0, binding = 0) uniform sampler2D uDepth;
 layout(set = 0, binding = 3) uniform accelerationStructureEXT uScene;
+#define RT_ALPHA_SET 0
+#define RT_ALPHA_ATLAS 4
+#define RT_ALPHA_DATA 5
+#include "rt_alpha.glsl"
 
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -35,9 +39,9 @@ void main()
 	float lit = 0.0;
 	if (dot(n, p.sun.xyz) > 0.0) {
 		rayQueryEXT query;
-		rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFF,
+		rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF,
 			world + n * 1.0, 0.5, p.sun.xyz, 32768.0);
-		while (rayQueryProceedEXT(query)) {}
+		RT_PROCEED(query)
 		lit = rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
 	}
 	float f = p.unused.x > 1.5 ? mix(0.15, 1.0, lit) : mix(0.45, 1.0, lit);

@@ -377,16 +377,18 @@ static bool EnsureRtLayout( void )
 	{
 		return false;
 	}
-	VkDescriptorSetLayoutBinding bindings[4] = {};
-	for ( uint32_t i = 0; i < 4; i++ )
+	// the three images, the structure, and the atlas and the buffer of the alpha test (rt_alpha.glsl)
+	VkDescriptorSetLayoutBinding bindings[6] = {};
+	for ( uint32_t i = 0; i < 6; i++ )
 	{
 		bindings[i].binding = i;
-		bindings[i].descriptorType = i < 3 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		bindings[i].descriptorType = ( i < 3 || i == 4 ) ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+			: ( i == 3 ? VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER );
 		bindings[i].descriptorCount = 1;
 		bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 	}
 	VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	layoutInfo.bindingCount = 4;
+	layoutInfo.bindingCount = 6;
 	layoutInfo.pBindings = bindings;
 	VK_CheckResult( vkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &post.rtSetLayout ), "vkCreateDescriptorSetLayout" );
 	VkPushConstantRange range = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 * sizeof( float ) };
@@ -397,10 +399,11 @@ static bool EnsureRtLayout( void )
 	pipelineLayoutInfo.pPushConstantRanges = &range;
 	VK_CheckResult( vkCreatePipelineLayout( vk.device, &pipelineLayoutInfo, NULL, &post.rtPipelineLayout ), "vkCreatePipelineLayout" );
 
-	const VkDescriptorPoolSize poolSizes[2] = { { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 * 3 }, { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 } };
+	const VkDescriptorPoolSize poolSizes[3] = { { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 * 4 }, { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 16 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16 } };
 	VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	poolInfo.maxSets = 16;
-	poolInfo.poolSizeCount = 2;
+	poolInfo.poolSizeCount = 3;
 	poolInfo.pPoolSizes = poolSizes;
 	for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
 	{
@@ -532,13 +535,27 @@ static void RunPass( int pass, const postImage_t *target, bool load, const postI
 		VkWriteDescriptorSetAccelerationStructureKHR structure = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
 		structure.accelerationStructureCount = 1;
 		structure.pAccelerationStructures = &scene;
-		VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		write.pNext = &structure;
-		write.dstSet = set;
-		write.dstBinding = 3;
-		write.descriptorCount = 1;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-		vkUpdateDescriptorSets( vk.device, 1, &write, 0, NULL );
+		VkImageView atlas;
+		VkSampler sampler;
+		VkBuffer alpha;
+		VK_RT_AlphaInputs( &atlas, &sampler, &alpha );
+		const VkDescriptorImageInfo image = { sampler, atlas, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+		const VkDescriptorBufferInfo buffer = { alpha, 0, VK_WHOLE_SIZE };
+		VkWriteDescriptorSet rtWrites[3] = { { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET }, { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET },
+			{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET } };
+		for ( uint32_t i = 0; i < 3; i++ )
+		{
+			rtWrites[i].dstSet = set;
+			rtWrites[i].dstBinding = 3 + i;
+			rtWrites[i].descriptorCount = 1;
+		}
+		rtWrites[0].pNext = &structure;
+		rtWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		rtWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		rtWrites[1].pImageInfo = &image;
+		rtWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		rtWrites[2].pBufferInfo = &buffer;
+		vkUpdateDescriptorSets( vk.device, 3, rtWrites, 0, NULL );
 	}
 	vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set, 0, NULL );
 	vkCmdPushConstants( cmd, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, numPush * sizeof( float ), push );

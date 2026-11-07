@@ -102,6 +102,12 @@ short of the light, so that the wall an explosion sits on is still lit by it. Ch
 the lights are often in a character's hand or body. With Ray Traced, the dynamic lights are always drawn by the shader
 (as with `r_dlightGLSL` 1, or 2 if that is set). One ray for every lit pixel of every light.
 
+Grates, fences and foliage are flat surfaces whose texture is cut out by an alpha test (or, for see-through ones,
+blended by its alpha). For the rays they block only where the texture is there: a light behind a grate throws the
+grate's pattern, leaves throw the shapes of leaves. The alpha of every such texture of the level (up to 256 of them)
+is kept small, 128 x 128, in an atlas made when the level's first frame needs it, with the texture coordinates of
+their triangles; on yavin1b that takes 90 ms once. Textures that move (tcMod scroll, rotate, ...) block nothing.
+
 ## Draw distance
 
 * `r_surfaceSpriteRange` (default 3): grass, bushes and other "surface sprites" fade out at a distance set per

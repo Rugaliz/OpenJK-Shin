@@ -41,6 +41,7 @@ static VkDescriptorSetLayout	sceneSetLayout;
 static VkDescriptorPool			scenePool;
 static VkDescriptorSet			sceneSets[VK_FRAMES_IN_FLIGHT];
 static VkAccelerationStructureKHR	sceneHandles[VK_FRAMES_IN_FLIGHT];
+static VkBuffer					sceneAlpha[VK_FRAMES_IN_FLIGHT];	// (the alpha test's buffer it holds: a new one each level)
 static int						sceneFrames[VK_FRAMES_IN_FLIGHT];
 static VkDescriptorSetLayout	descriptorSetLayout;
 static VkPipelineLayout			pipelineLayout;
@@ -440,19 +441,34 @@ void VK_DrawSetScene( VkAccelerationStructureKHR scene )
 		sceneFrames[slot] = 0;
 		return;
 	}
-	if ( sceneHandles[slot] != scene )
+	VkImageView atlas;
+	VkSampler sampler;
+	VkBuffer alpha;
+	VK_RT_AlphaInputs( &atlas, &sampler, &alpha );
+	if ( sceneHandles[slot] != scene || sceneAlpha[slot] != alpha )
 	{
 		VkWriteDescriptorSetAccelerationStructureKHR structure = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
 		structure.accelerationStructureCount = 1;
 		structure.pAccelerationStructures = &scene;
-		VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		write.pNext = &structure;
-		write.dstSet = sceneSets[slot];
-		write.dstBinding = 0;
-		write.descriptorCount = 1;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-		vkUpdateDescriptorSets( vk.device, 1, &write, 0, NULL );
+		const VkDescriptorImageInfo image = { sampler, atlas, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+		const VkDescriptorBufferInfo buffer = { alpha, 0, VK_WHOLE_SIZE };
+		VkWriteDescriptorSet writes[3] = { { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET }, { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET },
+			{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET } };
+		for ( uint32_t i = 0; i < 3; i++ )
+		{
+			writes[i].dstSet = sceneSets[slot];
+			writes[i].dstBinding = i;
+			writes[i].descriptorCount = 1;
+		}
+		writes[0].pNext = &structure;
+		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		writes[1].pImageInfo = &image;
+		writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[2].pBufferInfo = &buffer;
+		vkUpdateDescriptorSets( vk.device, 3, writes, 0, NULL );
 		sceneHandles[slot] = scene;
+		sceneAlpha[slot] = alpha;
 	}
 	sceneFrames[slot] = vk.frameCounter + 1;
 }
@@ -654,26 +670,35 @@ void VK_InitDraw( void )
 		shaderInfo.codeSize = sizeof( vk_spirv_dlight_rt_frag );
 		shaderInfo.pCode = vk_spirv_dlight_rt_frag;
 		VK_CheckResult( vkCreateShaderModule( vk.device, &shaderInfo, NULL, &dlightRayFragmentShader ), "vkCreateShaderModule" );
-		VkDescriptorSetLayoutBinding sceneBinding = {};
-		sceneBinding.binding = 0;
-		sceneBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-		sceneBinding.descriptorCount = 1;
-		sceneBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		// the level's structure, and the atlas and the buffer of its alpha test (rt_alpha.glsl)
+		const VkDescriptorType sceneTypes[3] = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER };
+		VkDescriptorSetLayoutBinding sceneBindings[3] = {};
+		VkDescriptorPoolSize scenePoolSizes[3];
+		for ( uint32_t i = 0; i < 3; i++ )
+		{
+			sceneBindings[i].binding = i;
+			sceneBindings[i].descriptorType = sceneTypes[i];
+			sceneBindings[i].descriptorCount = 1;
+			sceneBindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			scenePoolSizes[i].type = sceneTypes[i];
+			scenePoolSizes[i].descriptorCount = VK_FRAMES_IN_FLIGHT;
+		}
 		VkDescriptorSetLayoutCreateInfo sceneLayoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-		sceneLayoutInfo.bindingCount = 1;
-		sceneLayoutInfo.pBindings = &sceneBinding;
+		sceneLayoutInfo.bindingCount = 3;
+		sceneLayoutInfo.pBindings = sceneBindings;
 		VK_CheckResult( vkCreateDescriptorSetLayout( vk.device, &sceneLayoutInfo, NULL, &sceneSetLayout ), "vkCreateDescriptorSetLayout" );
-		const VkDescriptorPoolSize scenePoolSize = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, VK_FRAMES_IN_FLIGHT };
 		VkDescriptorPoolCreateInfo scenePoolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 		scenePoolInfo.maxSets = VK_FRAMES_IN_FLIGHT;
-		scenePoolInfo.poolSizeCount = 1;
-		scenePoolInfo.pPoolSizes = &scenePoolSize;
+		scenePoolInfo.poolSizeCount = 3;
+		scenePoolInfo.pPoolSizes = scenePoolSizes;
 		VK_CheckResult( vkCreateDescriptorPool( vk.device, &scenePoolInfo, NULL, &scenePool ), "vkCreateDescriptorPool" );
 		VkDescriptorSetLayout sceneLayouts[VK_FRAMES_IN_FLIGHT];
 		for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
 		{
 			sceneLayouts[i] = sceneSetLayout;
 			sceneHandles[i] = VK_NULL_HANDLE;
+			sceneAlpha[i] = VK_NULL_HANDLE;
 			sceneFrames[i] = 0;
 		}
 		VkDescriptorSetAllocateInfo sceneAllocate = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };

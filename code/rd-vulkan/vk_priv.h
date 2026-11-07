@@ -149,11 +149,12 @@ bool		VK_RT_NewBuffer( vkRtBuffer_t *buffer, VkDeviceSize size, VkBufferUsageFla
 void		VK_RT_FreeBuffer( vkRtBuffer_t *buffer );
 void		VK_RT_FreeStructure( vkRtStructure_t *structure );
 bool		VK_RT_BuildTriangles( VkCommandBuffer cmd, vkRtStructure_t *blas, vkRtBuffer_t *scratch, VkDeviceAddress vertices,
-				uint32_t numVertices, VkDeviceAddress indexes, uint32_t numTriangles, bool fastBuild );
+				uint32_t numVertices, VkDeviceAddress indexes, uint32_t numTriangles, bool fastBuild, bool opaque );
 bool		VK_RT_BuildInstances( VkCommandBuffer cmd, vkRtStructure_t *tlas, vkRtBuffer_t *scratch, VkDeviceAddress instances,
 				uint32_t numInstances );
 void		VK_RT_Barrier( VkCommandBuffer cmd, VkPipelineStageFlags stage );
 VkAccelerationStructureKHR	VK_RT_Scene( void );		// this frame's top level structure (the level and its brush models)
+void		VK_RT_AlphaInputs( VkImageView *atlas, VkSampler *sampler, VkBuffer *data );	// for the alpha test of the rays (rt_alpha.glsl)
 VkAccelerationStructureKHR	VK_RT_Characters( const float *xyz, int numPoints, const int *indexes, int numTriangles );
 
 // vk_mem.cpp

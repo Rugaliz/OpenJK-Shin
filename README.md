@@ -87,7 +87,7 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   through walls. The new **Soft** setting goes further: the shadow has the character's shape, falls on walls and
   steps too, and its edge blurs the further it is from the character. On graphics cards with ray tracing (AMD RX 6000
   and newer, NVIDIA RTX, Intel Arc) and the Vulkan renderer, **Ray Traced** shadows are exact, down to the fingers,
-  and the light of sabers and explosions no longer shines through walls.
+  and the light of sabers and explosions no longer shines through walls (grates and leaves throw their pattern).
   See [docs/shadows.md](docs/shadows.md).
 - **See further**: grass and bushes are drawn about three times further away, and characters keep their detailed look
   twice as far.

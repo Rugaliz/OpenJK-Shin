@@ -105,6 +105,13 @@ begins (`VK_RT_BeginView`, before anything is drawn), and the dynamic light prog
 transform from the surface's space to the world in 64 bytes of push constants after the usual 128 (every graphics card
 with ray tracing has room for 256). Cards without ray tracing never load that shader.
 
+Alpha tested surfaces (grates, foliage): their triangles go into bottom level structures of their own that are not
+opaque, so a ray query hands them to the shader as candidates; `shaders/rt_alpha.glsl` finds the texture coordinates
+of the point (a storage buffer of triangles, from the instance's custom index and the primitive index) and confirms the
+hit where the texture's alpha passes the shader's test, read from an atlas of the level's alpha textures
+(`VK_RT_PrepareLevel`, at the level's first frame with ray tracing). The dynamic lights' set and the post passes' set
+have the atlas and the buffer next to the structure.
+
 ## What is not there yet
 
 * The dynamic glow (needs old NVIDIA / ARB programs), as in OpenGL on current drivers.

@@ -302,15 +302,16 @@ static bool VK_RT_Build( VkCommandBuffer cmd, vkRtStructure_t *structure, vkRtBu
 VK_RT_BuildTriangles
 
 A bottom level structure from triangles: vertices (3 floats each) and indexes (3 per triangle, 32 bit) at device
-addresses. fastBuild for what is built again every frame, otherwise it is made to be searched fast.
+addresses. fastBuild for what is built again every frame, otherwise it is made to be searched fast. Not opaque: ray
+queries hand its triangles to the shader as candidates, to be confirmed or not (the alpha test, VK_RT_Alpha*).
 =================
 */
 bool VK_RT_BuildTriangles( VkCommandBuffer cmd, vkRtStructure_t *blas, vkRtBuffer_t *scratch, VkDeviceAddress vertices,
-	uint32_t numVertices, VkDeviceAddress indexes, uint32_t numTriangles, bool fastBuild )
+	uint32_t numVertices, VkDeviceAddress indexes, uint32_t numTriangles, bool fastBuild, bool opaque )
 {
 	VkAccelerationStructureGeometryKHR geometry = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
 	geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-	geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+	geometry.flags = opaque ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0;	// (not opaque: the shader is asked, alpha test)
 	VkAccelerationStructureGeometryTrianglesDataKHR &triangles = geometry.geometry.triangles;
 	triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
 	triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -370,19 +371,61 @@ frame needs it and kept until the level changes, placed every frame by a top lev
 =============================================================================
 */
 
-// what blocks light: solid surfaces that are drawn as they are (no sky, nothing see-through or cut out by an alpha
-// test, nothing that moves its vertices)
-static bool VK_RT_Blocks( const shader_t *shader )
+// What a surface's shader makes of it for the rays: nothing (sky, glass, moving vertices), solid, or solid where its
+// texture is (grates, foliage, catwalks: cut out by an alpha test, or see-through ones blended by their alpha, which
+// count where the alpha is at least a half; test is the RT_ALPHA_* the shaders know, scale the stage's tcMod scale)
+enum { RT_NONE, RT_SOLID, RT_ALPHA_TESTED };
+enum { RT_ALPHA_GT_0 = 1, RT_ALPHA_LT_80, RT_ALPHA_GE_80, RT_ALPHA_GE_C0 };
+
+static int VK_RT_Blocks( const shader_t *shader, int *test, float scale[2] )
 {
+
 	if ( !shader || shader->sky || ( shader->surfaceFlags & ( SURF_SKY | SURF_NODRAW ) ) || shader->fogParms )
 	{
-		return false;
+		return RT_NONE;
 	}
-	if ( shader->sort != SS_OPAQUE || shader->numDeforms || !shader->numUnfoggedPasses || !shader->stages )
+	if ( ( shader->sort != SS_OPAQUE && shader->sort != SS_SEE_THROUGH ) || shader->numDeforms || !shader->numUnfoggedPasses || !shader->stages )
 	{
-		return false;
+		return RT_NONE;
 	}
-	return ( shader->stages[0].stateBits & GLS_ATEST_BITS ) == 0;
+	const shaderStage_t *stage = &shader->stages[0];
+	switch ( stage->stateBits & GLS_ATEST_BITS )
+	{
+	case 0:
+		if ( shader->sort == SS_OPAQUE )
+		{
+			return RT_SOLID;
+		}
+		if ( ( stage->stateBits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) ) != GLS_ALPHA )
+		{
+			return RT_NONE;
+		}
+		*test = RT_ALPHA_GE_80;	// (see-through, blended by its alpha)
+		break;
+	case GLS_ATEST_GT_0:	*test = RT_ALPHA_GT_0;	break;
+	case GLS_ATEST_LT_80:	*test = RT_ALPHA_LT_80;	break;
+	case GLS_ATEST_GE_80:	*test = RT_ALPHA_GE_80;	break;
+	case GLS_ATEST_GE_C0:	*test = RT_ALPHA_GE_C0;	break;
+	default:
+		return RT_NONE;
+	}
+	// (the alpha comes from the stage's texture, as it is laid on the surface)
+	const textureBundle_t *bundle = &stage->bundle[0];
+	if ( !bundle->image || bundle->isLightmap || bundle->tcGen != TCGEN_TEXTURE || bundle->isVideoMap )
+	{
+		return RT_NONE;
+	}
+	scale[0] = scale[1] = 1.0f;
+	for ( int i = 0; i < bundle->numTexMods; i++ )
+	{
+		if ( bundle->texMods[i].type != TMOD_SCALE )
+		{
+			return RT_NONE;	// (moving texture coordinates)
+		}
+		scale[0] *= bundle->texMods[i].translate[0];	// (where tcMod scale keeps them)
+		scale[1] *= bundle->texMods[i].translate[1];
+	}
+	return RT_ALPHA_TESTED;
 }
 
 typedef struct {
@@ -390,6 +433,10 @@ typedef struct {
 	vkRtStructure_t	blas;			// (no handle: nothing in it blocks light)
 	vkRtBuffer_t	input;			// its vertices and indexes, kept while it may still be being built
 	int				triangles;
+	vkRtStructure_t	alphaBlas;		// the alpha tested triangles, not opaque
+	vkRtBuffer_t	alphaInput;
+	int				alphaTriangles;
+	int				alphaFirst;		// where their texture coordinates are in rtAlpha.triangles (the instance's custom index)
 } rtModel_t;
 
 static struct {
@@ -411,6 +458,55 @@ static struct {
 #define RT_MASK_BMODEL		0x02
 #define RT_MASK_CHARACTERS	0x04
 
+/*
+The alpha tested surfaces: the alpha of each texture is in a tile of an atlas, and for each triangle its texture
+coordinates and its material (which tile, which test) are in a storage buffer, as rt_alpha.glsl reads them. Made with
+all the level's brush models the first time a frame of the level needs them (VK_RT_PrepareLevel).
+*/
+#define RT_ALPHA_TILE		128
+#define RT_ALPHA_ATLAS		2048
+#define RT_ALPHA_MATERIALS	( ( RT_ALPHA_ATLAS / RT_ALPHA_TILE ) * ( RT_ALPHA_ATLAS / RT_ALPHA_TILE ) )	// (256, as in rt_alpha.glsl)
+#define RT_ALPHA_ATLAS_ID	0x7ffe0010u
+
+typedef struct {
+	float		uv01[4];
+	float		uv2[2];
+	uint32_t	material, pad;
+} rtAlphaTriangle_t;
+
+typedef struct {
+	float		rect[4];		// the tile in the atlas: corner, size
+	uint32_t	test[4];		// RT_ALPHA_*
+} rtAlphaMaterial_t;
+
+static struct {
+	std::vector<const image_t *>		images;			// the materials: the texture, the test
+	std::vector<int>					tests;
+	std::vector<rtAlphaTriangle_t>		triangles;
+	bool								collecting;		// the level's models are being made: alpha tested surfaces go in
+	bool								ready;			// the atlas and the buffer are those of the level
+	vkRtBuffer_t						data;			// the materials (RT_ALPHA_MATERIALS), then the triangles
+	bool								atlasMade;
+} rtAlpha;
+
+static uint32_t VK_RT_AlphaMaterial( const image_t *image, int test )
+{
+	for ( size_t i = 0; i < rtAlpha.images.size(); i++ )
+	{
+		if ( rtAlpha.images[i] == image && rtAlpha.tests[i] == test )
+		{
+			return (uint32_t)i;
+		}
+	}
+	if ( rtAlpha.images.size() >= RT_ALPHA_MATERIALS )
+	{
+		return 0xFFFFFFFFu;
+	}
+	rtAlpha.images.push_back( image );
+	rtAlpha.tests.push_back( test );
+	return (uint32_t)( rtAlpha.images.size() - 1 );
+}
+
 static void VK_RT_AddTriangle( std::vector<float> &xyz, std::vector<uint32_t> &indexes, const float *a, const float *b, const float *c )
 {
 	const uint32_t first = (uint32_t)( xyz.size() / 3 );
@@ -422,16 +518,48 @@ static void VK_RT_AddTriangle( std::vector<float> &xyz, std::vector<uint32_t> &i
 	indexes.push_back( first + 2 );
 }
 
-// the triangles of the surfaces of bmodel that block light, in its own space
-static void VK_RT_Collect( const bmodel_t *bmodel, std::vector<float> &xyz, std::vector<uint32_t> &indexes )
+// where the triangles of a surface go: the solid ones, or the alpha tested ones (with their texture coordinates)
+typedef struct {
+	std::vector<float>		xyz;
+	std::vector<uint32_t>	indexes;
+} rtGeometry_t;
+
+static void VK_RT_AddTriangleUV( rtGeometry_t *geometry, uint32_t material, const float *scale, const float *a, const float *b,
+	const float *c, const float *sa, const float *sb, const float *sc )
+{
+	VK_RT_AddTriangle( geometry->xyz, geometry->indexes, a, b, c );
+	if ( material != 0xFFFFFFFFu )
+	{
+		rtAlphaTriangle_t t = { { sa[0] * scale[0], sa[1] * scale[1], sb[0] * scale[0], sb[1] * scale[1] },
+			{ sc[0] * scale[0], sc[1] * scale[1] }, material, 0 };
+		rtAlpha.triangles.push_back( t );
+	}
+}
+
+// the triangles of the surfaces of bmodel that block light, in its own space: solid, and alpha tested (while the level's
+// models are made, VK_RT_PrepareLevel; otherwise they are left out)
+static void VK_RT_Collect( const bmodel_t *bmodel, rtGeometry_t *solid, rtGeometry_t *alpha )
 {
 	for ( int s = 0; s < bmodel->numSurfaces; s++ )
 	{
 		const msurface_t *surf = bmodel->firstSurface + s;
-		if ( !VK_RT_Blocks( surf->shader ) || !surf->data )
+		int test = 0;
+		float scale[2] = { 1.0f, 1.0f };
+		const int blocks = surf->data ? VK_RT_Blocks( surf->shader, &test, scale ) : RT_NONE;
+		if ( blocks == RT_NONE || ( blocks == RT_ALPHA_TESTED && !rtAlpha.collecting ) )
 		{
 			continue;
 		}
+		uint32_t material = 0xFFFFFFFFu;
+		if ( blocks == RT_ALPHA_TESTED )
+		{
+			material = VK_RT_AlphaMaterial( surf->shader->stages[0].bundle[0].image, test );
+			if ( material == 0xFFFFFFFFu )
+			{
+				continue;	// (no tile left in the atlas)
+			}
+		}
+		rtGeometry_t *to = ( blocks == RT_ALPHA_TESTED ) ? alpha : solid;
 		switch ( *surf->data )
 		{
 		case SF_FACE:
@@ -440,7 +568,8 @@ static void VK_RT_Collect( const bmodel_t *bmodel, std::vector<float> &xyz, std:
 			const int *idx = (const int *)( (const byte *)face + face->ofsIndices );
 			for ( int i = 0; i + 2 < face->numIndices; i += 3 )
 			{
-				VK_RT_AddTriangle( xyz, indexes, face->points[idx[i]], face->points[idx[i + 1]], face->points[idx[i + 2]] );
+				const float *a = face->points[idx[i]], *b = face->points[idx[i + 1]], *c = face->points[idx[i + 2]];
+				VK_RT_AddTriangleUV( to, material, scale, a, b, c, a + 3, b + 3, c + 3 );
 			}
 			break;
 		}
@@ -449,8 +578,8 @@ static void VK_RT_Collect( const bmodel_t *bmodel, std::vector<float> &xyz, std:
 			const srfTriangles_t *tris = (const srfTriangles_t *)surf->data;
 			for ( int i = 0; i + 2 < tris->numIndexes; i += 3 )
 			{
-				VK_RT_AddTriangle( xyz, indexes, tris->verts[tris->indexes[i]].xyz, tris->verts[tris->indexes[i + 1]].xyz,
-					tris->verts[tris->indexes[i + 2]].xyz );
+				const drawVert_t *a = &tris->verts[tris->indexes[i]], *b = &tris->verts[tris->indexes[i + 1]], *c = &tris->verts[tris->indexes[i + 2]];
+				VK_RT_AddTriangleUV( to, material, scale, a->xyz, b->xyz, c->xyz, a->st, b->st, c->st );
 			}
 			break;
 		}
@@ -461,10 +590,10 @@ static void VK_RT_Collect( const bmodel_t *bmodel, std::vector<float> &xyz, std:
 			{
 				for ( int x = 0; x + 1 < grid->width; x++ )
 				{
-					const float *a = grid->verts[y * grid->width + x].xyz, *b = grid->verts[y * grid->width + x + 1].xyz;
-					const float *c = grid->verts[( y + 1 ) * grid->width + x].xyz, *d = grid->verts[( y + 1 ) * grid->width + x + 1].xyz;
-					VK_RT_AddTriangle( xyz, indexes, a, c, b );
-					VK_RT_AddTriangle( xyz, indexes, b, c, d );
+					const drawVert_t *a = &grid->verts[y * grid->width + x], *b = &grid->verts[y * grid->width + x + 1];
+					const drawVert_t *c = &grid->verts[( y + 1 ) * grid->width + x], *d = &grid->verts[( y + 1 ) * grid->width + x + 1];
+					VK_RT_AddTriangleUV( to, material, scale, a->xyz, c->xyz, b->xyz, a->st, c->st, b->st );
+					VK_RT_AddTriangleUV( to, material, scale, b->xyz, c->xyz, d->xyz, b->st, c->st, d->st );
 				}
 			}
 			break;
@@ -475,7 +604,34 @@ static void VK_RT_Collect( const bmodel_t *bmodel, std::vector<float> &xyz, std:
 	}
 }
 
-// the model of bmodel, its bottom level structure recorded into cmd if it is new (NULL: there is no room)
+// a bottom level structure of geometry into structure (input: where its vertices and indexes are kept)
+static int VK_RT_BuildGeometry( VkCommandBuffer cmd, const rtGeometry_t *geometry, vkRtStructure_t *structure, vkRtBuffer_t *input,
+	bool opaque )
+{
+	const int triangles = (int)( geometry->indexes.size() / 3 );
+	if ( !triangles )
+	{
+		return 0;
+	}
+	const VkDeviceSize vertexBytes = ( geometry->xyz.size() * sizeof( float ) + 15 ) & ~(VkDeviceSize)15;
+	const VkDeviceSize bytes = vertexBytes + geometry->indexes.size() * sizeof( uint32_t );
+	if ( !VK_RT_NewBuffer( input, bytes, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
+	{
+		return 0;
+	}
+	memcpy( input->mapped, geometry->xyz.data(), geometry->xyz.size() * sizeof( float ) );
+	memcpy( (byte *)input->mapped + vertexBytes, geometry->indexes.data(), geometry->indexes.size() * sizeof( uint32_t ) );
+	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );	// (the scratch may be in use)
+	if ( !VK_RT_BuildTriangles( cmd, structure, &rtScene.scratch, input->address, (uint32_t)( geometry->xyz.size() / 3 ),
+			input->address + vertexBytes, (uint32_t)triangles, false, opaque ) )
+	{
+		VK_RT_FreeStructure( structure );
+		return 0;
+	}
+	return triangles;
+}
+
+// the model of bmodel, its bottom level structures recorded into cmd if it is new
 static const rtModel_t *VK_RT_Model( VkCommandBuffer cmd, const bmodel_t *bmodel )
 {
 	for ( size_t i = 0; i < rtScene.models.size(); i++ )
@@ -488,28 +644,151 @@ static const rtModel_t *VK_RT_Model( VkCommandBuffer cmd, const bmodel_t *bmodel
 
 	rtModel_t model = {};
 	model.bmodel = bmodel;
-	std::vector<float> xyz;
-	std::vector<uint32_t> indexes;
-	VK_RT_Collect( bmodel, xyz, indexes );
-	model.triangles = (int)( indexes.size() / 3 );
-	if ( model.triangles )
-	{
-		const VkDeviceSize vertexBytes = ( xyz.size() * sizeof( float ) + 15 ) & ~(VkDeviceSize)15;
-		const VkDeviceSize bytes = vertexBytes + indexes.size() * sizeof( uint32_t );
-		if ( VK_RT_NewBuffer( &model.input, bytes, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
-		{
-			memcpy( model.input.mapped, xyz.data(), xyz.size() * sizeof( float ) );
-			memcpy( (byte *)model.input.mapped + vertexBytes, indexes.data(), indexes.size() * sizeof( uint32_t ) );
-			VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );	// (the scratch may be in use)
-			if ( !VK_RT_BuildTriangles( cmd, &model.blas, &rtScene.scratch, model.input.address, (uint32_t)( xyz.size() / 3 ),
-					model.input.address + vertexBytes, (uint32_t)model.triangles, false ) )
-			{
-				VK_RT_FreeStructure( &model.blas );
-			}
-		}
-	}
+	model.alphaFirst = (int)rtAlpha.triangles.size();
+	rtGeometry_t solid, alpha;
+	VK_RT_Collect( bmodel, &solid, &alpha );
+	model.triangles = VK_RT_BuildGeometry( cmd, &solid, &model.blas, &model.input, true );
+	model.alphaTriangles = VK_RT_BuildGeometry( cmd, &alpha, &model.alphaBlas, &model.alphaInput, false );
 	rtScene.models.push_back( model );
 	return &rtScene.models.back();
+}
+
+// the alpha of material i's texture, made small into its tile of atlas (RGBA, the alpha in every channel)
+static void VK_RT_AlphaTile( byte *atlas, int i )
+{
+	const int tilesAcross = RT_ALPHA_ATLAS / RT_ALPHA_TILE;
+	const int x0 = ( i % tilesAcross ) * RT_ALPHA_TILE, y0 = ( i / tilesAcross ) * RT_ALPHA_TILE;
+	byte *pic = NULL;
+	int width = 0, height = 0;
+
+	R_LoadImage( rtAlpha.images[i]->imgName, &pic, &width, &height );
+	for ( int y = 0; y < RT_ALPHA_TILE; y++ )
+	{
+		for ( int x = 0; x < RT_ALPHA_TILE; x++ )
+		{
+			int alpha = 255;	// (no picture: solid)
+			if ( pic && width > 0 && height > 0 )
+			{
+				// the average of the texels the atlas texel covers
+				const int sx0 = x * width / RT_ALPHA_TILE, sx1 = Q_max( ( x + 1 ) * width / RT_ALPHA_TILE, sx0 + 1 );
+				const int sy0 = y * height / RT_ALPHA_TILE, sy1 = Q_max( ( y + 1 ) * height / RT_ALPHA_TILE, sy0 + 1 );
+				int sum = 0;
+				for ( int sy = sy0; sy < sy1; sy++ )
+				{
+					for ( int sx = sx0; sx < sx1; sx++ )
+					{
+						sum += pic[( sy * width + sx ) * 4 + 3];
+					}
+				}
+				alpha = sum / ( ( sy1 - sy0 ) * ( sx1 - sx0 ) );
+			}
+			byte *dst = atlas + ( ( y0 + y ) * RT_ALPHA_ATLAS + x0 + x ) * 4;
+			dst[0] = dst[1] = dst[2] = dst[3] = (byte)alpha;
+		}
+	}
+	if ( pic )
+	{
+		R_Free( pic );
+	}
+}
+
+// the atlas and the buffer of the alpha tested surfaces as they are now (the device is idle)
+static void VK_RT_UploadAlpha( void )
+{
+	const size_t materials = rtAlpha.images.size();
+	const VkDeviceSize bytes = RT_ALPHA_MATERIALS * sizeof( rtAlphaMaterial_t ) + Q_max( rtAlpha.triangles.size(), (size_t)1 ) * sizeof( rtAlphaTriangle_t );
+
+	VK_RT_FreeBuffer( &rtAlpha.data );
+	if ( !VK_RT_NewBuffer( &rtAlpha.data, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true ) )
+	{
+		return;
+	}
+	memset( rtAlpha.data.mapped, 0, (size_t)bytes );
+	rtAlphaMaterial_t *material = (rtAlphaMaterial_t *)rtAlpha.data.mapped;
+	const int tilesAcross = RT_ALPHA_ATLAS / RT_ALPHA_TILE;
+	for ( size_t i = 0; i < materials; i++ )
+	{
+		// (half a texel in from the edges, so that the filter does not reach the next tile)
+		material[i].rect[0] = ( ( i % tilesAcross ) * RT_ALPHA_TILE + 0.5f ) / RT_ALPHA_ATLAS;
+		material[i].rect[1] = ( ( i / tilesAcross ) * RT_ALPHA_TILE + 0.5f ) / RT_ALPHA_ATLAS;
+		material[i].rect[2] = material[i].rect[3] = ( RT_ALPHA_TILE - 1.0f ) / RT_ALPHA_ATLAS;
+		material[i].test[0] = (uint32_t)rtAlpha.tests[i];
+	}
+	if ( !rtAlpha.triangles.empty() )
+	{
+		memcpy( material + RT_ALPHA_MATERIALS, rtAlpha.triangles.data(), rtAlpha.triangles.size() * sizeof( rtAlphaTriangle_t ) );
+	}
+
+	if ( materials )
+	{
+		byte *atlas = (byte *)R_Malloc( RT_ALPHA_ATLAS * RT_ALPHA_ATLAS * 4, TAG_TEMP_WORKSPACE, qtrue );
+		for ( size_t i = 0; i < materials; i++ )
+		{
+			VK_RT_AlphaTile( atlas, (int)i );
+		}
+		VK_TexImage2D( RT_ALPHA_ATLAS_ID, 0, 4, RT_ALPHA_ATLAS, RT_ALPHA_ATLAS, GL_RGBA, GL_UNSIGNED_BYTE, atlas );
+		R_Free( atlas );
+	}
+	else
+	{
+		const byte white[4] = { 255, 255, 255, 255 };
+		VK_TexImage2D( RT_ALPHA_ATLAS_ID, 0, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, white );
+	}
+	VK_TexParameter( RT_ALPHA_ATLAS_ID, GL_TEXTURE_MIN_FILTER, (GLfloat)GL_LINEAR );
+	VK_TexParameter( RT_ALPHA_ATLAS_ID, GL_TEXTURE_MAG_FILTER, (GLfloat)GL_LINEAR );
+	VK_TexParameter( RT_ALPHA_ATLAS_ID, GL_TEXTURE_WRAP_S, (GLfloat)GL_CLAMP_TO_EDGE );
+	VK_TexParameter( RT_ALPHA_ATLAS_ID, GL_TEXTURE_WRAP_T, (GLfloat)GL_CLAMP_TO_EDGE );
+	VK_FlushUploads( true );
+	rtAlpha.atlasMade = true;
+}
+
+/*
+=================
+VK_RT_AlphaInputs
+
+What the shaders with ray queries read for the alpha test (rt_alpha.glsl): the atlas and the buffer. There always are
+some (empty ones before a level).
+=================
+*/
+void VK_RT_AlphaInputs( VkImageView *atlas, VkSampler *sampler, VkBuffer *data )
+{
+	if ( !rtAlpha.atlasMade || !rtAlpha.data.buffer )
+	{
+		VK_RT_UploadAlpha();
+	}
+	const vkTexture_t *texture = VK_TextureForId( RT_ALPHA_ATLAS_ID, false );
+	*atlas = texture->view;
+	*sampler = VK_SamplerFor( texture );
+	*data = rtAlpha.data.buffer;
+}
+
+// all the brush models of the level with their alpha tested surfaces, then the atlas and the buffer for them
+static void VK_RT_PrepareLevel( VkCommandBuffer cmd )
+{
+	const double start = VK_Now();
+	rtAlpha.images.clear();
+	rtAlpha.tests.clear();
+	rtAlpha.triangles.clear();
+	rtAlpha.collecting = true;
+	int solid = 0, alpha = 0;
+	for ( int i = 0; i < tr.numModels; i++ )
+	{
+		const model_t *model = tr.models[i];
+		if ( model && model->type == MOD_BRUSH && model->bmodel && !model->bspInstance )
+		{
+			const rtModel_t *rt = VK_RT_Model( cmd, model->bmodel );
+			solid += rt->triangles;
+			alpha += rt->alphaTriangles;
+		}
+	}
+	rtAlpha.collecting = false;
+
+	// (the shaders of the frames before may still read the old buffer and atlas)
+	VK_SubmitFrame( true );
+	VK_RT_UploadAlpha();
+	rtAlpha.ready = true;
+	ri.Printf( PRINT_DEVELOPER, "ray tracing: %d models, %d triangles that block light, %d of them alpha tested (%d textures), made in %.1f ms\n",
+		(int)rtScene.models.size(), solid + alpha, alpha, (int)rtAlpha.images.size(), VK_Now() - start );
 }
 
 static void VK_RT_FreeScene( void )
@@ -518,8 +797,11 @@ static void VK_RT_FreeScene( void )
 	{
 		VK_RT_FreeStructure( &rtScene.models[i].blas );
 		VK_RT_FreeBuffer( &rtScene.models[i].input );
+		VK_RT_FreeStructure( &rtScene.models[i].alphaBlas );
+		VK_RT_FreeBuffer( &rtScene.models[i].alphaInput );
 	}
 	rtScene.models.clear();
+	rtAlpha.ready = false;	// (the atlas and the buffer stay until the next level's replace them)
 	VK_RT_FreeBuffer( &rtScene.scratch );
 	for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
 	{
@@ -553,8 +835,8 @@ void VK_RT_NewLevel( void )
 	VK_RT_FreeScene();
 }
 
-static void VK_RT_Place( VkAccelerationStructureInstanceKHR *instance, const rtModel_t *model, const float axis[3][3],
-	const float *origin, uint32_t mask )
+static void VK_RT_Place( VkAccelerationStructureInstanceKHR *instance, const vkRtStructure_t *blas, uint32_t customIndex,
+	const float axis[3][3], const float *origin, uint32_t mask )
 {
 	memset( instance, 0, sizeof( *instance ) );
 	for ( int r = 0; r < 3; r++ )
@@ -565,9 +847,10 @@ static void VK_RT_Place( VkAccelerationStructureInstanceKHR *instance, const rtM
 		}
 		instance->transform.matrix[r][3] = origin ? origin[r] : 0.0f;
 	}
+	instance->instanceCustomIndex = customIndex;
 	instance->mask = mask;
 	instance->flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-	instance->accelerationStructureReference = model->blas.address;
+	instance->accelerationStructureReference = blas->address;
 }
 
 /*
@@ -608,6 +891,11 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 		return VK_NULL_HANDLE;
 	}
 
+	if ( !rtAlpha.ready )
+	{
+		VK_RT_PrepareLevel( vk.cmd );	// (sends what was recorded: vk.cmd is another one after it)
+	}
+
 	const double start = VK_Now();
 	const size_t modelsBefore = rtScene.models.size();
 	VkCommandBuffer cmd = vk.cmd;
@@ -617,9 +905,13 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 	const rtModel_t *world = VK_RT_Model( cmd, &tr.world->bmodels[0] );
 	if ( world->blas.handle )
 	{
-		VK_RT_Place( &instances[count++], world, NULL, NULL, RT_MASK_WORLD );
+		VK_RT_Place( &instances[count++], &world->blas, 0, NULL, NULL, RT_MASK_WORLD );
 	}
-	for ( int i = 0; i < backEnd.refdef.num_entities && count < RT_MAX_INSTANCES; i++ )
+	if ( world->alphaBlas.handle )
+	{
+		VK_RT_Place( &instances[count++], &world->alphaBlas, (uint32_t)world->alphaFirst, NULL, NULL, RT_MASK_WORLD );
+	}
+	for ( int i = 0; i < backEnd.refdef.num_entities && count + 1 < RT_MAX_INSTANCES; i++ )
 	{
 		const trRefEntity_t *ent = &backEnd.refdef.entities[i];
 		if ( ent->e.reType != RT_MODEL || ( ent->e.renderfx & RF_DEPTHHACK ) )
@@ -634,7 +926,11 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 		const rtModel_t *rt = VK_RT_Model( cmd, model->bmodel );
 		if ( rt->blas.handle )
 		{
-			VK_RT_Place( &instances[count++], rt, ent->e.axis, ent->e.origin, RT_MASK_BMODEL );
+			VK_RT_Place( &instances[count++], &rt->blas, 0, ent->e.axis, ent->e.origin, RT_MASK_BMODEL );
+		}
+		if ( rt->alphaBlas.handle )
+		{
+			VK_RT_Place( &instances[count++], &rt->alphaBlas, (uint32_t)rt->alphaFirst, ent->e.axis, ent->e.origin, RT_MASK_BMODEL );
 		}
 	}
 	if ( !count )
@@ -702,16 +998,14 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, NULL, 0, NULL );
 	if ( !VK_RT_BuildTriangles( cmd, &frame.characters, &frame.charactersScratch, frame.charactersInput.address, (uint32_t)numPoints,
-			frame.charactersInput.address + vertexBytes, (uint32_t)numTriangles, true ) )
+			frame.charactersInput.address + vertexBytes, (uint32_t)numTriangles, true, true ) )
 	{
 		return VK_NULL_HANDLE;
 	}
 
 	// the instance, after the indexes
 	const VkDeviceSize instanceOffset = ( bytes + 15 ) & ~(VkDeviceSize)15;
-	rtModel_t characters = {};
-	characters.blas = frame.characters;
-	VK_RT_Place( (VkAccelerationStructureInstanceKHR *)( (byte *)frame.charactersInput.mapped + instanceOffset ), &characters,
+	VK_RT_Place( (VkAccelerationStructureInstanceKHR *)( (byte *)frame.charactersInput.mapped + instanceOffset ), &frame.characters, 0,
 		NULL, NULL, RT_MASK_CHARACTERS );	// (in world space already)
 	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );
 	if ( !VK_RT_BuildInstances( cmd, &frame.charactersTop, &frame.charactersTopScratch, frame.charactersInput.address + instanceOffset, 1 ) )
@@ -759,7 +1053,7 @@ static bool VK_RT_SelfTest( void )
 		begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		VK_CheckResult( vkBeginCommandBuffer( cmd, &begin ), "vkBeginCommandBuffer" );
 
-		ok = VK_RT_BuildTriangles( cmd, &blas, &scratch, input.address, 3, input.address + 48, 1, false );
+		ok = VK_RT_BuildTriangles( cmd, &blas, &scratch, input.address, 3, input.address + 48, 1, false, true );
 		if ( ok )
 		{
 			VkAccelerationStructureInstanceKHR instance = {};
@@ -845,4 +1139,6 @@ void VK_RT_Init( void )
 void VK_RT_Shutdown( void )
 {
 	VK_RT_FreeScene();	// (the device is idle)
+	VK_RT_FreeBuffer( &rtAlpha.data );
+	rtAlpha.atlasMade = false;	// (the atlas is a texture, it goes with the others)
 }

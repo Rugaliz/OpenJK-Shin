@@ -23,6 +23,10 @@ layout(push_constant) uniform Constants
 layout(set = 0, binding = 0) uniform sampler2D uDiffuse;
 #ifdef RAY_QUERY
 layout(set = 1, binding = 0) uniform accelerationStructureEXT uScene;
+#define RT_ALPHA_SET 1
+#define RT_ALPHA_ATLAS 1
+#define RT_ALPHA_DATA 2
+#include "rt_alpha.glsl"
 #endif
 
 layout(location = 0) in vec3 vPos;
@@ -73,9 +77,9 @@ void main()
 		if (dot(n, d) < 0.0) n = -n;
 		if (dist > 16.0) {
 			rayQueryEXT query;
-			rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0x03,
+			rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x03,
 				wPos + n * 1.0, 0.5, d / dist, dist - 12.0);
-			while (rayQueryProceedEXT(query)) {}
+			RT_PROCEED(query)
 			if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) light = vec3(0.0);
 		}
 	}
