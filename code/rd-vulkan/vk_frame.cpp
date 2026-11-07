@@ -73,11 +73,16 @@ static void VK_BeginCommandBuffer( void )
 	{
 		ri.Error( ERR_FATAL, "Vulkan: too many command buffers in a frame" );
 	}
-	VkCommandBufferAllocateInfo allocate = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-	allocate.commandPool = frame->pool;
-	allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	allocate.commandBufferCount = 1;
-	VK_CheckResult( vkAllocateCommandBuffers( vk.device, &allocate, &vk.frameCommandBuffers[vk.frameIndex][count] ), "vkAllocateCommandBuffers" );
+	// Made once and used again each time the pool is reset (a reset keeps them): one made every time was never given
+	// back, and the driver's memory for each grew by megabytes a second until the system ran out
+	if ( !vk.frameCommandBuffers[vk.frameIndex][count] )
+	{
+		VkCommandBufferAllocateInfo allocate = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+		allocate.commandPool = frame->pool;
+		allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocate.commandBufferCount = 1;
+		VK_CheckResult( vkAllocateCommandBuffers( vk.device, &allocate, &vk.frameCommandBuffers[vk.frameIndex][count] ), "vkAllocateCommandBuffers" );
+	}
 	vk.cmd = vk.frameCommandBuffers[vk.frameIndex][count++];
 
 	VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };

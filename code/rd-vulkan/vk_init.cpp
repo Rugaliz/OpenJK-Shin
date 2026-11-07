@@ -808,7 +808,10 @@ void VK_CreateSwapchain( void )
 	VK_CheckResult( vkCreateSwapchainKHR( vk.device, &info, NULL, &swapchain ), "vkCreateSwapchainKHR" );
 	if ( vk.swapchain )
 	{
+		// (the old one is only retired by the new one: it has to be destroyed too, or its images stay, every time
+		// the window changes or a level starts and ends loading)
 		VK_DestroySwapchain();
+		vkDestroySwapchainKHR( vk.device, vk.swapchain, NULL );
 	}
 	vk.swapchain = swapchain;
 	vk.swapchainFormat = chosen.format;
@@ -825,7 +828,7 @@ void VK_CreateSwapchain( void )
 	vk.swapchainDirty = false;
 }
 
-// destroys the semaphores of the images and the swapchain itself (the new one, if there is one, is made already)
+// destroys the semaphores of the images, once the device is idle (the swapchain itself is destroyed by the caller)
 void VK_DestroySwapchain( void )
 {
 	vkDeviceWaitIdle( vk.device );

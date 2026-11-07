@@ -87,8 +87,8 @@ typedef struct vk_s {
 	bool						waitedForImage;		// the first submit of the frame waits for the acquired image
 	uint32_t					imageIndex;
 	VkCommandBuffer				cmd;				// current command buffer of the frame
-	VkCommandBuffer				frameCommandBuffers[VK_FRAMES_IN_FLIGHT][16];
-	int							frameCommandBufferCount[VK_FRAMES_IN_FLIGHT];
+	VkCommandBuffer				frameCommandBuffers[VK_FRAMES_IN_FLIGHT][16];	// of the frame's pool, made when first needed
+	int							frameCommandBufferCount[VK_FRAMES_IN_FLIGHT];	// in use this frame
 
 	// what the GL state machine of the layer says is wanted
 	float						clearColor[4];
