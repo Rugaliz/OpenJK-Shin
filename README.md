@@ -336,7 +336,7 @@ with its source code under the same license.
 
 ## Credits
 
-OpenJK Shin is made by [Ricardo Fernandes](https://github.com/Rugaliz).
+OpenJK Shin is made by [Rugaliz](https://github.com/Rugaliz).
 
 It builds on the work of the [OpenJK](https://github.com/JACoders/OpenJK) project, whose community took the released
 source and made it work on modern systems. Its [support channels](https://discord.gg/dPNCfeQ) and
