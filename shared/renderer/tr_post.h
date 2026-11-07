@@ -1209,6 +1209,10 @@ qboolean R_RayTracedShadows_Available( void ) {
 	return qfalse;
 }
 
+int R_RayTracing( void ) {
+	return 0;
+}
+
 qboolean R_DlightShadows( void ) {
 	return qfalse;
 }

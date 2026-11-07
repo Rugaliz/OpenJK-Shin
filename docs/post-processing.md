@@ -9,7 +9,7 @@ nothing else changes. All of it is off by default, nothing changes unless you tu
 console (the key left of 1, or Shift+Esc) or put in your config file, and they are saved.
 
 You do not need the console: **Setup > More Video** has a row for each of them (Ambient Occlusion, Bloom, SMAA Edge
-Smoothing, Shader Dynamic Lights, Light Shafts, Eye Adaptation, Sharpening), which take effect at once. A row only shows up if what it needs is there
+Smoothing, Shader Dynamic Lights, Light Shafts, Eye Adaptation), which take effect at once. A row only shows up if what it needs is there
 (SMAA needs OpenGL 3.3, the rest OpenGL 2.0). To make room, the rows of that page are a little closer together than
 before, and in Jedi Academy the panel is taller. Jedi Academy multiplayer has the rows on the More Video page of Setup
 both in the main menu (where the slider for the brightness moves up a little to make room) and in the game menu. Jedi
@@ -34,7 +34,7 @@ out of the occlusion. Needs OpenGL 2.0 and framebuffer objects (every graphics c
 | `r_bloomThreshold` | 0.8 | How bright (0 to 1) a pixel has to be to glow. Lower makes more of the picture glow. |
 | `r_bloomIntensity` | 0.5 | How strong the glow is. |
 | `r_smaa` | 0 | **SMAA**, a high quality edge smoothing that works on what the multisampling (the Anti-Aliasing setting) leaves behind, like the edges that textures and shaders make. Unlike FXAA it only touches the edges it finds, so textures stay as sharp as they are. Needs OpenGL 3.3. Use it with or without multisampling. |
-| `r_sharpen` | 0 | **Sharpening** (contrast adaptive sharpening, the method of AMD's FidelityFX CAS), 0 (off) to 1 (strongest). Brings out the detail of the textures, especially with SMAA or multisampling, without halos: each pixel is sharpened by as much as the pixels around it leave room for before they would clip, so flat and busy areas get the most and edges that are already sharp the least. Setup > More Video > Sharpening: Off, Low (0.3), Medium (0.6), High (1). |
+| `r_sharpen` | 0 | **Sharpening** (contrast adaptive sharpening, the method of AMD's FidelityFX CAS), 0 (off) to 1 (strongest). Brings out the detail of the textures, especially with SMAA or multisampling, without halos: each pixel is sharpened by as much as the pixels around it leave room for before they would clip, so flat and busy areas get the most and edges that are already sharp the least. Console only: nothing in the picture is softened by the renderer (no temporal anti-aliasing or upscaling), so it has no row in the menus. |
 | `r_lightShafts` | 0 | **Light shafts**: rays of sunlight, on levels whose sky gives a sun. The sky near the sun is blurred along lines towards the sun (the scattering of light as a post process of Mitchell, GPU Gems 3, chapter 13), so where something stands in front of the sky the rays have gaps: they come through windows and gratings, between pillars and around the edges of roofs, and the sun gets a soft glow. Only the brighter parts of the sky give rays; they fade out as the sun leaves the view. 1 is the normal strength, up to 2. Done at a quarter of the size of the view, about the cost of bloom. Setup > More Video > Light Shafts: Off, On. |
 | `r_eyeAdaptation` | 0 | **Eye adaptation**: dark places brighten as your eyes get used to them, over a second or two, and very bright ones dim a little; coming out into the light the view adjusts faster than going into the dark. The games draw in the 0 to 1 range of the screen, so there is no wider range to choose an exposure from as HDR rendering would: the average brightness of the view (the mean of its logarithm) is measured on the graphics card, read back a few frames later without waiting for it, and the exposure follows it, from 0.8 to 1.8, applied with a curve that keeps black black and white white (`1 - (1 - colour) ^ exposure`), so nothing clips. Normally lit scenes stay close to the original look. The HUD and menus are not affected. 1 is the normal strength, up to 2. Setup > More Video > Eye Adaptation: Off, On. |
 | `r_postDebug` | 0 | For testing: 1 runs the effects' plumbing with nothing in it (the picture must not change), 2 shows the occlusion alone. |
@@ -59,7 +59,7 @@ the same (within 1%). It costs three texture reads a lit pixel instead of one.
 
 ### Lightsabers and blaster bolts, as in the films
 
-With the shader dynamic lights (and with Ray Traced shadows, which use them), a lightsaber is a light along its whole
+With the shader dynamic lights (and with Ray Tracing, which uses them), a lightsaber is a light along its whole
 blade, not a point at its middle: what it lights is lit from the nearest point of the blade, so a blade held along a
 wall throws a streak of light down the wall, and its glow reaches about 2.5 times the blade's length (1.8 times the
 radius the game gives it, `DLIGHT_LINE_REACH`) and is a quarter brighter (`DLIGHT_LINE_BRIGHTNESS`). Blaster bolts

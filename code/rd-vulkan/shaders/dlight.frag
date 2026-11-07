@@ -2,7 +2,7 @@
 
 // Built twice (shaders/build.py): as it is, and with RAY_QUERY as dlight_rt.frag for graphics cards with ray tracing,
 // where a ray from the pixel to the light through the level's ray tracing structure (vk_rt.cpp) can keep the light off
-// what is behind a wall (the shadows of dynamic lights, cg_shadows 5).
+// what is behind a wall (the shadows of dynamic lights, r_rayTracing).
 #ifdef RAY_QUERY
 #extension GL_EXT_ray_query : require
 #endif
@@ -16,7 +16,7 @@ layout(push_constant) uniform Constants
 	vec4 lightHalf;		// xyz: a light along a line, from light.xyz to an end (0 for a light at a point)
 #ifdef RAY_QUERY
 	vec4 toWorld0, toWorld1, toWorld2;	// from the space of the surface to the world (vkDlightShadow_t)
-	vec4 shadow;						// x: 1 for the rays
+	vec4 shadow;						// x: 1 for the rays, y: the quality (2 High: more rays)
 #endif
 } pc;
 
@@ -87,7 +87,7 @@ void main()
 	}
 #ifdef RAY_QUERY
 	// rays from the pixel to the light, in the world, against the level, its brush models and the characters (as they
-	// were the frame before, mask 0x04): one to a light at a point, up to four spread along a light along a line (the
+	// were the frame before, mask 0x04): one to a light at a point, several spread along a light along a line (the
 	// soft shadows a long light makes). They stop short of the light, so that what it sits on (an explosion on a wall,
 	// the hand on a saber's hilt) does not hide it; from a character (shadow.x 2) they start further out, so that the
 	// frame before's copy of it does not shadow it where it has moved since.
@@ -113,15 +113,22 @@ void main()
 		vec3 n = dot(wN, wN) > 1e-12 ? normalize(wN) : vec3(0.0);
 		float seen;
 		if (dot(wHalf, wHalf) > 1e-6) {
-			// a line: four points spread along it, moved by a different amount at every pixel. The first two are half
-			// the line apart; only where they disagree (the edge of a shadow) are the two between them traced too, as
-			// elsewhere the whole line is seen, or hidden, from the pixel: half the rays for most of what is lit
+			// a line: points spread along it (four, eight at High), moved by a different amount at every pixel. Every
+			// other one goes first, over the whole line; only where they disagree (the edge of a shadow) are the ones
+			// between them traced too, as elsewhere the whole line is seen, or hidden, from the pixel: half the rays
+			// for most of what is lit
+			const int count = pc.shadow.y > 1.5 ? 8 : 4;
 			float turn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-			vec3 start = wLight - wHalf, step = wHalf * 0.5;
-			float a = seenFrom(wPos, n, start + step * turn, tMin);
-			float b = seenFrom(wPos, n, start + step * (2.0 + turn), tMin);
-			seen = a == b ? a :
-				0.25 * (a + b + seenFrom(wPos, n, start + step * (1.0 + turn), tMin) + seenFrom(wPos, n, start + step * (3.0 + turn), tMin));
+			vec3 start = wLight - wHalf, step = wHalf * (2.0 / float(count));
+			float first = 0.0;
+			for (int i = 0; i < count; i += 2) first += seenFrom(wPos, n, start + step * (float(i) + turn), tMin);
+			if (first == 0.0 || first == float(count / 2)) {
+				seen = first / float(count / 2);
+			} else {
+				seen = first;
+				for (int i = 1; i < count; i += 2) seen += seenFrom(wPos, n, start + step * (float(i) + turn), tMin);
+				seen /= float(count);
+			}
 		} else {
 			seen = seenFrom(wPos, n, wLight, tMin);
 		}

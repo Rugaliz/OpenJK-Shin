@@ -76,36 +76,47 @@ shared by all the renderers (`shared/renderer/tr_shadow_volumes.h` for the maps,
 Cost: in Jedi Academy multiplayer at 1280 x 720 with five characters in view, about 0.9 ms a frame (0.4 ms of it on
 the CPU), against 1.2 ms for the stencil shadows.
 
-## Ray traced shadows (`cg_shadows 5`)
+## Ray traced shadows (`r_rayTracing`)
 
-Setup > More Video > Shadows > Ray Traced, in single player with the Vulkan renderer on a graphics card with ray
-tracing (`r_rtAvail` 1, see [the Vulkan renderer](vulkan-renderer.md#ray-tracing-for-shadows-in-progress)). Elsewhere
-`cg_shadows 5` draws the soft shadows, and where those can't be drawn either, the stencil ones.
+Setup > More Video > Ray Tracing: Off, Medium (`r_rayTracing 1`) or High (`r_rayTracing 2`), in single player with the
+Vulkan renderer on a graphics card with ray tracing (`r_rtAvail` 1, see
+[the Vulkan renderer](vulkan-renderer.md#ray-tracing-for-shadows-in-progress)). It is a setting of its own, apart from
+Shadows: with it on, the shadows of the characters are ray traced whenever Shadows is Volumetric or Soft (with None or
+Simple there are none to trace), and the dynamic lights get shadows whatever Shadows is. (It used to be a choice of the
+Shadows row, `cg_shadows 5`; a settings file that has it is turned into Soft with Ray Tracing at Medium.)
 
 The characters are found as for the shadow maps (their light, the floor under them, how dark, the area their shadow can
 fall in), but instead of a 128 x 128 depth map each, all their triangles go into a ray tracing structure every frame,
-and from every pixel in a character's area four rays, spread around the direction of its light as wide as
+and from every pixel in a character's area rays, spread around the direction of its light as wide as
 `r_shadowSoftness` says, are traced against it. So the shadow is exact at any size and distance: fingers, the hilt of a
-saber, the gap between the legs, with no blocks or grain, soft at the edges. It is done at half the size of the view in
-one pass for all the characters, and blurred along the surfaces at full size (the blur of the ambient occlusion, which
-stops at edges in depth).
+saber, the gap between the legs, with no blocks, soft at the edges. It is done in one pass for all the characters, and
+blurred along the surfaces at full size (the blur of the ambient occlusion, which stops at edges in depth):
+
+* **Medium**: at half the size of the view (a quarter of the pixels), four rays a pixel.
+* **High**: at the full size of the view, four rays a pixel, and four more between them where the first four disagree
+  (the edge of a shadow: elsewhere the character is wholly in the way of the light, or wholly not). The edges are
+  smoother and finer, with less grain.
+
+At 3440 x 1440 with 8x multisampling on a Radeon RX 7800 XT, nine characters in view, a frame took 6.1 ms with the soft
+shadows (shadow maps), 5.0 ms with Medium and 6.1 ms with High; with one of them holding a lit saber, 6.3, 5.9 and
+8.0 ms. Medium is the cheaper of the two kinds of soft shadows on a card with ray tracing.
 
 Cost: with seven characters in view at 1280 x 720 on a Radeon RX 7800 XT, about 1.4 ms a frame (0.5 of it building the
 structure of 19,500 triangles), against 0.34 ms of graphics card time for the shadow maps (which draw their maps on the
 processor instead). The rays scale with the number of pixels in the characters' shadow areas.
 
-The light of sabers, blasters and explosions (the dynamic lights) gets shadows too with Ray Traced: before a lit pixel is
+The light of sabers, blasters and explosions (the dynamic lights) gets shadows too with Ray Tracing: before a lit pixel is
 lit, a ray goes from it to the light through the level and its doors and lifts, and where something is in between, the
 light stops there. So it no longer comes through walls and floors (a saber in the next room lit the floor on this side,
 an explosion above lit the room below), and pillars and crates keep it off what is behind them. The ray stops 12 units
 short of the light, so that the wall an explosion sits on is still lit by it, and the hand on a saber's hilt does not
-hide the blade. With Ray Traced, the dynamic lights are always drawn by the shader (as with `r_dlightGLSL` 1, or 2 if
+hide the blade. With Ray Tracing, the dynamic lights are always drawn by the shader (as with `r_dlightGLSL` 1, or 2 if
 that is set).
 
 A lightsaber or a blaster bolt is a light along a line (see [post-processing](post-processing.md)): rays go to points
-spread along it, so its shadows are soft, as a long light makes them. Two go first, half the line apart; only where they
-disagree, at the edge of a shadow, do two more go between them (elsewhere the whole line is seen, or hidden, from the
-pixel). At 3440x1440 with nine characters in view, one lit saber costs 1.0 ms a frame on a Radeon RX 7800 XT (it was
+spread along it, so its shadows are soft, as a long light makes them: four at Medium, eight at High. Every other one
+goes first, over the whole line; only where they disagree, at the edge of a shadow, do the ones between them go too
+(elsewhere the whole line is seen, or hidden, from the pixel). At 3440x1440 with nine characters in view, one lit saber costs 1.0 ms a frame on a Radeon RX 7800 XT (it was
 1.45 ms with four rays everywhere), a blaster firing about 0.2 ms. Characters block these lights too, the
 one holding the saber as well: a duel throws the fighters' shadows on the walls and the floor. The characters are
 known only after the dynamic lights are drawn, so these rays see them as they were the frame before (at 60 frames a

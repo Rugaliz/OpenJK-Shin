@@ -114,7 +114,7 @@ static struct {
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
 	postImage_t			sharp;						// the view sharpened (r_sharpen)
 	postImage_t			shadow;						// the darkening of the shadow maps
-	postImage_t			rtShadow;					// the ray traced shadows, at half the size of the view before the blur
+	postImage_t			rtShadow;					// the ray traced shadows before the blur (RtShadowSize)
 	vkRtBuffer_t		rtCasters[VK_FRAMES_IN_FLIGHT];	// their casters (RT_CASTER_SECTIONS lots a frame, read by address)
 	int					rtCastersFrame[VK_FRAMES_IN_FLIGHT], rtCastersUsed[VK_FRAMES_IN_FLIGHT];
 	postImage_t			shaftsA, shaftsB;			// light shafts: the sky near the sun, then blurred towards it
@@ -275,9 +275,15 @@ static void FreeImages( void )
 }
 
 // the images for a view of this size, if they are not there yet
+// the size of the image of the ray traced shadows for a view this wide (or high): half of it, all of it at High
+static int RtShadowSize( int size )
+{
+	return ( r_rayTracing && r_rayTracing->integer >= 2 ) ? size : ( size + 1 ) / 2;
+}
+
 static bool EnsureImages( int width, int height )
 {
-	if ( post.width == width && post.height == height && post.scene.image )
+	if ( post.width == width && post.height == height && post.scene.image && post.rtShadow.width == RtShadowSize( width ) )
 	{
 		return true;
 	}
@@ -296,7 +302,7 @@ static bool EnsureImages( int width, int height )
 		&& NewImage( &post.shaftsA, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) )
 		&& NewImage( &post.shaftsB, Q_max( width / LIGHT_SHAFTS_SCALE, 2 ), Q_max( height / LIGHT_SHAFTS_SCALE, 2 ) )
 		&& NewImage( &post.lum, EYE_LUM_SIZE, EYE_LUM_SIZE ) && NewImage( &post.lumAverage, 1, 1 )
-		&& NewImage( &post.rtShadow, ( width + 1 ) / 2, ( height + 1 ) / 2 );
+		&& NewImage( &post.rtShadow, RtShadowSize( width ), RtShadowSize( height ) );
 	for ( int i = 0; ok && i < POST_BLOOM_LEVELS; i++ )
 	{
 		ok = NewImage( &post.bloom[i], Q_max( width >> ( i + 1 ), 2 ), Q_max( height >> ( i + 1 ), 2 ) );
@@ -1250,11 +1256,12 @@ void RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, const
 =================
 RB_RayTracedShadowsApply
 
-The ray traced shadows of the characters (cg_shadows 5, see tr_shadow_maps.h): their triangles into the frame's ray
-tracing structure, the casters into a buffer the shader reads by its address, then one pass over the view at half its
-size (a quarter of the rays) into post.rtShadow, where each pixel traces rays only for the casters whose shadow can
-fall on it; blurred along the surfaces at the size of the view into post.shadow, and multiplied into the picture where
-the stencil does not mark a character.
+The ray traced shadows of the characters (r_rayTracing, see tr_shadow_maps.h): their triangles into the frame's ray
+tracing structure, the casters into a buffer the shader reads by its address, then one pass over the view into
+post.rtShadow, where each pixel traces rays only for the casters whose shadow can fall on it: at Medium at half the
+size of the view (a quarter of the rays), four rays a pixel; at High at its full size, eight rays a pixel where the
+first four disagree. Blurred along the surfaces at the size of the view into post.shadow, and multiplied into the
+picture where the stencil does not mark a character.
 =================
 */
 qboolean R_RayTracedShadows_Available( void )
@@ -1262,10 +1269,19 @@ qboolean R_RayTracedShadows_Available( void )
 	return ( post.ready && vk.rayTracing && !post.rtShadowFailed && !post.shadowFailed ) ? qtrue : qfalse;
 }
 
-// with the ray traced shadows, the dynamic lights' rays keep them from going through walls (dlight_rt.frag)
+int R_RayTracing( void )
+{
+	if ( !r_rayTracing || r_rayTracing->integer <= 0 || !R_RayTracedShadows_Available() )
+	{
+		return 0;
+	}
+	return r_rayTracing->integer >= 2 ? 2 : 1;
+}
+
+// with ray tracing, the dynamic lights' rays keep them from going through walls (dlight_rt.frag)
 qboolean R_DlightShadows( void )
 {
-	return ( vk.rayTracing && r_shadows->integer == 5 && R_RayTracedShadows_Available() ) ? qtrue : qfalse;
+	return R_RayTracing() ? qtrue : qfalse;
 }
 
 /*
@@ -1370,9 +1386,10 @@ void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters,
 		}
 	}
 	const VkDeviceAddress address = post.rtCasters[slot].address + offset;
-	const uint32_t count = (uint32_t)numCasters;
+	const uint32_t count = (uint32_t)numCasters, quality = (uint32_t)R_RayTracing();
 	memcpy( push + 24, &address, sizeof( address ) );
 	memcpy( push + 26, &count, sizeof( count ) );
+	memcpy( push + 27, &quality, sizeof( quality ) );
 	RunPass( PASS_RT_SHADOW, &post.rtShadow, false, inputs, push, 28, NULL, scene );
 
 	// the few rays a pixel has, blurred along the surfaces (the blur of the ambient occlusion)

@@ -1233,11 +1233,10 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 	}
 
 	// The shadows row offers none, simple and volumetric (stencil volumes). Add soft ones (shadow maps, cg_shadows 4)
-	// and ray traced ones (5) where the renderer can draw them.
+	// where the renderer can draw them. (Ray tracing has a row of its own, Menu_AddEffectRows.)
 	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "cg_shadows" ) && item->typeData ) {
 		static const struct { const char *name; float value; const char *avail; } extra[] = {
 			{ "Soft", 4, "r_shadowMapsAvail" },
-			{ "Ray Traced", 5, "r_rtAvail" },
 		};
 		multiDef_t *multiPtr = (multiDef_t *)item->typeData;
 
@@ -1256,7 +1255,7 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 			multiPtr->cvarValue[multiPtr->count] = extra[e].value;
 			multiPtr->count++;
 			item->descText = String_Alloc( "Shadows of the characters. Soft: shaped like the character, falling on walls and steps too, "
-				"with edges that blur further from the character. Ray Traced: the same, exact, on graphics cards with ray tracing." );
+				"with edges that blur further from the character. With Ray Tracing on, Volumetric and Soft are ray traced." );
 			Com_Printf( "Added %s shadows to the shadows field.\n", extra[e].name );
 		}
 	}
@@ -1311,7 +1310,7 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on. Detailed: it picks out the bumps of the surface too." },
 		{ "lightshafts", "r_lightShafts", "r_postAvail", "Light Shafts:", "Rays of sunlight through gaps and around edges, on levels with a sun." },
 		{ "eyeadaptation", "r_eyeAdaptation", "r_postAvail", "Eye Adaptation:", "Dark places brighten as your eyes get used to them, over a second or two." },
-		{ "sharpen", "r_sharpen", "r_postAvail", "Sharpening:", "Crisper textures, without halos. Good with SMAA or Anti-Aliasing." },
+		{ "raytracing", "r_rayTracing", "r_rtAvail", "Ray Tracing:", "Exact shadows of the characters, and the light of sabers, blasters and explosions stops at walls. High: smoother shadows, slower." },
 	};
 	itemDef_t	*rows[24];
 	int			numRows = 0;
@@ -1359,12 +1358,12 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 		row->descText = String_Alloc( effects[e].desc );
 		row->cvarTest = NULL;
 		row->cvarFlags = 0;
-		if ( !Q_stricmp( effects[e].name, "sharpen" ) )
+		if ( !Q_stricmp( effects[e].name, "raytracing" ) )
 		{
-			// four steps instead of off and on: the "off" of the row it was copied from (already in the language of
-			// the game), then three strengths
-			static const char *const names[] = { "Low", "Medium", "High" };
-			static const float values[] = { 0.3f, 0.6f, 1.0f };
+			// three steps instead of off and on: the "off" of the row it was copied from (already in the language of
+			// the game), then the two qualities
+			static const char *const names[] = { "Medium", "High" };
+			static const float values[] = { 1.0f, 2.0f };
 			multiDef_t *multiPtr = (multiDef_t *)row->typeData;
 
 			multiPtr->cvarValue[0] = 0.0f;

@@ -1016,7 +1016,8 @@ static void Emit( GLenum mode, const source_t &position, const source_t &color, 
 	{
 		memcpy( shadow.toWorld, gl.uniformToWorld, sizeof( shadow.toWorld ) );
 		shadow.shadow[0] = gl.uniformShadow;
-		shadow.shadow[1] = shadow.shadow[2] = shadow.shadow[3] = 0.0f;
+		shadow.shadow[1] = (float)R_RayTracing();	// (the quality: more rays at High)
+		shadow.shadow[2] = shadow.shadow[3] = 0.0f;
 	}
 	VK_Draw( &key, &dynamic, &constants, texture0, texture1, &geometry, gl.program ? &shadow : NULL );
 }

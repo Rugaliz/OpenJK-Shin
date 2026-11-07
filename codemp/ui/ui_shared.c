@@ -8803,34 +8803,6 @@ static itemDef_t *Menu_CloneRow( menuDef_t *menu, const itemDef_t *src, float dy
 
 /*
 ===============
-Item_MakeSharpenRow
-
-The row for the sharpening (r_sharpen) is a copy of an off and on row; it gets four steps instead (the "off" of the
-row it was copied from, already in the language of the game, then three strengths).
-===============
-*/
-static void Item_MakeSharpenRow( itemDef_t *row )
-{
-	static const char *const names[] = { "Low", "Medium", "High" };
-	static const float values[] = { 0.3f, 0.6f, 1.0f };
-	multiDef_t *multiPtr = row->typeData.multi;
-	int i;
-
-	if ( !multiPtr || multiPtr->count < 1 )
-		return;
-	multiPtr->cvarValue[0] = 0.0f;
-	multiPtr->count = 1;
-	for ( i = 0; i < (int)ARRAY_LEN( names ) && multiPtr->count < MAX_MULTI_CVARS; i++ )
-	{
-		multiPtr->cvarList[multiPtr->count] = String_Alloc( names[i] );
-		multiPtr->cvarValue[multiPtr->count] = values[i];
-		multiPtr->count++;
-	}
-	multiPtr->strDef = qfalse;
-}
-
-/*
-===============
 Item_MakeShadowsRow
 
 The stock menus of multiplayer have no row for the shadows of the characters (cg_shadows). This one is a copy of an off
@@ -8882,7 +8854,6 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on. Detailed: it picks out the bumps of the surface too." },
 		{ "lightshafts", "r_lightShafts", "r_postAvail", "Light Shafts:", "Rays of sunlight through gaps and around edges, on levels with a sun." },
 		{ "eyeadaptation", "r_eyeAdaptation", "r_postAvail", "Eye Adaptation:", "Dark places brighten as your eyes get used to them, over a second or two." },
-		{ "sharpen", "r_sharpen", "r_postAvail", "Sharpening:", "Crisper textures, without halos. Good with SMAA or Anti-Aliasing." },
 	};
 	itemDef_t	*rows[24];
 	int			numRows = 0;
@@ -8983,9 +8954,7 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		row->descText = String_Alloc( effects[e].desc );
 		row->cvarTest = NULL;
 		row->cvarFlags = 0;
-		if ( !Q_stricmp( effects[e].name, "sharpen" ) )
-			Item_MakeSharpenRow( row );
-		else if ( !Q_stricmp( effects[e].name, "shadows" ) )
+		if ( !Q_stricmp( effects[e].name, "shadows" ) )
 			Item_MakeShadowsRow( row );
 		else if ( !Q_stricmp( effects[e].name, "dlightglsl" ) && row->typeData.multi && row->typeData.multi->count == 2 )
 		{

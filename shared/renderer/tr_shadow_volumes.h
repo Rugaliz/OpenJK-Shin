@@ -134,7 +134,7 @@ static void RB_ShadowClear( void )
 }
 
 // 2 = stencil volumes, 4 = shadow maps (cg_shadows 4, or 2 with r_shadowMaps 1; volumes where the renderer can't
-// draw maps), 5 = ray traced (cg_shadows 5; maps, then volumes, where the renderer can't), 0 = none
+// draw maps), 5 = ray traced (r_rayTracing with 2 or 4; maps, then volumes, where the renderer can't), 0 = none
 static int RB_ShadowMode( void )
 {
 	const int shadows = r_shadows->integer;
@@ -142,8 +142,8 @@ static int RB_ShadowMode( void )
 	if ( glConfig.stencilBits < 4 || !R_MODEL_SHADOWS( shadows ) ) {
 		return 0;
 	}
-	if ( shadows == 5 && R_RayTracedShadows_Available() ) {
-		return 5;
+	if ( R_RayTracing() ) {
+		return 5;	// (ray traced, whichever of the model shadows is chosen)
 	}
 	if ( ( shadows >= 4 || r_shadowMaps->integer ) && R_ShadowMaps_Available() ) {
 		return 4;

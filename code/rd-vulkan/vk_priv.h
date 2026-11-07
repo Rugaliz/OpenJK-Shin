@@ -258,11 +258,11 @@ typedef struct vkGeometry_s {
 } vkGeometry_t;
 
 void		VK_AllocateGeometry( vkGeometry_t *geometry, int vertexCount, int indexCount, const vkPipelineKey_t *key );
-// The shadows of the dynamic light program (ray traced, cg_shadows 5): pushed after vkConstants_t by its ray query
+// The shadows of the dynamic light program (ray traced, r_rayTracing): pushed after vkConstants_t by its ray query
 // pipelines, from the program's uniforms (vk_gl.cpp)
 typedef struct vkDlightShadow_s {
 	float	toWorld[12];	// 3 rows: from the space of the surface to the world
-	float	shadow[4];		// x: 1 for the rays
+	float	shadow[4];		// x: 1 for the rays, y: R_RayTracing
 } vkDlightShadow_t;
 
 // this frame's ray tracing structure of the level, for the rays of the dynamic lights (VK_NULL_HANDLE: none)
@@ -288,3 +288,6 @@ void		VK_ShutdownPost( void );
 double		VK_Now( void );			// milliseconds
 void		VK_Slow( const char *what, double start );
 extern cvar_t	*r_vkProfile;
+
+// r_rayTracing: 0 off, 1 medium, 2 high (Setup > More Video > Ray Tracing); R_RayTracing says what is drawn
+extern cvar_t	*r_rayTracing;

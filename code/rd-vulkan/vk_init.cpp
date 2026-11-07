@@ -30,6 +30,7 @@ vk_t vk;
 static cvar_t	*r_vkValidation;
 static cvar_t	*r_vkRayTracing;
 static cvar_t	*r_vkDevice;
+cvar_t			*r_rayTracing;
 
 void APIENTRY vkglActiveTextureARB( GLenum texture );
 void APIENTRY vkglClientActiveTextureARB( GLenum texture );
@@ -895,6 +896,18 @@ bool VK_Init( glconfig_t *glConfig )
 	r_vkDevice = ri.Cvar_Get( "r_vkDevice", "-1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_vkProfile = ri.Cvar_Get( "r_vkProfile", "0", 0 );
 	r_vkRayTracing = ri.Cvar_Get( "r_vkRayTracing", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 0: never turn ray tracing on, even where the device has it
+	r_rayTracing = ri.Cvar_Get( "r_rayTracing", "0", CVAR_ARCHIVE_ND );
+
+	// cg_shadows 5 was the ray traced shadows before ray tracing had a setting of its own: the soft ones, ray traced
+	cvar_t *shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	if ( shadows->integer == 5 )
+	{
+		ri.Cvar_Set( "cg_shadows", "4" );
+		if ( !r_rayTracing->integer )
+		{
+			ri.Cvar_Set( "r_rayTracing", "1" );
+		}
+	}
 
 	memset( &vk, 0, sizeof( vk ) );
 	vk.width = glConfig->vidWidth;

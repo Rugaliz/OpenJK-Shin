@@ -2,11 +2,13 @@
 #extension GL_EXT_ray_query : require
 #extension GL_EXT_buffer_reference : require
 
-// The shadows of the characters, ray traced (cg_shadows 5), all of them in one pass at half the size of the view. A
-// pixel is tested against the area each character's shadow can fall in (as for its shadow map: the character seen from
-// its light, padded), and only for those it is in, a few rays spread around the direction of that character's light go
-// against the triangles of the characters (vk_rt.cpp, instance mask 0x04). The result is the factor the picture is
-// multiplied by; the rays are few, a blur along the surfaces follows (post_ssao_blur.frag).
+// The shadows of the characters, ray traced (r_rayTracing), all of them in one pass: at Medium at half the size of the
+// view, at High at its full size. A pixel is tested against the area each character's shadow can fall in (as for its
+// shadow map: the character seen from its light, padded), and only for those it is in, a few rays spread around the
+// direction of that character's light go against the triangles of the characters (vk_rt.cpp, instance mask 0x04):
+// four at Medium; at High four, and four more between them where the first ones disagree (the edge of a shadow). The
+// result is the factor the picture is multiplied by; the rays are few, a blur along the surfaces follows
+// (post_ssao_blur.frag).
 
 struct Caster {
 	vec4 rowS, rowT;	// from the eye to where the character is seen from its light (as in its shadow map)
@@ -19,7 +21,7 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Ca
 
 layout(push_constant) uniform P {
 	vec4 a; vec4 b; vec4 c; vec4 row0; vec4 row1; vec4 row2;
-	Casters casters; uint count; uint pad;
+	Casters casters; uint count; uint quality;
 } p;
 // a: proj [0] [5] [8] [9]; b: proj [10] [14], depth uv scale; c: depth uv bias; row0-2: from the eye to the world
 
@@ -29,10 +31,21 @@ layout(set = 0, binding = 3) uniform accelerationStructureEXT uScene;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
 
-const int RAYS = 4;
-
 float depthAt(vec2 t) { return texture(uDepth, t * p.b.zw + p.c.xy).r; }
 float viewZ(float depth) { return -p.b.y / (depth * 2.0 - 1.0 + p.b.x); }
+
+// 1 if the ray r of rays (a spiral over a disc around the light's direction l, as wide as spread, turned by turn) from
+// origin hits a character
+float blockedTowards(vec3 origin, vec3 l, vec3 side, vec3 up, float turn, int r, int rays, float spread)
+{
+	float angle = turn + float(r) * 2.3999632;
+	float radius = sqrt((float(r) + 0.5) / float(rays)) * spread;
+	vec3 dir = normalize(l + (cos(angle) * side + sin(angle) * up) * radius);
+	rayQueryEXT query;
+	rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0x04, origin, 0.5, dir, 4096.0);
+	while (rayQueryProceedEXT(query)) {}
+	return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
+}
 
 void main()
 {
@@ -60,18 +73,19 @@ void main()
 		// the rays: around the light's direction in a disc, turned by a different amount at every pixel
 		vec3 side = normalize(abs(l.z) < 0.9 ? cross(l, vec3(0.0, 0.0, 1.0)) : cross(l, vec3(1.0, 0.0, 0.0)));
 		vec3 up = cross(side, l);
+		int rays = p.quality > 1u ? 8 : 4;
 		float blocked = 0.0;
-		for (int r = 0; r < RAYS; r++) {
-			float angle = turn + float(r) * 2.3999632;
-			float radius = sqrt((float(r) + 0.5) / float(RAYS)) * c.light.w;
-			vec3 dir = normalize(l + (cos(angle) * side + sin(angle) * up) * radius);
-			rayQueryEXT query;
-			rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0x04,
-				world + n * 0.5, 0.5, dir, 4096.0);
-			while (rayQueryProceedEXT(query)) {}
-			if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) blocked += 1.0;
+		for (int r = 0; r < rays; r += rays / 4) {	// (High: every other one first)
+			blocked += blockedTowards(world + n * 0.5, l, side, up, turn, r, rays, c.light.w);
 		}
-		f *= 1.0 - c.params.y * blocked / float(RAYS);
+		if (rays == 8 && blocked > 0.0 && blocked < 4.0) {
+			for (int r = 1; r < rays; r += 2) {
+				blocked += blockedTowards(world + n * 0.5, l, side, up, turn, r, rays, c.light.w);
+			}
+		} else {
+			blocked *= float(rays) / 4.0;	// (the four traced agree: as if every ray was)
+		}
+		f *= 1.0 - c.params.y * blocked / float(rays);
 	}
 	outColor = vec4(f, f, f, 1.0);
 }

@@ -54,9 +54,12 @@ qboolean	R_ShadowMaps_Available( void );
 // stencil has the bit stencilSkip set (the characters) are left alone when stencilSkip is not 0.
 void		RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, const byte *atlas, int stencilSkip );
 
-// Ray traced (cg_shadows 5): the renderer can (Vulkan with ray tracing, r_rtAvail), and darkening the 3D view by the
-// casters with rays against the triangles of all of them (xyz: 3 floats a point, world space; indexes: 3 a triangle)
+// Ray traced (r_rayTracing, Setup > More Video > Ray Tracing, makes the shadows of cg_shadows 2 and 4 ray traced): the
+// renderer can (Vulkan with ray tracing, r_rtAvail), what is asked of it (0 off, 1 medium, 2 high), and darkening the
+// 3D view by the casters with rays against the triangles of all of them (xyz: 3 floats a point, world space; indexes:
+// 3 a triangle)
 qboolean	R_RayTracedShadows_Available( void );
+int			R_RayTracing( void );
 qboolean	R_DlightShadows( void );		// with them, dynamic lights do not go through walls (the shader dynamic lights' rays)
 void		RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters, const float *xyz, int numPoints,
 				const int *indexes, int numTriangles, int stencilSkip );
