@@ -208,6 +208,27 @@ endif(BuildSPRdVanilla OR BuildJK2SPRdVanilla OR BuildSPRdVulkan OR BuildJK2SPRd
 # (see docs/vulkan-renderer.md).
 if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 	find_package(Vulkan)
+	set(SPRDVulkanIncludeDir ${Vulkan_INCLUDE_DIRS})
+	set(SPRDVulkanLibrary Vulkan::Vulkan)
+	# MinGW (the Windows version built on Linux): the headers are enough. The Vulkan loader of Windows, vulkan-1.dll,
+	# comes with the graphics driver, and its import library is made from the list of what the renderer calls; the
+	# headers are copied apart, as the folder they were found in holds the headers of the system building it too.
+	if(NOT Vulkan_FOUND AND MINGW AND CMAKE_DLLTOOL AND Vulkan_INCLUDE_DIR AND EXISTS "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.h")
+		set(VulkanImportLibrary "${CMAKE_CURRENT_BINARY_DIR}/libvulkan-1.dll.a")
+		execute_process(COMMAND ${CMAKE_DLLTOOL} -m i386:x86-64 -d "${SPDir}/rd-vulkan/vulkan-1.def" -l "${VulkanImportLibrary}"
+			RESULT_VARIABLE VulkanImportResult)
+		if(VulkanImportResult EQUAL 0)
+			file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			file(COPY "${Vulkan_INCLUDE_DIR}/vulkan" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			if(EXISTS "${Vulkan_INCLUDE_DIR}/vk_video")
+				file(COPY "${Vulkan_INCLUDE_DIR}/vk_video" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			endif()
+			set(SPRDVulkanIncludeDir "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			set(SPRDVulkanLibrary "${VulkanImportLibrary}")
+			set(Vulkan_FOUND TRUE)
+			message(STATUS "Vulkan: import library for vulkan-1.dll made from rd-vulkan/vulkan-1.def")
+		endif()
+	endif()
 	if(NOT Vulkan_FOUND)
 		message(STATUS "Vulkan headers/loader not found, not building the Vulkan renderer module")
 	else()
@@ -235,8 +256,8 @@ if(BuildSPRdVulkan OR BuildJK2SPRdVulkan)
 			)
 		source_group("vulkan" FILES ${SPRDVulkanFiles})
 
-		set(SPRDVulkanIncludeDirectories "${SPDir}/rd-vulkan" ${SPRDVanillaRendererIncludeDirectories} ${Vulkan_INCLUDE_DIRS})
-		set(SPRDVulkanLibraries ${SPRDVulkanLibrariesBase} Vulkan::Vulkan)
+		set(SPRDVulkanIncludeDirectories "${SPDir}/rd-vulkan" ${SPRDVanillaRendererIncludeDirectories} ${SPRDVulkanIncludeDir})
+		set(SPRDVulkanLibraries ${SPRDVulkanLibrariesBase} ${SPRDVulkanLibrary})
 
 		function(add_sp_vulkan_renderer_project ProjectName Label InstallDir Component Defines)
 			add_library(${ProjectName} SHARED ${SPRDVulkanFiles})

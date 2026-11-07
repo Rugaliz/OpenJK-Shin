@@ -37,12 +37,17 @@ Rewriting every call site is what Quake II/III Vulkan ports did, and it is slow 
 - [x] 6. 3D: matrices, depth, blend, alpha test, cull, multitexture + texenv, fog, clip plane, polygon offset, scissor,
       stencil (shadows), depth range (weapon), vertex arrays.
 - [x] 7. `ReadPixels` (screenshots), `CopyTexImage2D` / `CopyTexSubImage2D` (distortion effects), depth read back (flares), cinematics (`DrawStretchRaw`). Brightness and overbright are a pass over the finished picture (`RB_GammaPass`, as in the OpenGL renderers).
-- [~] 8. Done: MSAA (with alpha to coverage and sample shading), anisotropy, vsync modes, `vid_restart` and mode changes, a pipeline cache kept between runs, 3440x1440 at 8x MSAA reaches the 250 fps cap. Still to do: run with the validation layer (`r_vkValidation 1`, needs the layer installed: `vulkan-validation-layers`), Windows / Wine check.
+- [~] 8. Done: MSAA (with alpha to coverage and sample shading), anisotropy, vsync modes, `vid_restart` and mode changes, a pipeline cache kept between runs, 3440x1440 at 8x MSAA reaches the 250 fps cap. Run with the validation layer (`r_vkValidation 1`, needs the layer installed: `vulkan-validation-layers`). The Windows build (MinGW) runs under Wine. Still to do: a real Windows machine.
 - [x] 9. Post effects (SSAO, bloom, SMAA, shader dynamic lights) natively in Vulkan (`vk_post.cpp`, shaders `post_*.frag`, `smaa_*.frag`, `dlight.*`); the Setup > More Video rows show with the Vulkan renderer too. Checked against the OpenGL renderer by screenshots (occlusion map, bloom, SMAA) and with 4x multisampling.
 - [ ] 10. Docs, README, CI (build the module only when the Vulkan headers and `glslc` exist).
 
 Shaders are GLSL compiled to SPIR-V at build time with `glslc`; the generated SPIR-V is also checked in as a header
 (same idea as `tr_smaa_data.h`) so a Windows build without the Vulkan SDK still works.
+
+The Windows version built on Linux with MinGW needs only the Vulkan headers: the renderer is linked against Windows'
+Vulkan loader, `vulkan-1.dll`, which comes with every graphics driver, and MinGW toolchains seldom have its import
+library, so the build makes one with `dlltool` from `rd-vulkan/vulkan-1.def`, the list of the functions the renderer
+calls (a function it starts to call goes there too, or the Windows build fails to link).
 
 ## Using it
 
@@ -94,12 +99,12 @@ triangles, made in 2 ms on the first frame.
 from it), `r_rtDebug 2` shows only that. The result should match the shadows the level's own lighting has
 (`r_lightmap 1` shows that lighting alone), with hard edges.
 
-The characters' shadows (`cg_shadows 5`, Shadows > Ray Traced, see [shadows](shadows.md)): every frame the
+The characters' shadows (`r_rayTracing`, More Video > Ray Tracing, see [shadows](shadows.md)): every frame the
 triangles of the characters go into a bottom level structure built for speed of building, placed by the frame's top
 level structure (mask 0x04, the level is 0x01 and its brush models 0x02); `post_rt_shadow.frag` reads the casters from
 a buffer by its device address; they have a top level structure of their own, built when the shadows are drawn.
 
-The shadows of the dynamic lights (with `cg_shadows 5`): the level's top level structure is built when a view
+The shadows of the dynamic lights (with `r_rayTracing`): the level's top level structure is built when a view
 begins (`VK_RT_BeginView`, before anything is drawn), and the dynamic light program is drawn with
 `dlight_rt.frag` (dlight.frag built with `RAY_QUERY`), which gets the structure in a second descriptor set and the
 transform from the surface's space to the world in 64 bytes of push constants after the usual 128 (every graphics card
@@ -116,7 +121,7 @@ have the atlas and the buffer next to the structure.
 
 * The dynamic glow (needs old NVIDIA / ARB programs), as in OpenGL on current drivers.
 * Texture compression (the textures are uploaded as RGBA8, the graphics memory use is higher than in OpenGL).
-* Not tried on Windows yet.
+* Tried on Windows only under Wine so far (the MinGW build, with ray tracing, on RADV).
 
 ## Status
 
