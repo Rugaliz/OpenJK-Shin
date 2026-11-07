@@ -1694,6 +1694,13 @@ void CG_PrevForcePower_f(void);
 // cg_view.c
 //
 void CG_TestModel_f (void);
+void CG_AddLineLight( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
+
+// the lights of blaster bolts in flight and where they hit (cg_weapons.c), and fading flashes (cg_localents.c)
+qboolean CG_BoltLightColor( int weapon, qboolean alt, vec3_t rgb, qboolean *flash );
+void CG_BoltLight( centity_t *cent, int weapon, qboolean alt );
+void CG_BoltFlash( int weapon, qboolean alt, const vec3_t origin, const vec3_t dir );
+void CG_AddLightFlash( const vec3_t origin, float radius, const vec3_t color, int duration );
 void CG_TestGun_f (void);
 void CG_TestModelNextFrame_f (void);
 void CG_TestModelPrevFrame_f (void);

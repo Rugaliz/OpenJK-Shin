@@ -53,6 +53,9 @@ void R_TransformDlights( int count, dlight_t *dl, orientationr_t *ori) {
 		dl->transformed[0] = DotProduct( temp, ori->axis[0] );
 		dl->transformed[1] = DotProduct( temp, ori->axis[1] );
 		dl->transformed[2] = DotProduct( temp, ori->axis[2] );
+		dl->transformedHalf[0] = DotProduct( dl->half, ori->axis[0] );
+		dl->transformedHalf[1] = DotProduct( dl->half, ori->axis[1] );
+		dl->transformedHalf[2] = DotProduct( dl->half, ori->axis[2] );
 	}
 }
 

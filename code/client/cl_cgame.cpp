@@ -796,6 +796,9 @@ Ghoul2 Insert End
 		case CG_OPENJK_R_SET2DANCHOR_JK2:
 			return CG_OPENJK_R_SET2DANCHOR;
 			break;
+		case CG_OPENJK_R_ADDLINELIGHTTOSCENE_JK2:
+			return CG_OPENJK_R_ADDLINELIGHTTOSCENE;
+			break;
 	}
 	return (cgameImport_t)-1;
 }
@@ -1205,6 +1208,10 @@ Ghoul2 Insert End
 
 	case CG_OPENJK_R_SET2DANCHOR:
 		re.Set2DAnchor( args[1] );
+		return 0;
+
+	case CG_OPENJK_R_ADDLINELIGHTTOSCENE:
+		re.AddLineLightToScene( (const float *) VMA(1), (const float *) VMA(2), VMF(3), VMF(4), VMF(5), VMF(6) );
 		return 0;
 
 	case CG_UI_STRING_INIT:

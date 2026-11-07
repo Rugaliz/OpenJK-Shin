@@ -73,6 +73,25 @@ Creates an entity in front of the current position, which
 can then be moved around
 =================
 */
+/*
+=================
+CG_AddLineLight
+
+A light along a line (a saber's blade, a blaster bolt): with the shader dynamic lights, what it lights is lit from the
+nearest point of the line; where the engine has no such call, a light at the middle, as before.
+=================
+*/
+void CG_AddLineLight( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b ) {
+	if ( trap->ext.R_AddLineLightToScene ) {
+		trap->ext.R_AddLineLightToScene( start, end, intensity, r, g, b );
+	} else {
+		vec3_t mid;
+		VectorAdd( start, end, mid );
+		VectorScale( mid, 0.5f, mid );
+		trap->R_AddLightToScene( mid, intensity, r, g, b );
+	}
+}
+
 void CG_TestModel_f (void) {
 	vec3_t		angles;
 

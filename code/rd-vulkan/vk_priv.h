@@ -153,6 +153,7 @@ bool		VK_RT_BuildTriangles( VkCommandBuffer cmd, vkRtStructure_t *blas, vkRtBuff
 bool		VK_RT_BuildInstances( VkCommandBuffer cmd, vkRtStructure_t *tlas, vkRtBuffer_t *scratch, VkDeviceAddress instances,
 				uint32_t numInstances );
 void		VK_RT_Barrier( VkCommandBuffer cmd, VkPipelineStageFlags stage );
+bool		VK_RT_TrianglesFit( const vkRtStructure_t *blas, uint32_t numVertices, uint32_t numTriangles );
 VkAccelerationStructureKHR	VK_RT_Scene( void );		// this frame's top level structure (the level and its brush models)
 void		VK_RT_AlphaInputs( VkImageView *atlas, VkSampler *sampler, VkBuffer *data );	// for the alpha test of the rays (rt_alpha.glsl)
 VkAccelerationStructureKHR	VK_RT_Characters( const float *xyz, int numPoints, const int *indexes, int numTriangles );

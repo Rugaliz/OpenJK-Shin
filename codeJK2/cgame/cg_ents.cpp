@@ -1059,6 +1059,8 @@ static void CG_Missile( centity_t *cent ) {
 		if ( wData->alt_missileDlight )
 				cgi_R_AddLightToScene(cent->lerpOrigin, wData->alt_missileDlight,
 					wData->alt_missileDlightColor[0], wData->alt_missileDlightColor[1], wData->alt_missileDlightColor[2] );
+		else
+			CG_BoltLight( cent, s1->weapon, qtrue );
 
 		// add missile sound
 		if ( weapon->alt_missileSound )
@@ -1078,6 +1080,8 @@ static void CG_Missile( centity_t *cent ) {
 		if ( wData->missileDlight )
 			cgi_R_AddLightToScene(cent->lerpOrigin, wData->missileDlight,
 				wData->missileDlightColor[0], wData->missileDlightColor[1], wData->missileDlightColor[2] );
+		else
+			CG_BoltLight( cent, s1->weapon, qfalse );
 
 		// add missile sound
 		if ( weapon->missileSound )

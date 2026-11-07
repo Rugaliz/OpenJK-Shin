@@ -75,7 +75,9 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
     sun.
   - **Eye Adaptation**: dark places brighten as your eyes get used to them, without washing out the bright parts.
   - **Shader Dynamic Lights**: the light of lightsabers, blaster bolts and explosions follows the shape of what it
-    falls on, instead of blocky patches. **Detailed** also picks out the bumps of rock, brick and tiles.
+    falls on, instead of blocky patches. **Detailed** also picks out the bumps of rock, brick and tiles. Lightsabers
+    glow along the whole blade, wider and brighter, and blaster bolts light the walls they fly past and flash where they
+    hit, as in the films.
 
   See [docs/post-processing.md](docs/post-processing.md).
 - **A brightness slider that works**: the Brightness slider of the video setup takes effect at once and brightens the whole
@@ -87,7 +89,8 @@ variable is in brackets (open the console with Shift+Escape or the key above Tab
   through walls. The new **Soft** setting goes further: the shadow has the character's shape, falls on walls and
   steps too, and its edge blurs the further it is from the character. On graphics cards with ray tracing (AMD RX 6000
   and newer, NVIDIA RTX, Intel Arc) and the Vulkan renderer, **Ray Traced** shadows are exact, down to the fingers,
-  and the light of sabers and explosions no longer shines through walls (grates and leaves throw their pattern).
+  and the light of sabers and explosions no longer shines through walls (grates and leaves throw their pattern); the
+  fighters in a duel throw their shadows on the walls.
   See [docs/shadows.md](docs/shadows.md).
 - **See further**: grass and bushes are drawn about three times further away, and characters keep their detailed look
   twice as far.

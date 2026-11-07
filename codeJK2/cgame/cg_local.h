@@ -1020,6 +1020,13 @@ void	cgi_R_GetLighting( const vec3_t origin, vec3_t ambientLight, vec3_t directe
 // significant construction
 void	cgi_R_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts );
 void	cgi_R_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
+void	cgi_R_AddLineLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
+
+// the lights of blaster bolts in flight and where they hit (cg_weapons.cpp), and fading flashes (cg_localents.cpp)
+qboolean	CG_BoltLightColor( int weapon, qboolean alt, vec3_t rgb, qboolean *flash );
+void	CG_BoltLight( centity_t *cent, int weapon, qboolean alt );
+void	CG_BoltFlash( int weapon, qboolean alt, const vec3_t origin, const vec3_t dir );
+void	CG_AddLightFlash( const vec3_t origin, float radius, const vec3_t color, int duration );
 void	cgi_R_RenderScene( const refdef_t *fd );
 void	cgi_R_SetColor( const float *rgba );	// NULL = 1,1,1,1
 

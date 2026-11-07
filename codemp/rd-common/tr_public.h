@@ -30,7 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../qcommon/qcommon.h"
 #include "../ghoul2/ghoul2_shared.h"
 
-#define	REF_API_VERSION 10
+#define	REF_API_VERSION 11
 
 //
 // these are the functions exported by the refresh module
@@ -244,6 +244,7 @@ typedef struct refexport_s {
 	struct {
 		float				(*Font_StrLenPixels)					( const char *text, const int iFontIndex, const float scale );
 		void				(*Set2DAnchor)							( int anchor );	// where 2D drawing sticks to on a wide screen: -1 left edge, 0 centre (default), 1 right edge
+		void				(*AddLineLightToScene)					( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );	// lit from the nearest point of the line (a saber's blade); NULL: not there
 	} ext;
 
 } refexport_t;

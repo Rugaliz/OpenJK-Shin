@@ -717,6 +717,7 @@ typedef struct cgameImport_s {
 	struct {
 		float			(*R_Font_StrLenPixels)					( const char *text, const int iFontIndex, const float scale );
 		void			(*R_Set2DAnchor)						( int anchor );	// where 2D drawing sticks to on a wide screen: -1 left edge, 0 centre (default), 1 right edge
+		void			(*R_AddLineLightToScene)				( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );	// lit from the nearest point of the line (a saber's blade, a blaster bolt)
 	} ext;
 } cgameImport_t;
 

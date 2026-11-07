@@ -30,7 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../ghoul2/G2.h"
 #include "../ghoul2/ghoul2_gore.h"
 
-#define	REF_API_VERSION		20
+#define	REF_API_VERSION		21
 
 typedef struct {
 	void				(QDECL *Printf)						( int printLevel, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
@@ -185,6 +185,7 @@ typedef struct {
 	void	(*AddRefEntityToScene)( const refEntity_t *re );
 	void	(*AddPolyToScene)( qhandle_t hShader , int numVerts, const polyVert_t *verts );
 	void	(*AddLightToScene)( const vec3_t org, float intensity, float r, float g, float b );
+	void	(*AddLineLightToScene)( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );	// lit from the nearest point of the line (a saber's blade)
 	void	(*RenderScene)( const refdef_t *fd );
 	qboolean(*GetLighting)( const vec3_t org, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir);
 

@@ -55,7 +55,19 @@ typedef struct dlight_s {
 	float	radius;
 
 	vec3_t	transformed;		// origin in local coordinate system
+
+	// a light along a line (RE_AddLineLightToScene): origin is its middle, half from there to an end, and radius the
+	// reach of the light from the nearest point of the line plus half's length (what the culling needs); a light at a
+	// point has half 0 and reach radius
+	vec3_t	half;
+	vec3_t	transformedHalf;	// half in local coordinate system
+	float	reach;
 } dlight_t;
+
+// how much further a light along a line (a saber, a bolt) reaches than the radius the game gives it for a light at its
+// middle, and how much brighter it is: the glow of the films (the shader dynamic lights only)
+#define DLIGHT_LINE_REACH		1.8f
+#define DLIGHT_LINE_BRIGHTNESS	1.25f
 
 
 // a trRefEntity_t has all the information passed in by
@@ -1600,6 +1612,7 @@ void RE_ClearScene( void );
 void RE_AddRefEntityToScene( const refEntity_t *ent );
 void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts );
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
+void RE_AddLineLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
 void RE_RenderScene( const refdef_t *fd );
 
 qboolean RE_GetLighting( const vec3_t origin, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir );

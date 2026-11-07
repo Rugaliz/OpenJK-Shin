@@ -2909,6 +2909,78 @@ qboolean CG_VehicleWeaponImpact( centity_t *cent )
 
 /*
 =================
+CG_BoltLightColor
+
+Blaster bolts light what they fly past and flash where they hit, as in the films (the weapons give their bolts no light
+of their own): the colour of a weapon's bolts, and whether they flash where they hit (what explodes has a light in its
+effect already). qfalse: no light (no bolts).
+=================
+*/
+qboolean CG_BoltLightColor( int weapon, qboolean alt, vec3_t rgb, qboolean *flash ) {
+	*flash = qtrue;
+	switch ( weapon ) {
+	case WP_BLASTER: case WP_BLASTER_PISTOL: case WP_BRYAR_PISTOL: case WP_EMPLACED_GUN: case WP_BOT_LASER: case WP_TURRET:
+	case WP_ATST_MAIN: case WP_ATST_SIDE: case WP_TUSKEN_RIFLE:
+		VectorSet( rgb, 1.0f, 0.25f, 0.15f );
+		return qtrue;
+	case WP_BOWCASTER: case WP_TIE_FIGHTER:
+		VectorSet( rgb, 0.3f, 1.0f, 0.3f );
+		return qtrue;
+	case WP_REPEATER:
+		VectorSet( rgb, 1.0f, 0.8f, 0.3f );
+		*flash = (qboolean)!alt;
+		return qtrue;
+	case WP_DEMP2: case WP_JAWA:
+		VectorSet( rgb, 0.4f, 0.6f, 1.0f );
+		return qtrue;
+	case WP_CONCUSSION:
+		VectorSet( rgb, 0.5f, 0.6f, 1.0f );
+		*flash = qfalse;
+		return qtrue;
+	case WP_FLECHETTE:
+		VectorSet( rgb, 1.0f, 0.6f, 0.25f );
+		*flash = (qboolean)!alt;
+		return qtrue;
+	case WP_ROCKET_LAUNCHER: case WP_RAPID_FIRE_CONC:
+		VectorSet( rgb, 1.0f, 0.55f, 0.2f );
+		*flash = qfalse;
+		return qtrue;
+	default:
+		return qfalse;
+	}
+}
+
+// a bolt in flight: a short light along it, behind its head
+void CG_BoltLight( centity_t *cent, int weapon, qboolean alt ) {
+	vec3_t		rgb, velocity, tail;
+	qboolean	flash;
+
+	if ( !CG_BoltLightColor( weapon, alt, rgb, &flash ) ) {
+		return;
+	}
+	EvaluateTrajectoryDelta( &cent->currentState.pos, cg.time, velocity );
+	if ( VectorNormalize( velocity ) < 1.0f ) {
+		VectorCopy( cent->lerpOrigin, tail );
+	} else {
+		VectorMA( cent->lerpOrigin, -24.0f, velocity, tail );
+	}
+	cgi_R_AddLineLightToScene( tail, cent->lerpOrigin, 70.0f, rgb[0], rgb[1], rgb[2] );
+}
+
+// where a bolt hits: a flash, out from the surface a little (not for what explodes: its effect has a light)
+void CG_BoltFlash( int weapon, qboolean alt, const vec3_t origin, const vec3_t dir ) {
+	vec3_t		rgb, at;
+	qboolean	flash;
+
+	if ( !CG_BoltLightColor( weapon, alt, rgb, &flash ) || !flash ) {
+		return;
+	}
+	VectorMA( origin, 8.0f, dir, at );
+	CG_AddLightFlash( at, 110.0f, rgb, 150 );
+}
+
+/*
+=================
 CG_MissileHitWall
 
 Caused by an EV_MISSILE_MISS event, or directly by local bullet tracing
@@ -2916,6 +2988,8 @@ Caused by an EV_MISSILE_MISS event, or directly by local bullet tracing
 */
 void CG_MissileHitWall( centity_t *cent, int weapon, vec3_t origin, vec3_t dir, qboolean altFire )
 {
+	CG_BoltFlash( weapon, altFire, origin, dir );
+
 	int parm;
 
 	switch( weapon )
@@ -3042,6 +3116,8 @@ CG_MissileHitPlayer
 
 void CG_MissileHitPlayer( centity_t *cent, int weapon, vec3_t origin, vec3_t dir, qboolean altFire )
 {
+	CG_BoltFlash( weapon, altFire, origin, dir );
+
 	gentity_t *other = NULL;
 	qboolean	humanoid = qtrue;
 

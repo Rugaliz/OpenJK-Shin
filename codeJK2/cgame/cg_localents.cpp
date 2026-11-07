@@ -543,6 +543,59 @@ void CG_AddLine( localEntity_t *le )
 //==============================================================================
 
 /*
+=============================================================================
+
+LIGHT FLASHES: the flash of a blaster bolt where it hits (CG_BoltFlash), a light that fades out
+
+=============================================================================
+*/
+
+#define MAX_LIGHT_FLASHES	32
+
+static struct {
+	vec3_t	origin, color;
+	float	radius;
+	int		start, duration;		// (duration 0: free)
+} cg_lightFlashes[MAX_LIGHT_FLASHES];
+
+void CG_AddLightFlash( const vec3_t origin, float radius, const vec3_t color, int duration ) {
+	int i, oldest = 0;
+
+	for ( i = 0; i < MAX_LIGHT_FLASHES; i++ ) {
+		if ( !cg_lightFlashes[i].duration ) {
+			break;
+		}
+		if ( cg_lightFlashes[i].start < cg_lightFlashes[oldest].start ) {
+			oldest = i;
+		}
+	}
+	if ( i == MAX_LIGHT_FLASHES ) {
+		i = oldest;
+	}
+	VectorCopy( origin, cg_lightFlashes[i].origin );
+	VectorCopy( color, cg_lightFlashes[i].color );
+	cg_lightFlashes[i].radius = radius;
+	cg_lightFlashes[i].start = cg.time;
+	cg_lightFlashes[i].duration = duration;
+}
+
+static void CG_AddLightFlashes( void ) {
+	for ( int i = 0; i < MAX_LIGHT_FLASHES; i++ ) {
+		const int age = cg.time - cg_lightFlashes[i].start;
+		if ( !cg_lightFlashes[i].duration ) {
+			continue;
+		}
+		if ( age < 0 || age >= cg_lightFlashes[i].duration ) {
+			cg_lightFlashes[i].duration = 0;
+			continue;
+		}
+		const float left = 1.0f - (float)age / cg_lightFlashes[i].duration;
+		cgi_R_AddLightToScene( cg_lightFlashes[i].origin, cg_lightFlashes[i].radius * ( 0.5f + 0.5f * left ),
+			cg_lightFlashes[i].color[0] * left, cg_lightFlashes[i].color[1] * left, cg_lightFlashes[i].color[2] * left );
+	}
+}
+
+/*
 ===================
 CG_AddLocalEntities
 
@@ -550,6 +603,8 @@ CG_AddLocalEntities
 */
 void CG_AddLocalEntities( void )
 {
+	CG_AddLightFlashes();
+
 	localEntity_t	*le, *next;
 
 	// walk the list backwards, so any new local entities generated

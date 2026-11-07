@@ -5276,7 +5276,7 @@ static void CG_RGBForSaberColor( saber_colors_t color, vec3_t rgb )
 
 static void CG_DoSaberLight( saberInfo_t *saber )
 {
-	vec3_t		positions[MAX_BLADES*2], mid={0}, rgbs[MAX_BLADES*2], rgb={0};
+	vec3_t		positions[MAX_BLADES*2], mid={0}, rgbs[MAX_BLADES*2], rgb={0}, hilt={0};
 	float		lengths[MAX_BLADES*2]={0}, totallength = 0, numpositions = 0, dist, diameter = 0;
 	int			i, j;
 
@@ -5308,6 +5308,7 @@ static void CG_DoSaberLight( saberInfo_t *saber )
 			{//first blade, store middle of that as midpoint
 				VectorMA( saber->blade[i].muzzlePoint, saber->blade[i].length*0.5, saber->blade[i].muzzleDir, mid );
 				VectorCopy( rgbs[i], rgb );
+				VectorCopy( saber->blade[i].muzzlePoint, hilt );
 			}
 			numpositions++;
 		}
@@ -5356,7 +5357,17 @@ static void CG_DoSaberLight( saberInfo_t *saber )
 			}
 		}
 
-		trap->R_AddLightToScene( mid, diameter + (Q_flrand(0.0f, 1.0f)*8.0f), rgb[0], rgb[1], rgb[2] );
+		if ( numpositions == 1 )
+		{// one blade: along it, from the hilt to the tip (as CG_DoSaber's)
+			vec3_t tip;
+			VectorSubtract( mid, hilt, tip );
+			VectorAdd( mid, tip, tip );
+			CG_AddLineLight( hilt, tip, diameter*0.7f + (Q_flrand(0.0f, 1.0f)*3.0f), rgb[0], rgb[1], rgb[2] );
+		}
+		else
+		{
+			trap->R_AddLightToScene( mid, diameter + (Q_flrand(0.0f, 1.0f)*8.0f), rgb[0], rgb[1], rgb[2] );
+		}
 	}
 }
 
@@ -5412,9 +5423,11 @@ void CG_DoSaber( vec3_t origin, vec3_t dir, float length, float lengthMax, float
 
 	if (doLight)
 	{	// always add a light because sabers cast a nice glow before they slice you in half!!  or something...
-		vec3_t rgb={1,1,1};
+		vec3_t rgb={1,1,1}, tip;
 		CG_RGBForSaberColor( color, rgb );
-		trap->R_AddLightToScene( mid, (length*1.4f) + (Q_flrand(0.0f, 1.0f)*3.0f), rgb[0], rgb[1], rgb[2] );
+		// along the whole blade, from the hilt to the tip (a light at the middle where the engine or renderer can't)
+		VectorMA( origin, length, dir, tip );
+		CG_AddLineLight( origin, tip, (length*1.4f) + (Q_flrand(0.0f, 1.0f)*3.0f), rgb[0], rgb[1], rgb[2] );
 	}
 
 	memset( &saber, 0, sizeof( refEntity_t ));

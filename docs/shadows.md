@@ -98,9 +98,16 @@ The light of sabers, blasters and explosions (the dynamic lights) gets shadows t
 lit, a ray goes from it to the light through the level and its doors and lifts, and where something is in between, the
 light stops there. So it no longer comes through walls and floors (a saber in the next room lit the floor on this side,
 an explosion above lit the room below), and pillars and crates keep it off what is behind them. The ray stops 12 units
-short of the light, so that the wall an explosion sits on is still lit by it. Characters do not block these lights:
-the lights are often in a character's hand or body. With Ray Traced, the dynamic lights are always drawn by the shader
-(as with `r_dlightGLSL` 1, or 2 if that is set). One ray for every lit pixel of every light.
+short of the light, so that the wall an explosion sits on is still lit by it, and the hand on a saber's hilt does not
+hide the blade. With Ray Traced, the dynamic lights are always drawn by the shader (as with `r_dlightGLSL` 1, or 2 if
+that is set).
+
+A lightsaber or a blaster bolt is a light along a line (see [post-processing](post-processing.md)): four rays go to
+points spread along it, so its shadows are soft, as a long light makes them. Characters block these lights too, the
+one holding the saber as well: a duel throws the fighters' shadows on the walls and the floor. The characters are
+known only after the dynamic lights are drawn, so these rays see them as they were the frame before (at 60 frames a
+second and more that is not to be seen); from a character's own skin the rays start 8 units out, so that the frame
+before's copy of it does not shadow it where it has moved since. A light at a point gets one ray.
 
 Grates, fences and foliage are flat surfaces whose texture is cut out by an alpha test (or, for see-through ones,
 blended by its alpha). For the rays they block only where the texture is there: a light behind a grate throws the

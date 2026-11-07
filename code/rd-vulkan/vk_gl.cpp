@@ -88,6 +88,7 @@ static struct vkglState_s {
 	float			uniformBump;
 	float			uniformToWorld[12];	// the shadows of the dynamic light program (vkDlightShadow_t)
 	float			uniformShadow;
+	float			uniformLightHalf[3];	// a light along a line
 
 	// current values
 	float			color[4];
@@ -589,8 +590,8 @@ void APIENTRY vkglUseProgram( GLuint program )
 
 GLint APIENTRY vkglGetUniformLocation( GLuint program, const GLchar *name )
 {
-	static const char *const names[] = { "uDiffuse", "uLight", "uColor", "uTextured", "uAlphaTest", "uBump", "uToWorld", "uShadow" };
-	for ( int i = 0; i < 8; i++ )
+	static const char *const names[] = { "uDiffuse", "uLight", "uColor", "uTextured", "uAlphaTest", "uBump", "uToWorld", "uShadow", "uLightHalf" };
+	for ( int i = 0; i < 9; i++ )
 	{
 		if ( !strcmp( name, names[i] ) ) return i;
 	}
@@ -614,6 +615,12 @@ void APIENTRY vkglUniform3f( GLint location, GLfloat v0, GLfloat v1, GLfloat v2 
 		gl.uniformColor[0] = v0;
 		gl.uniformColor[1] = v1;
 		gl.uniformColor[2] = v2;
+	}
+	else if ( location == 8 )
+	{
+		gl.uniformLightHalf[0] = v0;
+		gl.uniformLightHalf[1] = v1;
+		gl.uniformLightHalf[2] = v2;
 	}
 }
 
@@ -750,6 +757,8 @@ static void PrepareDraw( vkPipelineKey_t *key, vkDynamicState_t *dynamic, vkCons
 		constants->eyeZ[3] = gl.uniformTextured;
 		constants->fogColorDensity[0] = gl.uniformAlphaTest;
 		constants->fogColorDensity[1] = gl.uniformBump;
+		memcpy( constants->fogRange, gl.uniformLightHalf, sizeof( gl.uniformLightHalf ) );	// (the shader's lightHalf)
+		constants->fogRange[3] = 0.0f;
 		return;
 	}
 

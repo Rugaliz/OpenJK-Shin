@@ -2152,6 +2152,7 @@ extern "C" Q_EXPORT refexport_t* QDECL GetRefAPI ( int apiVersion, refimport_t *
 	REX(GetLighting);
 	REX(AddPolyToScene);
 	REX(AddLightToScene);
+	REX(AddLineLightToScene);
 	REX(RenderScene);
 	REX(GetLighting);
 

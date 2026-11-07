@@ -324,6 +324,28 @@ bool VK_RT_BuildTriangles( VkCommandBuffer cmd, vkRtStructure_t *blas, vkRtBuffe
 		fastBuild ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR );
 }
 
+// a fast built bottom level structure of this many triangles fits in blas as it is (it is not made again)
+bool VK_RT_TrianglesFit( const vkRtStructure_t *blas, uint32_t numVertices, uint32_t numTriangles )
+{
+	VkAccelerationStructureGeometryKHR geometry = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+	geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+	geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+	geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+	geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+	geometry.geometry.triangles.vertexStride = 3 * sizeof( float );
+	geometry.geometry.triangles.maxVertex = numVertices ? numVertices - 1 : 0;
+	geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
+	VkAccelerationStructureBuildGeometryInfoKHR build = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+	build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+	build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+	build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+	build.geometryCount = 1;
+	build.pGeometries = &geometry;
+	VkAccelerationStructureBuildSizesInfoKHR sizes = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+	qvkGetAccelerationStructureBuildSizesKHR( vk.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &numTriangles, &sizes );
+	return blas->handle && blas->storage.size >= sizes.accelerationStructureSize;
+}
+
 /*
 =================
 VK_RT_BuildInstances
@@ -450,6 +472,8 @@ static struct {
 		vkRtStructure_t	characters;			// the characters of the frame (VK_RT_Characters), in a top level structure
 		vkRtStructure_t	charactersTop;		// of their own (the level's is read by draws before they are known)
 		vkRtBuffer_t	charactersInput, charactersScratch, charactersTopScratch;
+		int				charactersBuilt;	// vk.frameCounter + 1 of the frame they were made in (the next frame's level
+											// structure places them: the dynamic lights' rays are blocked by characters)
 	} frames[VK_FRAMES_IN_FLIGHT];
 } rtScene;
 
@@ -911,6 +935,12 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 	{
 		VK_RT_Place( &instances[count++], &world->alphaBlas, (uint32_t)world->alphaFirst, NULL, NULL, RT_MASK_WORLD );
 	}
+	// the characters as they were the frame before (they are known only after the dynamic lights are drawn)
+	const auto &previous = rtScene.frames[( vk.frameIndex + VK_FRAMES_IN_FLIGHT - 1 ) % VK_FRAMES_IN_FLIGHT];
+	if ( previous.characters.handle && previous.charactersBuilt == vk.frameCounter )
+	{
+		VK_RT_Place( &instances[count++], &previous.characters, 0, NULL, NULL, RT_MASK_CHARACTERS );
+	}
 	for ( int i = 0; i < backEnd.refdef.num_entities && count + 1 < RT_MAX_INSTANCES; i++ )
 	{
 		const trRefEntity_t *ent = &backEnd.refdef.entities[i];
@@ -990,6 +1020,13 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	memcpy( frame.charactersInput.mapped, xyz, (size_t)numPoints * 3 * sizeof( float ) );
 	memcpy( (byte *)frame.charactersInput.mapped + vertexBytes, indexes, (size_t)numTriangles * 3 * sizeof( uint32_t ) );
 
+	// When the structure has to be made again larger, the frame before (in flight) may still read the old one, through
+	// the level's structure of its dynamic lights: what was recorded is sent, and all of it waited for, first.
+	if ( frame.characters.handle && !VK_RT_TrianglesFit( &frame.characters, (uint32_t)numPoints, (uint32_t)numTriangles ) )
+	{
+		VK_SubmitFrame( true );
+	}
+
 	// (built again in the same frame for another view, they may have been read by shaders already)
 	VkCommandBuffer cmd = vk.cmd;
 	VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
@@ -1013,6 +1050,7 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 		return VK_NULL_HANDLE;
 	}
 	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT );
+	frame.charactersBuilt = vk.frameCounter + 1;
 	return frame.charactersTop.handle;
 }
 

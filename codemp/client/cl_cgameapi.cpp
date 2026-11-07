@@ -1695,6 +1695,19 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 // Stub function for old RMG system.
 static void RE_InitRendererTerrain ( const char * /*info*/ ) {}
 
+
+// a light along a line: the renderer's own where it has one (rd-vanilla), a light at the middle otherwise (rend2)
+static void CL_R_AddLineLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b ) {
+	if ( re->ext.AddLineLightToScene ) {
+		re->ext.AddLineLightToScene( start, end, intensity, r, g, b );
+	} else {
+		vec3_t mid;
+		VectorAdd( start, end, mid );
+		VectorScale( mid, 0.5f, mid );
+		re->AddLightToScene( mid, intensity, r, g, b );
+	}
+}
+
 void CL_BindCGame( void ) {
 	static cgameImport_t cgi;
 	cgameExport_t		*ret;
@@ -1912,6 +1925,7 @@ void CL_BindCGame( void ) {
 
 		cgi.ext.R_Font_StrLenPixels				= re->ext.Font_StrLenPixels;
 		cgi.ext.R_Set2DAnchor					= re->ext.Set2DAnchor;
+		cgi.ext.R_AddLineLightToScene			= CL_R_AddLineLightToScene;
 
 		GetCGameAPI = (GetCGameAPI_t)cgvm->GetModuleAPI;
 		ret = GetCGameAPI( CGAME_API_VERSION, &cgi );

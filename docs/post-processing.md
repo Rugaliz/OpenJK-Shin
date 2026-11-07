@@ -57,6 +57,20 @@ Mapping Unparametrized Surfaces on the GPU", 2010), which needs no tangents, so 
 has. Rock, brick and floor tiles get relief where a saber or an explosion lights them; the overall brightness stays
 the same (within 1%). It costs three texture reads a lit pixel instead of one.
 
+### Lightsabers and blaster bolts, as in the films
+
+With the shader dynamic lights (and with Ray Traced shadows, which use them), a lightsaber is a light along its whole
+blade, not a point at its middle: what it lights is lit from the nearest point of the blade, so a blade held along a
+wall throws a streak of light down the wall, and its glow reaches about 2.5 times the blade's length (1.8 times the
+radius the game gives it, `DLIGHT_LINE_REACH`) and is a quarter brighter (`DLIGHT_LINE_BRIGHTNESS`). Blaster bolts
+light what they fly past (none of the game's weapons gave their bolts a light): a short light along each bolt in its
+colour (red for the blasters and pistols, green for the bowcaster and TIE fighters, blue for the DEMP 2, ...), and a
+flash of 150 ms where one hits a wall or a body (not for what explodes, whose effect has its own light). The game
+modules ask for these with a new call, `AddLineLightToScene` (`cgi_R_AddLineLightToScene` in single player,
+`trap->ext.R_AddLineLightToScene` in Jedi Academy multiplayer); with the projected dynamic lights, or a renderer that
+does not have it (rend2), it is the light at the middle the game always had. Jedi Outcast multiplayer, which runs the
+original game modules, keeps its lights as they were.
+
 ## Brightness and overbright (`r_gamma`, `r_overBrightBits`)
 
 The original games set the brightness (the Brightness slider of the video setup, `r_gamma`) with the gamma ramps of the graphics

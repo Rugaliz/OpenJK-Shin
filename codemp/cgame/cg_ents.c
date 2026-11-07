@@ -2542,6 +2542,10 @@ static void CG_Missile( centity_t *cent ) {
 			trap->R_AddLightToScene(cent->lerpOrigin, weapon->altMissileDlight,
 				weapon->altMissileDlightColor[0], weapon->altMissileDlightColor[1], weapon->altMissileDlightColor[2] );
 		}
+		else
+		{
+			CG_BoltLight( cent, s1->weapon, qtrue );
+		}
 
 		// add missile sound
 		if ( weapon->altMissileSound ) {
@@ -2569,6 +2573,10 @@ static void CG_Missile( centity_t *cent ) {
 		{
 			trap->R_AddLightToScene(cent->lerpOrigin, weapon->missileDlight,
 				weapon->missileDlightColor[0], weapon->missileDlightColor[1], weapon->missileDlightColor[2] );
+		}
+		else
+		{
+			CG_BoltLight( cent, s1->weapon, qfalse );
 		}
 
 		// add missile sound

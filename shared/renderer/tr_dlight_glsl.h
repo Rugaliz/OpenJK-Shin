@@ -81,6 +81,7 @@ static const char *dlightFragmentSource =
 	"#version 120\n"
 	"uniform sampler2D uDiffuse;\n"
 	"uniform vec4 uLight;\n"		// xyz: position in the space of the surface, w: radius
+	"uniform vec3 uLightHalf;\n"	// a light along a line: from xyz to an end (0 for a light at a point)
 	"uniform vec3 uColor;\n"
 	"uniform float uTextured;\n"
 	"uniform float uAlphaTest;\n"	// 0 none, 1 alpha > 0, 2 alpha < 0.5, 3 alpha >= 0.5, 4 alpha >= 0.75, as the stage the light goes on
@@ -89,7 +90,8 @@ static const char *dlightFragmentSource =
 	"varying vec3 vNormal;\n"
 	"float height( vec2 st ) { return dot( texture2D( uDiffuse, st ).rgb, vec3( 0.299, 0.587, 0.114 ) ) * uBump; }\n"
 	"void main() {\n"
-	"	vec3 toLight = uLight.xyz - vPos;\n"
+	"	float t = clamp( dot( vPos - uLight.xyz, uLightHalf ) / max( dot( uLightHalf, uLightHalf ), 1e-6 ), -1.0, 1.0 );\n"
+	"	vec3 toLight = uLight.xyz + uLightHalf * t - vPos;\n"	// (from the nearest point of the line)
 	"	float dist2 = dot( toLight, toLight );\n"
 	"	float atten = clamp( 1.0 - dist2 / ( uLight.w * uLight.w ), 0.0, 1.0 );\n"
 	"	float facing = 1.0;\n"
@@ -132,7 +134,7 @@ static const char *dlightFragmentSource =
 static struct {
 	int		generation;
 	GLuint	program;
-	GLint	uniforms[8];
+	GLint	uniforms[9];
 	qboolean	failed;
 } dlightGlsl;
 
@@ -166,6 +168,7 @@ static qboolean ProjectDlightGLSL( void ) {
 		dlightGlsl.uniforms[5] = qglGetUniformLocation( dlightGlsl.program, "uBump" );
 		dlightGlsl.uniforms[6] = qglGetUniformLocation( dlightGlsl.program, "uToWorld" );	// (the Vulkan renderer's rays,
 		dlightGlsl.uniforms[7] = qglGetUniformLocation( dlightGlsl.program, "uShadow" );	// R_DlightShadows: -1 in OpenGL)
+		dlightGlsl.uniforms[8] = qglGetUniformLocation( dlightGlsl.program, "uLightHalf" );
 	}
 
 	dStage = RB_DlightDiffuseStage();
@@ -217,7 +220,8 @@ static qboolean ProjectDlightGLSL( void ) {
 				backEnd.ori.axis[0][1], backEnd.ori.axis[1][1], backEnd.ori.axis[2][1], backEnd.ori.origin[1],
 				backEnd.ori.axis[0][2], backEnd.ori.axis[1][2], backEnd.ori.axis[2][2], backEnd.ori.origin[2] };
 			qglUniform4fv( dlightGlsl.uniforms[6], 3, toWorld );
-			qglUniform1f( dlightGlsl.uniforms[7], R_DlightShadows() ? 1.0f : 0.0f );
+			// (2: the surface is an entity's, a character: the rays start further out, see dlight.frag)
+			qglUniform1f( dlightGlsl.uniforms[7], R_DlightShadows() ? ( backEnd.currentEntity != &tr.worldEntity ? 2.0f : 1.0f ) : 0.0f );
 		}
 	}
 	qglEnableClientState( GL_NORMAL_ARRAY );
@@ -257,8 +261,9 @@ static qboolean ProjectDlightGLSL( void ) {
 			continue;
 		}
 
-		const float		light[4] = { dl->transformed[0], dl->transformed[1], dl->transformed[2], dl->radius };
+		const float		light[4] = { dl->transformed[0], dl->transformed[1], dl->transformed[2], dl->reach };
 		qglUniform4fv( dlightGlsl.uniforms[1], 1, light );
+		qglUniform3f( dlightGlsl.uniforms[8], dl->transformedHalf[0], dl->transformedHalf[1], dl->transformedHalf[2] );
 		qglUniform3f( dlightGlsl.uniforms[2], dl->color[0], dl->color[1], dl->color[2] );
 		R_DrawElements( numIndexes, hitIndexes );
 

@@ -4240,7 +4240,10 @@ void CG_DoSaber( vec3_t origin, vec3_t dir, float length, float lengthMax, saber
 	}
 
 	// always add a light because sabers cast a nice glow before they slice you in half!!  or something...
-	cgi_R_AddLightToScene( mid, (length*2.0f) + (Q_flrand(0.0f, 1.0f)*8.0f), rgb[0], rgb[1], rgb[2] );
+	// (along the whole blade, from the hilt to the tip: the renderer makes it a light at the middle where it can't)
+	vec3_t tip;
+	VectorMA( origin, length, dir, tip );
+	cgi_R_AddLineLightToScene( origin, tip, (length*2.0f) + (Q_flrand(0.0f, 1.0f)*8.0f), rgb[0], rgb[1], rgb[2] );
 
 	memset( &saber, 0, sizeof( refEntity_t ));
 

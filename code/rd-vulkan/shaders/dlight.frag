@@ -13,7 +13,7 @@ layout(push_constant) uniform Constants
 	vec4 light;
 	vec4 colorTextured;
 	vec4 alphaTest;
-	vec4 unused;
+	vec4 lightHalf;		// xyz: a light along a line, from light.xyz to an end (0 for a light at a point)
 #ifdef RAY_QUERY
 	vec4 toWorld0, toWorld1, toWorld2;	// from the space of the surface to the world (vkDlightShadow_t)
 	vec4 shadow;						// x: 1 for the rays
@@ -27,6 +27,7 @@ layout(set = 1, binding = 0) uniform accelerationStructureEXT uScene;
 #define RT_ALPHA_ATLAS 1
 #define RT_ALPHA_DATA 2
 #include "rt_alpha.glsl"
+#define RT_LINE_RAYS 4	// rays to a light along a line (a saber)
 #endif
 
 layout(location = 0) in vec3 vPos;
@@ -40,7 +41,8 @@ float height(vec2 st) { return dot(texture(uDiffuse, st).rgb, vec3(0.299, 0.587,
 
 void main()
 {
-	vec3 toLight = pc.light.xyz - vPos;
+	float t = clamp(dot(vPos - pc.light.xyz, pc.lightHalf.xyz) / max(dot(pc.lightHalf.xyz, pc.lightHalf.xyz), 1e-6), -1.0, 1.0);
+	vec3 toLight = pc.light.xyz + pc.lightHalf.xyz * t - vPos;	// (from the nearest point of the line)
 	float dist2 = dot(toLight, toLight);
 	float atten = clamp(1.0 - dist2 / (pc.light.w * pc.light.w), 0.0, 1.0);
 	float facing = 1.0;
@@ -64,24 +66,38 @@ void main()
 	}
 	vec3 light = pc.colorTextured.rgb * (atten * facing);
 #ifdef RAY_QUERY
-	// a ray from the pixel to the light, in the world, against the level and its brush models (mask 0x03); it stops
-	// short of the light, so that what the light sits on (an explosion on a wall) does not hide it
+	// rays from the pixel to the light, in the world, against the level, its brush models and the characters (as they
+	// were the frame before, mask 0x04): one to a light at a point, RT_LINE_RAYS spread along a light along a line (the
+	// soft shadows a long light makes). They stop short of the light, so that what it sits on (an explosion on a wall,
+	// the hand on a saber's hilt) does not hide it; from a character (shadow.x 2) they start further out, so that the
+	// frame before's copy of it does not shadow it where it has moved since.
 	vec4 p4 = vec4(vPos, 1.0), l4 = vec4(pc.light.xyz, 1.0);
 	vec3 wPos = vec3(dot(pc.toWorld0, p4), dot(pc.toWorld1, p4), dot(pc.toWorld2, p4));
 	vec3 wN = cross(dFdx(wPos), dFdy(wPos));	// (outside the branch: derivatives need every pixel of the quad)
 	if (pc.shadow.x > 0.5 && atten * facing > 0.0) {
 		vec3 wLight = vec3(dot(pc.toWorld0, l4), dot(pc.toWorld1, l4), dot(pc.toWorld2, l4));
-		vec3 d = wLight - wPos;
-		float dist = length(d);
+		vec3 wHalf = vec3(dot(pc.toWorld0.xyz, pc.lightHalf.xyz), dot(pc.toWorld1.xyz, pc.lightHalf.xyz), dot(pc.toWorld2.xyz, pc.lightHalf.xyz));
+		bool line = dot(wHalf, wHalf) > 1e-6;
+		int rays = line ? RT_LINE_RAYS : 1;
+		float tMin = pc.shadow.x > 1.5 ? 8.0 : 0.5;
 		vec3 n = dot(wN, wN) > 1e-12 ? normalize(wN) : vec3(0.0);
-		if (dot(n, d) < 0.0) n = -n;
-		if (dist > 16.0) {
+		float turn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+		float seen = 0.0;
+		for (int i = 0; i < rays; i++) {
+			vec3 target = line ? wLight + wHalf * (((float(i) + turn) / float(rays)) * 2.0 - 1.0) : wLight;
+			vec3 d = target - wPos;
+			float dist = length(d);
+			if (dist <= 16.0) {
+				seen += 1.0;	// (nothing in between worth a ray)
+				continue;
+			}
 			rayQueryEXT query;
-			rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x03,
-				wPos + n * 1.0, 0.5, d / dist, dist - 12.0);
+			rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x07,
+				wPos + (dot(n, d) < 0.0 ? -n : n), tMin, d / dist, dist - 12.0);
 			RT_PROCEED(query)
-			if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) light = vec3(0.0);
+			if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) seen += 1.0;
 		}
+		light *= seen / float(rays);
 	}
 #endif
 	if (pc.colorTextured.a > 0.5) {

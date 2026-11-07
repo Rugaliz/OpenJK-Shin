@@ -359,6 +359,8 @@ void RE_AddDynamicLightToScene( const vec3_t org, float intensity, float r, floa
 	dl->color[1] = g;
 	dl->color[2] = b;
 	dl->additive = additive;
+	VectorClear( dl->half );
+	dl->reach = intensity;
 }
 
 /*
@@ -379,6 +381,35 @@ RE_AddAdditiveLightToScene
 */
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b ) {
 	RE_AddDynamicLightToScene( org, intensity, r, g, b, qtrue );
+}
+
+/*
+=====================
+RE_AddLineLightToScene
+
+A light along a line (a lightsaber's blade, a blaster bolt): with the shader dynamic lights, what it lights is lit from
+the nearest point of the line, as far as DLIGHT_LINE_REACH times intensity and DLIGHT_LINE_BRIGHTNESS times brighter;
+otherwise (the projected dynamic lights) it is the light at the middle the game always had.
+=====================
+*/
+void RE_AddLineLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b ) {
+	vec3_t	mid, half;
+
+	VectorAdd( start, end, mid );
+	VectorScale( mid, 0.5f, mid );
+	VectorSubtract( end, mid, half );
+	if ( !( ( r_dlightGLSL->integer || R_DlightShadows() ) && R_GLSL_Available() ) || intensity <= 0 ) {
+		RE_AddLightToScene( mid, intensity, r, g, b );
+		return;
+	}
+	const int before = r_numdlights;
+	const float reach = intensity * DLIGHT_LINE_REACH;
+	RE_AddLightToScene( mid, reach + VectorLength( half ), r * DLIGHT_LINE_BRIGHTNESS, g * DLIGHT_LINE_BRIGHTNESS, b * DLIGHT_LINE_BRIGHTNESS );
+	if ( r_numdlights > before ) {
+		dlight_t *dl = &backEndData->dlights[r_numdlights - 1];
+		VectorCopy( half, dl->half );
+		dl->reach = reach;
+	}
 }
 
 /*
