@@ -32,6 +32,30 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define UPLOAD_BUFFERS	4
 
 static std::vector<vkTexture_t *>	textures;	// by the renderer's texture number
+
+// The renderer's own numbers for the images of the screen effects and the ray tracing (POST_*_ID, RT_*_ID: from
+// VK_RESERVED_TEXTURE_IDS up) are kept in a table of their own: in textures they would make it two billion long.
+#define VK_RESERVED_TEXTURE_IDS	0x7ffe0000u
+#define VK_RESERVED_TEXTURES	64
+static vkTexture_t					*reservedTextures[VK_RESERVED_TEXTURES];
+
+// where the texture of id is kept (NULL: nowhere, for an id in neither range; create grows textures for id)
+static vkTexture_t **TextureSlot( GLuint id, bool create )
+{
+	if ( id >= VK_RESERVED_TEXTURE_IDS )
+	{
+		return ( id - VK_RESERVED_TEXTURE_IDS < VK_RESERVED_TEXTURES ) ? &reservedTextures[id - VK_RESERVED_TEXTURE_IDS] : NULL;
+	}
+	if ( id >= textures.size() )
+	{
+		if ( !create )
+		{
+			return NULL;
+		}
+		textures.resize( id + 1024, NULL );
+	}
+	return &textures[id];
+}
 static vkTexture_t					whiteTexture;
 static unsigned long long			nextSerial = 1;
 
@@ -201,15 +225,12 @@ VK_TextureForId
 */
 vkTexture_t *VK_TextureForId( GLuint id, bool create )
 {
-	if ( id >= textures.size() )
+	vkTexture_t **slot = TextureSlot( id, create );
+	if ( !slot )
 	{
-		if ( !create )
-		{
-			return NULL;
-		}
-		textures.resize( id + 1024, NULL );
+		return NULL;
 	}
-	if ( !textures[id] && create )
+	if ( !*slot && create )
 	{
 		vkTexture_t *texture = new vkTexture_t();
 		texture->serial = nextSerial++;
@@ -217,9 +238,9 @@ vkTexture_t *VK_TextureForId( GLuint id, bool create )
 		texture->magFilter = GL_LINEAR;
 		texture->wrapS = texture->wrapT = GL_REPEAT;
 		texture->anisotropy = 1.0f;
-		textures[id] = texture;
+		*slot = texture;
 	}
-	return textures[id];
+	return *slot;
 }
 
 vkTexture_t *VK_WhiteTexture( void )
@@ -521,7 +542,7 @@ void VK_DeleteTexture( GLuint id )
 		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
 	}
 	delete texture;
-	textures[id] = NULL;
+	*TextureSlot( id, false ) = NULL;
 }
 
 static VkSamplerAddressMode WrapMode( GLenum wrap )
@@ -616,16 +637,18 @@ void VK_ShutdownImages( void )
 {
 	VK_FlushUploads( true );
 	vkDeviceWaitIdle( vk.device );
-	for ( size_t i = 0; i < textures.size(); i++ )
+	for ( size_t i = 0; i < textures.size() + VK_RESERVED_TEXTURES; i++ )
 	{
-		if ( textures[i] )
+		vkTexture_t *&texture = ( i < textures.size() ) ? textures[i] : reservedTextures[i - textures.size()];
+		if ( texture )
 		{
-			if ( !textures[i]->external )
+			if ( !texture->external )
 			{
-				vkDestroyImageView( vk.device, textures[i]->view, NULL );
-				vkDestroyImage( vk.device, textures[i]->image, NULL );
+				vkDestroyImageView( vk.device, texture->view, NULL );
+				vkDestroyImage( vk.device, texture->image, NULL );
 			}
-			delete textures[i];
+			delete texture;
+			texture = NULL;
 		}
 	}
 	textures.clear();
