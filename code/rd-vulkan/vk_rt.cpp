@@ -206,6 +206,64 @@ void VK_RT_FreeBuffer( vkRtBuffer_t *buffer )
 	memset( buffer, 0, sizeof( *buffer ) );
 }
 
+/*
+What is replaced by a larger one may still be used: by builds recorded before into the command buffer that is not sent
+yet (a level's first frame builds hundreds of structures with one scratch buffer, which grows on the way), or by the
+frame before, still on the GPU. Freeing it at once had those builds write into freed memory, and a ray through the
+structure they made could hang the GPU ("device lost"). It is kept until it is surely not used: two frames on (a frame
+waits for the one two before it as it starts), or when the device is idle.
+*/
+typedef struct {
+	vkRtStructure_t	structure;
+	vkRtBuffer_t	buffer;
+	int				frame;		// vk.frameCounter when it was replaced
+} rtRetired_t;
+
+static std::vector<rtRetired_t> rtRetired;
+
+static void VK_RT_RetireBuffer( vkRtBuffer_t *buffer )
+{
+	if ( buffer->buffer )
+	{
+		rtRetired_t retired = {};
+		retired.buffer = *buffer;
+		retired.frame = vk.frameCounter;
+		rtRetired.push_back( retired );
+	}
+	memset( buffer, 0, sizeof( *buffer ) );
+}
+
+static void VK_RT_RetireStructure( vkRtStructure_t *structure )
+{
+	if ( structure->handle || structure->storage.buffer )
+	{
+		rtRetired_t retired = {};
+		retired.structure = *structure;
+		retired.frame = vk.frameCounter;
+		rtRetired.push_back( retired );
+	}
+	memset( structure, 0, sizeof( *structure ) );
+}
+
+// all: the device is idle
+static void VK_RT_FreeRetired( bool all )
+{
+	for ( size_t i = 0; i < rtRetired.size(); )
+	{
+		if ( all || rtRetired[i].frame <= vk.frameCounter - 2 )
+		{
+			VK_RT_FreeStructure( &rtRetired[i].structure );
+			VK_RT_FreeBuffer( &rtRetired[i].buffer );
+			rtRetired[i] = rtRetired.back();
+			rtRetired.pop_back();
+		}
+		else
+		{
+			i++;
+		}
+	}
+}
+
 // a scratch buffer of at least size, with room to align its address
 static bool VK_RT_EnsureScratch( vkRtBuffer_t *scratch, VkDeviceSize size )
 {
@@ -213,7 +271,7 @@ static bool VK_RT_EnsureScratch( vkRtBuffer_t *scratch, VkDeviceSize size )
 	{
 		return true;
 	}
-	VK_RT_FreeBuffer( scratch );
+	VK_RT_RetireBuffer( scratch );
 	return VK_RT_NewBuffer( scratch, size + scratchAlignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false );
 }
 
@@ -264,7 +322,7 @@ static bool VK_RT_Build( VkCommandBuffer cmd, vkRtStructure_t *structure, vkRtBu
 
 	if ( !structure->handle || structure->storage.size < sizes.accelerationStructureSize )
 	{
-		VK_RT_FreeStructure( structure );
+		VK_RT_RetireStructure( structure );
 		if ( !VK_RT_NewBuffer( &structure->storage, sizes.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false ) )
 		{
 			return false;
@@ -815,8 +873,9 @@ static void VK_RT_PrepareLevel( VkCommandBuffer cmd )
 		(int)rtScene.models.size(), solid + alpha, alpha, (int)rtAlpha.images.size(), VK_Now() - start );
 }
 
-static void VK_RT_FreeScene( void )
+static void VK_RT_FreeScene( void )	// (the device is idle)
 {
+	VK_RT_FreeRetired( true );
 	for ( size_t i = 0; i < rtScene.models.size(); i++ )
 	{
 		VK_RT_FreeStructure( &rtScene.models[i].blas );
@@ -902,6 +961,8 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 		}
 		rtScene.world = tr.world;
 	}
+
+	VK_RT_FreeRetired( false );
 
 	auto &frame = rtScene.frames[vk.frameIndex];
 	if ( frame.frame == vk.frameCounter + 1 && frame.tlas.handle )
@@ -1010,7 +1071,7 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	const VkDeviceSize bytes = vertexBytes + (VkDeviceSize)numTriangles * 3 * sizeof( uint32_t );
 	if ( frame.charactersInput.size < bytes )
 	{
-		VK_RT_FreeBuffer( &frame.charactersInput );
+		VK_RT_RetireBuffer( &frame.charactersInput );
 		if ( !VK_RT_NewBuffer( &frame.charactersInput, bytes + bytes / 2 + sizeof( VkAccelerationStructureInstanceKHR ) + 16,
 				VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
 		{

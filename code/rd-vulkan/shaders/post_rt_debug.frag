@@ -32,7 +32,8 @@ void main()
 	vec3 world = vec3(dot(p.row0, eye), dot(p.row1, eye), dot(p.row2, eye));
 
 	// the surface, from how the position changes across the pixel, towards the eye
-	vec3 n = normalize(cross(dFdx(world), dFdy(world)));
+	vec3 n = cross(dFdx(world), dFdy(world));
+	n = dot(n, n) > 1e-12 ? normalize(n) : vec3(0.0, 0.0, 1.0);	// (no NaN into a ray query: the GPU can hang)
 	vec3 toEye = vec3(p.row0.w, p.row1.w, p.row2.w) - world;
 	if (dot(n, toEye) < 0.0) n = -n;
 

@@ -43,7 +43,8 @@ void main()
 	vec4 eye = vec4(-(ndc.x + p.a.z) * z / p.a.x, -(ndc.y + p.a.w) * z / p.a.y, z, 1.0);
 	vec3 world = vec3(dot(p.row0, eye), dot(p.row1, eye), dot(p.row2, eye));
 
-	vec3 n = normalize(cross(dFdx(world), dFdy(world)));
+	vec3 n = cross(dFdx(world), dFdy(world));
+	n = dot(n, n) > 1e-12 ? normalize(n) : vec3(0.0, 0.0, 1.0);	// (no NaN into a ray query: the GPU can hang)
 	vec3 toEye = vec3(p.row0.w, p.row1.w, p.row2.w) - world;
 	if (dot(n, toEye) < 0.0) n = -n;
 	float turn = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));

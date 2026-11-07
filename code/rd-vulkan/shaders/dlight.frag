@@ -87,8 +87,9 @@ void main()
 			vec3 target = line ? wLight + wHalf * (((float(i) + turn) / float(rays)) * 2.0 - 1.0) : wLight;
 			vec3 d = target - wPos;
 			float dist = length(d);
-			if (dist <= 16.0) {
-				seen += 1.0;	// (nothing in between worth a ray)
+			if (dist - 12.0 <= tMin + 1.0) {
+				// (nothing in between worth a ray; and a ray query must not end before it starts: the GPU can hang)
+				seen += 1.0;
 				continue;
 			}
 			rayQueryEXT query;
