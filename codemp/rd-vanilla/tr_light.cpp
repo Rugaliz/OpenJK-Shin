@@ -369,6 +369,14 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 		}
 	}
 
+	// what the characters' shadows go by (RB_ShadowTessEnd): the level's light, before the dynamic lights
+	VectorCopy( ent->lightDir, ent->shadowLightDir );
+	{
+		const float directed = Q_max( ent->directedLight[0], Q_max( ent->directedLight[1], ent->directedLight[2] ) );
+		const float ambient = Q_max( ent->ambientLight[0], Q_max( ent->ambientLight[1], ent->ambientLight[2] ) );
+		ent->shadowStrength = ( directed + ambient > 1.0f ) ? directed / ( directed + ambient ) : 0.5f;
+	}
+
 	//
 	// modify the light by dynamic lights
 	//

@@ -217,18 +217,19 @@ static void RB_ShadowCountEdge( int a, int b, int *numUsed )
 =================
 RB_ShadowTilt
 
-How far the shadow leans for each unit of height, from the light direction at the entity
+How far the shadow leans for each unit of height, from the direction of the level's light at the entity (in the
+world: ent->lightDir is turned with the entity, and turned towards the dynamic lights)
 =================
 */
 static void RB_ShadowTilt( const trRefEntity_t *ent, float *tx, float *ty )
 {
-	float lz = ent->lightDir[2];
+	float lz = ent->shadowLightDir[2];
 	if ( lz < 0.35f ) {
 		lz = 0.35f;
 	}
 
-	float x = ent->lightDir[0] / lz * r_shadowTilt->value;
-	float y = ent->lightDir[1] / lz * r_shadowTilt->value;
+	float x = ent->shadowLightDir[0] / lz * r_shadowTilt->value;
+	float y = ent->shadowLightDir[1] / lz * r_shadowTilt->value;
 	const float len = sqrtf( x * x + y * y );
 	const float maxTilt = 1.2f;
 
@@ -367,10 +368,8 @@ void RB_ShadowTessEnd( void )
 		}
 	}
 
-	// how much of the light comes from a direction, which is what a shadow takes away
-	const float directed = Q_max( ent->directedLight[0], Q_max( ent->directedLight[1], ent->directedLight[2] ) );
-	const float ambient = Q_max( ent->ambientLight[0], Q_max( ent->ambientLight[1], ent->ambientLight[2] ) );
-	const float strength = ( directed + ambient > 1.0f ) ? directed / ( directed + ambient ) : 0.5f;
+	// how much of the level's light comes from a direction, which is what a shadow takes away
+	const float strength = ent->shadowStrength;
 	shStrengthSum += strength;
 	shCasters++;
 

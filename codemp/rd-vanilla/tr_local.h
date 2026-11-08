@@ -143,6 +143,10 @@ typedef struct trRefEntity_s {
 	int			ambientLightInt;	// 32 bit rgba packed
 	vec3_t		directedLight;
 	int			dlightBits;
+	// the level's light alone, without the dynamic lights, for the characters' shadows (which the dynamic lights
+	// would turn towards themselves and darken): world space, towards it, and the share of it from that direction
+	vec3_t		shadowLightDir;
+	float		shadowStrength;
 } trRefEntity_t;
 
 
