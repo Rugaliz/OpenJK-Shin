@@ -1625,6 +1625,8 @@ SHADOWS
 
 void RB_ShadowTessEnd( void );
 void RB_ShadowFinish( void );
+qboolean RB_ShadowsDarken( void );		// (then the dynamic lights' passes wait for it:)
+void RB_DrawDeferredDlights( void );	// after RB_ShadowFinish, tr_dlight_glsl.h
 void RB_ProjectionShadowDeform( void );
 
 /*

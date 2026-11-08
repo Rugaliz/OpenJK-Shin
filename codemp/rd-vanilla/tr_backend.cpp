@@ -859,6 +859,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 				if (!didShadowPass && shader && shader->sort > SS_BANNER)
 				{
 					RB_ShadowFinish();
+					RB_DrawDeferredDlights();
 					didShadowPass = true;
 				}
 			}
@@ -1177,6 +1178,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	{
 		// darken down any stencil shadows
 		RB_ShadowFinish();
+		RB_DrawDeferredDlights();
 		didShadowPass = true;
 	}
 

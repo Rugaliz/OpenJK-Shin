@@ -151,6 +151,12 @@ static int RB_ShadowMode( void )
 	return 2;
 }
 
+// RB_ShadowFinish darkens the view: the light passes of the opaque surfaces wait for it (RB_DrawDeferredDlights)
+qboolean RB_ShadowsDarken( void )
+{
+	return RB_ShadowMode() ? qtrue : qfalse;
+}
+
 static inline int RB_ShadowCell( float v )
 {
 	return (int)floorf( v * 2.0f );

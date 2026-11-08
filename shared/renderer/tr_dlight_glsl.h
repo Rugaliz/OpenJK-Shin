@@ -283,3 +283,140 @@ static qboolean ProjectDlightGLSL( void ) {
 	}
 	return qtrue;
 }
+
+/*
+=============================================================================
+
+THE LIGHT PASSES AFTER THE SHADOWS
+
+With the characters' shadows on (RB_ShadowsDarken), the light passes of the opaque surfaces are kept, with what they
+draw, until RB_ShadowFinish has darkened the view, and drawn then (RB_DrawDeferredDlights). The shadows are those of
+the level's light, and they darken the finished picture: drawn before them, what a dynamic light adds was darkened
+too, where it should light up the shadow (a saber the shadow its wielder casts from a lamp, a blaster bolt the floor
+under a character). A fogged surface keeps its pass before its fog, which has to cover it.
+
+=============================================================================
+*/
+
+#include <vector>
+
+typedef struct {
+	shader_t		*shader;
+	trRefEntity_t	*entity;
+	orientationr_t	ori;
+	float			floatTime;
+	int				dlightBits;
+	int				firstVertex, numVertexes;
+	int				firstIndex, numIndexes;
+} deferredDlight_t;
+
+#define DLIGHT_DEFERRED_FLOATS	10		// a vertex: xyz and the normal (4 floats each, as in tess), the texture coordinates
+
+static std::vector<deferredDlight_t>	dlDeferred;
+static std::vector<float>				dlDeferredVertexes;
+static std::vector<glIndex_t>			dlDeferredIndexes;
+
+// The light pass of the opaque surface in tess, now or kept for after the shadows. qfalse as ProjectDlightGLSL.
+static qboolean RB_DlightPassGLSL( void ) {
+	if ( !backEnd.refdef.num_dlights ) {
+		return qtrue;
+	}
+	// (the first pass builds the program, and tells whether there is one)
+	if ( !RB_ShadowsDarken() || !dlightGlsl.program || dlightGlsl.generation != R_GLSL_Generation() ||
+		 ( tess.fogNum && tess.shader->fogPass ) ) {
+		return ProjectDlightGLSL();
+	}
+
+	deferredDlight_t d;
+	d.shader = tess.shader;
+	d.entity = backEnd.currentEntity;
+	d.ori = backEnd.ori;
+	d.floatTime = backEnd.refdef.floatTime;
+	d.dlightBits = tess.dlightBits;
+	d.firstVertex = (int)( dlDeferredVertexes.size() / DLIGHT_DEFERRED_FLOATS );
+	d.numVertexes = tess.numVertexes;
+	d.firstIndex = (int)dlDeferredIndexes.size();
+	d.numIndexes = tess.numIndexes;
+	for ( int i = 0; i < tess.numVertexes; i++ ) {
+		const float v[DLIGHT_DEFERRED_FLOATS] = {
+			tess.xyz[i][0], tess.xyz[i][1], tess.xyz[i][2], tess.xyz[i][3],
+			tess.normal[i][0], tess.normal[i][1], tess.normal[i][2], tess.normal[i][3],
+			tess.texCoords[i][0][0], tess.texCoords[i][0][1] };
+		dlDeferredVertexes.insert( dlDeferredVertexes.end(), v, v + DLIGHT_DEFERRED_FLOATS );
+	}
+	dlDeferredIndexes.insert( dlDeferredIndexes.end(), tess.indexes, tess.indexes + tess.numIndexes );
+	dlDeferred.push_back( d );
+	return qtrue;
+}
+
+// the depth range RB_RenderDrawSurfList gives the entity
+static void RB_DlightDepthRange( const trRefEntity_t *ent ) {
+	if ( ent != &tr.worldEntity && ( ent->e.renderfx & RF_NODEPTH ) ) {
+		qglDepthRange( 0, 0 );
+	} else if ( ent != &tr.worldEntity && ( ent->e.renderfx & RF_DEPTHHACK ) ) {
+		qglDepthRange( 0, .3 );
+	} else {
+		qglDepthRange( 0, 1 );
+	}
+}
+
+// After RB_ShadowFinish (tess is empty there): the light passes kept, each with its surface back in tess and its
+// entity's space; then the entity, the space and the time of the view's drawing as they were.
+void RB_DrawDeferredDlights( void ) {
+	if ( dlDeferred.empty() ) {
+		return;
+	}
+	trRefEntity_t			*savedEntity = backEnd.currentEntity;
+	const orientationr_t	savedOri = backEnd.ori;
+	const float				savedTime = backEnd.refdef.floatTime;
+	const trRefEntity_t		*entity = NULL;
+
+	qglDisableClientState( GL_COLOR_ARRAY );
+	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+	for ( size_t b = 0; b < dlDeferred.size(); b++ ) {
+		const deferredDlight_t *d = &dlDeferred[b];
+		const float *v = &dlDeferredVertexes[(size_t)d->firstVertex * DLIGHT_DEFERRED_FLOATS];
+
+		for ( int i = 0; i < d->numVertexes; i++, v += DLIGHT_DEFERRED_FLOATS ) {
+			VectorCopy4( v, tess.xyz[i] );
+			VectorCopy4( v + 4, tess.normal[i] );
+			tess.texCoords[i][0][0] = v[8];
+			tess.texCoords[i][0][1] = v[9];
+		}
+		memcpy( tess.indexes, &dlDeferredIndexes[d->firstIndex], d->numIndexes * sizeof( glIndex_t ) );
+		tess.numVertexes = d->numVertexes;
+		tess.numIndexes = d->numIndexes;
+		tess.shader = d->shader;
+		tess.dlightBits = d->dlightBits;
+		tess.fogNum = 0;
+
+		if ( d->entity != entity ) {
+			entity = d->entity;
+			backEnd.currentEntity = d->entity;
+			backEnd.ori = d->ori;
+			qglLoadMatrixf( backEnd.ori.modelMatrix );
+			R_TransformDlights( backEnd.refdef.num_dlights, backEnd.refdef.dlights, &backEnd.ori );
+			RB_DlightDepthRange( entity );
+		}
+		backEnd.refdef.floatTime = d->floatTime;
+		GL_Cull( tess.shader->cullType );
+		qglVertexPointer( 3, GL_FLOAT, 16, tess.xyz );
+		ProjectDlightGLSL();
+		if ( tess.shader->polygonOffset ) {
+			qglDisable( GL_POLYGON_OFFSET_FILL );
+		}
+	}
+
+	tess.numVertexes = tess.numIndexes = 0;
+	tess.dlightBits = 0;
+	backEnd.currentEntity = savedEntity;
+	backEnd.ori = savedOri;
+	backEnd.refdef.floatTime = savedTime;
+	qglLoadMatrixf( backEnd.ori.modelMatrix );
+	R_TransformDlights( backEnd.refdef.num_dlights, backEnd.refdef.dlights, &backEnd.ori );
+	RB_DlightDepthRange( savedEntity );
+
+	dlDeferred.clear();
+	dlDeferredVertexes.clear();
+	dlDeferredIndexes.clear();
+}
