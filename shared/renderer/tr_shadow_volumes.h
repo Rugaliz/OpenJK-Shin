@@ -31,6 +31,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include <vector>
 #include <algorithm>
+#include <string>
+#include <unordered_map>
 
 #ifndef R_SHADOWS_IN_ONE_DRAWCALL
 #error "define R_SHADOWS_IN_ONE_DRAWCALL before including tr_shadow_volumes.h"
@@ -725,6 +727,324 @@ static void RB_ShadowMapRect( const vec3_t U, const vec3_t V, const vec3_t L, co
 	}
 }
 
+/*
+=============================================================================
+
+RAY TRACED: THE LEVEL'S LAMPS AND THE CONTACT SHADOW
+
+With ray tracing a character's shadow is cast from the lamps of the level where it keeps them: the "light" entities
+q3map lit it with, which the Jedi Outcast levels have (most Jedi Academy levels were compiled without them). From each
+of the few lamps that light the character most, and that it can see, a soft shadow away from the lamp, as dark as the
+lamp's share of the light it has there: the darkness the light grid gives (how much of the light comes from a
+direction, RB_ShadowTessEnd) is shared out between them as q3map shared it out, by their brightness at the character.
+Where there are none, the grid's one direction, fainter and softer than a lamp's as it is a guess. And around every
+character a short contact shadow from all around: the light that comes from no one direction, which it takes away
+close to it.
+
+The lamps a character takes are kept for the 16 units cube it is in (what can see them is found with the server's
+traces through the level): one that stands still costs nothing.
+
+=============================================================================
+*/
+
+typedef struct {
+	vec3_t	origin;
+	float	photons;			// q3map's: the intensity times its point scale
+	float	luminance;			// of its colour (the brightest component 1)
+	float	radius;				// how big it is: how soft its shadows are
+	bool	linear;				// it falls off with the distance (spawnflags 1), not with its square
+	bool	spot;				// a spotlight: towards its target, in a cone
+	vec3_t	spotDir;
+	float	spotRadiusByDist;	// the radius of the cone for each unit along it
+} shadowLamp_t;
+
+#define SHADOW_LAMPS_MAX		4		// for a caster
+#define SHADOW_LAMP_TRACES		12		// at most this many tried for one, the brightest first
+#define SHADOW_LAMP_RADIUS		12.0f	// when the entity does not say (_deviance)
+#define SHADOW_CONTACT_REACH	32.0f
+#define SHADOW_CONTACT_SHARE	0.5f	// of the light from no one direction, what the contact shadow takes where all its rays are blocked
+#define SHADOW_GRID_GUESS		0.6f	// the grid direction's darkness, where there are no lamps
+
+typedef struct {
+	int		count;
+	int		lamps[SHADOW_LAMPS_MAX];
+	float	weights[SHADOW_LAMPS_MAX];
+} shadowLampChoice_t;
+
+static std::vector<shadowLamp_t>						shLamps;
+static std::unordered_map<long long, shadowLampChoice_t>	shLampChoices;
+static std::vector<shadowMapCaster_t>					shRtEntries;
+
+static float RB_EntityFloat( const std::vector<std::pair<std::string, std::string> > &ent, const char *key, float def )
+{
+	for ( size_t i = 0; i < ent.size(); i++ ) {
+		if ( !Q_stricmp( ent[i].first.c_str(), key ) ) {
+			return (float)atof( ent[i].second.c_str() );
+		}
+	}
+	return def;
+}
+
+static const char *RB_EntityString( const std::vector<std::pair<std::string, std::string> > &ent, const char *key )
+{
+	for ( size_t i = 0; i < ent.size(); i++ ) {
+		if ( !Q_stricmp( ent[i].first.c_str(), key ) ) {
+			return ent[i].second.c_str();
+		}
+	}
+	return "";
+}
+
+void R_ShadowLampsLoad( const char *text, int length )
+{
+	std::vector<std::vector<std::pair<std::string, std::string> > > ents;
+	std::vector<std::pair<std::string, std::string> > *ent = NULL;
+	std::string token[2];
+	int numTokens = 0;
+
+	shLamps.clear();
+	shLampChoices.clear();
+
+	// { "key" "value" ... } ...
+	for ( int i = 0; i < length && text[i]; i++ ) {
+		if ( text[i] == '{' ) {
+			ents.emplace_back();
+			ent = &ents.back();
+			numTokens = 0;
+		} else if ( text[i] == '}' ) {
+			ent = NULL;
+		} else if ( text[i] == '"' && ent ) {
+			int j = i + 1;
+			while ( j < length && text[j] && text[j] != '"' ) {
+				j++;
+			}
+			token[numTokens++].assign( text + i + 1, j - i - 1 );
+			if ( numTokens == 2 ) {
+				ent->emplace_back( token[0], token[1] );
+				numTokens = 0;
+			}
+			i = j;
+		}
+	}
+
+	for ( size_t e = 0; e < ents.size(); e++ ) {
+		if ( Q_stricmp( RB_EntityString( ents[e], "classname" ), "light" ) ) {
+			continue;
+		}
+		shadowLamp_t lamp = {};
+		if ( sscanf( RB_EntityString( ents[e], "origin" ), "%f %f %f", &lamp.origin[0], &lamp.origin[1], &lamp.origin[2] ) != 3 ) {
+			continue;
+		}
+		// as q3map: "light" (or "_light"), 300 when there is none, times "scale"
+		float intensity = RB_EntityFloat( ents[e], "light", 0.0f );
+		if ( intensity == 0.0f ) {
+			intensity = RB_EntityFloat( ents[e], "_light", 300.0f );
+		}
+		intensity *= RB_EntityFloat( ents[e], "scale", 1.0f );
+		if ( intensity <= 0.0f ) {
+			continue;	// (a negative light takes light away, it casts no shadow)
+		}
+		lamp.photons = intensity * 7500.0f;
+		vec3_t color = { 1.0f, 1.0f, 1.0f };
+		sscanf( RB_EntityString( ents[e], "_color" ), "%f %f %f", &color[0], &color[1], &color[2] );
+		const float brightest = Q_max( color[0], Q_max( color[1], color[2] ) );
+		lamp.luminance = brightest > 0.0f ? ( 0.299f * color[0] + 0.587f * color[1] + 0.114f * color[2] ) / brightest : 1.0f;
+		lamp.radius = RB_EntityFloat( ents[e], "_deviance", 0.0f );
+		if ( lamp.radius <= 0.0f ) {
+			lamp.radius = SHADOW_LAMP_RADIUS;
+		}
+		lamp.linear = ( (int)RB_EntityFloat( ents[e], "spawnflags", 0.0f ) & 1 ) != 0;
+
+		// a spotlight aims at the entity it targets
+		const char *target = RB_EntityString( ents[e], "target" );
+		for ( size_t t = 0; *target && t < ents.size(); t++ ) {
+			vec3_t at;
+			if ( Q_stricmp( RB_EntityString( ents[t], "targetname" ), target ) ||
+				 sscanf( RB_EntityString( ents[t], "origin" ), "%f %f %f", &at[0], &at[1], &at[2] ) != 3 ) {
+				continue;
+			}
+			VectorSubtract( at, lamp.origin, lamp.spotDir );
+			const float dist = VectorNormalize( lamp.spotDir );
+			if ( dist > 0.0f ) {
+				lamp.spot = true;
+				lamp.spotRadiusByDist = ( RB_EntityFloat( ents[e], "radius", 64.0f ) + 16.0f ) / dist;
+			}
+			break;
+		}
+		shLamps.push_back( lamp );
+	}
+	ri.Printf( PRINT_DEVELOPER, "shadows: %d lamps in the level\n", (int)shLamps.size() );
+}
+
+#ifdef RD_VULKAN
+// How much light the lamp gave a point in q3map, for its colour (without the angle: the point is a character, lit
+// from all sides); 0 outside a spotlight's cone
+static float RB_LampAt( const shadowLamp_t *lamp, const vec3_t point )
+{
+	vec3_t d;
+	VectorSubtract( point, lamp->origin, d );
+	float dist = VectorLength( d );
+	float scale = 1.0f;
+
+	if ( lamp->spot ) {
+		const float along = DotProduct( d, lamp->spotDir );
+		if ( along <= 0.0f ) {
+			return 0.0f;
+		}
+		vec3_t off;
+		VectorMA( d, -along, lamp->spotDir, off );
+		const float radiusAt = lamp->spotRadiusByDist * along, r = VectorLength( off );
+		if ( r >= radiusAt ) {
+			return 0.0f;
+		}
+		if ( r > radiusAt - 32.0f ) {
+			scale = ( radiusAt - r ) / 32.0f;	// (q3map's soft edge)
+		}
+	}
+	if ( dist < 16.0f ) {
+		dist = 16.0f;
+	}
+	const float add = lamp->linear ? lamp->photons / 8000.0f - dist : lamp->photons / ( dist * dist );
+	return add > 0.0f ? add * scale * lamp->luminance : 0.0f;
+}
+
+// The lamps that light a point most and that it can see, with how much (the server's traces: only the single player
+// renderer has them, and only the Vulkan one ray traces)
+static const shadowLampChoice_t *RB_ShadowLampsAt( const vec3_t point )
+{
+	const long long key = ( (long long)( (int)floorf( point[0] / 16.0f ) & 0xFFFFF ) << 40 ) |
+		( (long long)( (int)floorf( point[1] / 16.0f ) & 0xFFFFF ) << 20 ) | ( (int)floorf( point[2] / 16.0f ) & 0xFFFFF );
+	auto known = shLampChoices.find( key );
+	if ( known != shLampChoices.end() ) {
+		return &known->second;
+	}
+	if ( shLampChoices.size() > 8192 ) {
+		shLampChoices.clear();
+	}
+
+	// the brightest there
+	std::pair<float, int> best[SHADOW_LAMP_TRACES];
+	int numBest = 0;
+	for ( size_t i = 0; i < shLamps.size(); i++ ) {
+		const float add = RB_LampAt( &shLamps[i], point );
+		if ( add <= 0.0f || ( numBest == SHADOW_LAMP_TRACES && add <= best[numBest - 1].first ) ) {
+			continue;
+		}
+		int k = numBest < SHADOW_LAMP_TRACES ? numBest++ : numBest - 1;
+		for ( ; k > 0 && best[k - 1].first < add; k-- ) {
+			best[k] = best[k - 1];
+		}
+		best[k] = std::make_pair( add, (int)i );
+	}
+
+	// those it can see, brightest first; one much fainter than the brightest of them is left out
+	shadowLampChoice_t choice = {};
+	for ( int b = 0; b < numBest && choice.count < SHADOW_LAMPS_MAX; b++ ) {
+		const shadowLamp_t *lamp = &shLamps[best[b].second];
+		if ( choice.count && best[b].first < 0.05f * choice.weights[0] ) {
+			break;
+		}
+		trace_t tr;
+		ri.SV_Trace( &tr, point, vec3_origin, vec3_origin, lamp->origin, ENTITYNUM_NONE, CONTENTS_SOLID, G2_NOCOLLIDE, 0 );
+		if ( tr.fraction < 1.0f && Distance( tr.endpos, lamp->origin ) > 24.0f ) {
+			continue;	// (a lamp often sits in its fixture: what stops near it does not hide it)
+		}
+		choice.lamps[choice.count] = best[b].second;
+		choice.weights[choice.count++] = best[b].first;
+	}
+	return &( shLampChoices[key] = choice );
+}
+#endif
+
+// A ray traced entry seen along L: rows that put the box of the caster (mins, maxs) seen so onto 0 to 1 around its
+// middle, grown by magnify and by pad on each side
+static void RB_ShadowRtArea( shadowMapCaster_t *e, const vec3_t mins, const vec3_t maxs, const vec3_t L, float magnify, float pad )
+{
+	vec3_t U, V, a, mid;
+	const vec3_t ref = { 1.0f, 0.0f, 0.0f }, ref2 = { 0.0f, 1.0f, 0.0f };
+	VectorMA( fabsf( L[0] ) < 0.9f ? ref : ref2, -DotProduct( fabsf( L[0] ) < 0.9f ? ref : ref2, L ), L, U );
+	VectorNormalize( U );
+	CrossProduct( L, U, V );
+
+	float extent = 0.0f;
+	VectorAdd( mins, maxs, mid );
+	VectorScale( mid, 0.5f, mid );
+	for ( int k = 0; k < 8; k++ ) {
+		const vec3_t corner = { ( k & 1 ) ? maxs[0] : mins[0], ( k & 2 ) ? maxs[1] : mins[1], ( k & 4 ) ? maxs[2] : mins[2] };
+		vec3_t d;
+		VectorSubtract( corner, mid, d );
+		extent = Q_max( extent, Q_max( fabsf( DotProduct( d, U ) ), fabsf( DotProduct( d, V ) ) ) );
+	}
+	const float size = 2.0f * ( extent * magnify + pad );
+	VectorScale( U, 1.0f / size, a );
+	RB_ShadowMapEyeRow( a, 0.5f - DotProduct( mid, U ) / size, e->rowS );
+	VectorScale( V, 1.0f / size, a );
+	RB_ShadowMapEyeRow( a, 0.5f - DotProduct( mid, V ) / size, e->rowT );
+	e->area[0] = e->area[1] = 0.0f;
+	e->area[2] = e->area[3] = 1.0f;
+}
+
+// The ray traced entries of a caster (its box, the floor under it, the grid's direction L and its spread, darkness
+// the grid's darkness, strength the share of the grid's light that has a direction)
+static void RB_ShadowRtEntries( const vec3_t mins, const vec3_t maxs, float floorZ, const vec3_t L, float spread, float darkness, float strength )
+{
+	shadowMapCaster_t e = {};
+	vec3_t mid;
+	VectorAdd( mins, maxs, mid );
+	VectorScale( mid, 0.5f, mid );
+	e.floorZ = floorZ;
+	const float pad = 4.0f + 24.0f * r_shadowSoftness->value;
+
+	int numLamps = 0;
+#ifdef RD_VULKAN
+	static cvar_t *lampsCvar = NULL;
+	if ( !lampsCvar ) {
+		lampsCvar = ri.Cvar_Get( "r_rtLamps", "1", CVAR_ARCHIVE_ND );	// 0: the grid's direction, as without the lamps
+	}
+	// (a view of the level only: the lamps are of the last level loaded, the server's traces need it to be running)
+	if ( lampsCvar->integer && !shLamps.empty() && tr.world && !( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) ) {
+		const shadowLampChoice_t *choice = RB_ShadowLampsAt( mid );
+		float total = 0.0f;
+		for ( int i = 0; i < choice->count; i++ ) {
+			total += choice->weights[i];
+		}
+		for ( int i = 0; i < choice->count && shRtEntries.size() < SHADOWMAP_MAX_RT; i++ ) {
+			const shadowLamp_t *lamp = &shLamps[choice->lamps[i]];
+			vec3_t toLamp;
+			VectorSubtract( lamp->origin, mid, toLamp );
+			const float dist = VectorNormalize( toLamp );
+			// the shadow is the caster's seen from the lamp, larger the further the floor is behind it than the caster
+			const float toFloor = ( lamp->origin[2] - floorZ ) / Q_max( toLamp[2], 0.1f );
+			RB_ShadowRtArea( &e, mins, maxs, toLamp, Com_Clamp( 1.0f, 4.0f, toFloor / Q_max( dist, 1.0f ) ), pad );
+			VectorCopy( lamp->origin, e.light );
+			e.light[3] = lamp->radius;
+			e.darkness = darkness * choice->weights[i] / total;
+			e.rtType = SHADOW_RT_LAMP;
+			shRtEntries.push_back( e );
+			numLamps++;
+		}
+	}
+#endif
+	if ( !numLamps && shRtEntries.size() < SHADOWMAP_MAX_RT ) {
+		RB_ShadowRtArea( &e, mins, maxs, L, 1.0f, pad * 2.0f );	// (seen along a direction, the shadow is as large as the caster)
+		VectorCopy( L, e.light );
+		e.light[3] = spread * 2.0f;
+		e.darkness = darkness * SHADOW_GRID_GUESS;
+		e.rtType = SHADOW_RT_DIRECTION;
+		shRtEntries.push_back( e );
+	}
+	if ( shRtEntries.size() < SHADOWMAP_MAX_RT ) {
+		const vec3_t up = { 0.0f, 0.0f, 1.0f };
+		RB_ShadowRtArea( &e, mins, maxs, up, 1.0f, SHADOW_CONTACT_REACH );
+		VectorCopy( mid, e.light );
+		e.light[3] = SHADOW_CONTACT_REACH;
+		e.reach = 0.5f * Distance( mins, maxs ) + SHADOW_CONTACT_REACH;	// (nothing further from its middle)
+		e.darkness = Com_Clamp( 0.0f, 0.5f, ( 1.0f - strength ) * SHADOW_CONTACT_SHARE * r_shadowStrength->value );
+		e.rtType = SHADOW_RT_CONTACT;
+		shRtEntries.push_back( e );
+	}
+}
+
 static void RB_ShadowMapsFinish( void )
 {
 	static std::vector<int>				order;
@@ -774,6 +1094,7 @@ static void RB_ShadowMapsFinish( void )
 	if ( !rayTraced ) {
 		memset( shAtlas, 0, sizeof( shAtlas ) );
 	}
+	shRtEntries.clear();
 
 	for ( size_t c = 0; c < casters.size() && numMaps < SHADOWMAP_MAX_CASTERS; c++ ) {
 		const shadowCaster_t	*caster = &casters[c];
@@ -856,6 +1177,17 @@ static void RB_ShadowMapsFinish( void )
 		VectorCopy( L, map->light );
 		map->light[3] = r_shadowSoftness->value * 0.12f;	// (the spread of the volumes' samples)
 		numMaps++;
+
+		if ( rayTraced ) {
+			vec3_t mins = { 1e9f, 1e9f, 1e9f }, maxs = { -1e9f, -1e9f, -1e9f };
+			for ( int s = 0; s < caster->numSurfs; s++ ) {
+				const shadowSurf_t *surf = &shSurfs[order[caster->firstSurf + s]];
+				for ( int k = surf->capsStart; k < surf->capsEnd; k++ ) {
+					AddPointToBounds( shPts[shCaps[k]].xyz, mins, maxs );
+				}
+			}
+			RB_ShadowRtEntries( mins, maxs, map->floorZ, L, map->light[3], map->darkness, first->strength );
+		}
 	}
 
 	if ( numMaps ) {
@@ -884,7 +1216,7 @@ static void RB_ShadowMapsFinish( void )
 			for ( size_t i = 0; i < shPts.size(); i++ ) {
 				VectorCopy( shPts[i].xyz, &xyz[i * 3] );
 			}
-			RB_RayTracedShadowsApply( maps, numMaps, xyz.data(), (int)shPts.size(), shRtTris.data(), (int)shRtTris.size() / 3,
+			RB_RayTracedShadowsApply( shRtEntries.data(), (int)shRtEntries.size(), xyz.data(), (int)shPts.size(), shRtTris.data(), (int)shRtTris.size() / 3,
 				skipCasters ? SHADOW_STENCIL_SKIP : 0 );
 		} else {
 			RB_ShadowMapsApply( maps, numMaps, shAtlas, skipCasters ? SHADOW_STENCIL_SKIP : 0 );

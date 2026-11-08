@@ -1323,14 +1323,14 @@ void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters,
 
 	VK_EnsureFrame();
 
-	// the casters, as post_rt_shadow.frag reads them (5 vec4 each)
+	// the entries, as post_rt_shadow.frag reads them (5 vec4 each)
 	const int slot = vk.frameIndex;
 	if ( post.rtCastersFrame[slot] != vk.frameCounter + 1 )
 	{
 		post.rtCastersFrame[slot] = vk.frameCounter + 1;
 		post.rtCastersUsed[slot] = 0;
 	}
-	const VkDeviceSize sectionBytes = SHADOWMAP_MAX_CASTERS * 20 * sizeof( float );
+	const VkDeviceSize sectionBytes = SHADOWMAP_MAX_RT * 20 * sizeof( float );
 	if ( post.rtCastersUsed[slot] >= RT_CASTER_SECTIONS ||
 		 ( !post.rtCasters[slot].buffer && !VK_RT_NewBuffer( &post.rtCasters[slot], sectionBytes * RT_CASTER_SECTIONS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true ) ) )
 	{
@@ -1338,20 +1338,18 @@ void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters,
 	}
 	const VkDeviceSize offset = sectionBytes * post.rtCastersUsed[slot]++;
 	float *data = (float *)( (byte *)post.rtCasters[slot].mapped + offset );
-	numCasters = Q_min( numCasters, SHADOWMAP_MAX_CASTERS );
+	numCasters = Q_min( numCasters, SHADOWMAP_MAX_RT );
 	for ( int i = 0; i < numCasters; i++, data += 20 )
 	{
 		const shadowMapCaster_t *c = &casters[i];
 		memcpy( data, c->rowS, 4 * sizeof( float ) );
 		memcpy( data + 4, c->rowT, 4 * sizeof( float ) );
-		data[8] = c->tile[0];
-		data[9] = c->tile[1];
-		data[10] = c->tile[0] + 1.0f / SHADOWMAP_TILES;
-		data[11] = c->tile[1] + 1.0f / SHADOWMAP_TILES;
+		memcpy( data + 8, c->area, 4 * sizeof( float ) );
 		memcpy( data + 12, c->light, 4 * sizeof( float ) );
 		data[16] = c->floorZ;
 		data[17] = c->darkness;
-		data[18] = data[19] = 0.0f;
+		data[18] = (float)c->rtType;
+		data[19] = c->reach;
 	}
 
 	VK_EndRenderPass();	// (resolves the view into the single sample colour and depth)

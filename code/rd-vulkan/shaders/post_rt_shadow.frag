@@ -3,18 +3,21 @@
 #extension GL_EXT_buffer_reference : require
 
 // The shadows of the characters, ray traced (r_rayTracing), all of them in one pass: at Medium at half the size of the
-// view, at High at its full size. A pixel is tested against the area each character's shadow can fall in (as for its
-// shadow map: the character seen from its light, padded), and only for those it is in, a few rays spread around the
-// direction of that character's light go against the triangles of the characters (vk_rt.cpp, instance mask 0x04):
-// four at Medium; at High four, and four more between them where the first ones disagree (the edge of a shadow). The
-// result is the factor the picture is multiplied by; the rays are few, a blur along the surfaces follows
-// (post_ssao_blur.frag).
+// view, at High at its full size. Each character has a few entries (tr_shadow_volumes.h, RB_ShadowRtEntries): one for
+// each lamp of the level that lights it, or one for the light grid's direction where there are none, and a contact
+// shadow. A pixel is tested against the area an entry's shadow can fall in (the character seen from its light,
+// padded), and only for those it is in, rays go against the triangles of the characters (vk_rt.cpp, instance mask
+// 0x04): towards the light, spread over its size (two at Medium, four at High, and as many more between them where
+// those disagree: the edge of a shadow), or for the contact shadow a few short ones all around the surface. The result
+// is the factor the picture is multiplied by; the rays are few, a blur along the surfaces follows (post_ssao_blur.frag).
 
 struct Caster {
-	vec4 rowS, rowT;	// from the eye to where the character is seen from its light (as in its shadow map)
+	vec4 rowS, rowT;	// from the eye to where the character is seen from the light
 	vec4 area;			// that area: its corners (s, t)
-	vec4 light;			// the direction to the light (world), how wide the rays spread (a tangent)
-	vec4 params;		// the floor under it, darkness
+	vec4 light;			// a direction: towards it (world), how wide the rays spread (a tangent); a lamp: its position,
+						// its radius; the contact shadow: the middle of the character, how far its rays go
+	vec4 params;		// the floor under it, darkness, the type (0 direction, 1 lamp, 2 contact), for the contact
+						// shadow how far from the middle it reaches
 };
 
 layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Casters { Caster c[]; };
@@ -34,17 +37,20 @@ layout(location = 0) out vec4 outColor;
 float depthAt(vec2 t) { return texture(uDepth, t * p.b.zw + p.c.xy).r; }
 float viewZ(float depth) { return -p.b.y / (depth * 2.0 - 1.0 + p.b.x); }
 
-// 1 if the ray r of rays (a spiral over a disc around the light's direction l, as wide as spread, turned by turn) from
-// origin hits a character
-float blockedTowards(vec3 origin, vec3 l, vec3 side, vec3 up, float turn, int r, int rays, float spread)
+// 1 if the ray from origin along dir hits a character before tMax; blockedTowards: the ray r of rays (a spiral over a
+// disc around the light's direction l, as wide as spread, turned by turn)
+float blocked(vec3 origin, vec3 dir, float tMax)
+{
+	rayQueryEXT query;
+	rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0x04, origin, 0.5, dir, tMax);
+	while (rayQueryProceedEXT(query)) {}
+	return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
+}
+float blockedTowards(vec3 origin, vec3 l, vec3 side, vec3 up, float turn, int r, int rays, float spread, float tMax)
 {
 	float angle = turn + float(r) * 2.3999632;
 	float radius = sqrt((float(r) + 0.5) / float(rays)) * spread;
-	vec3 dir = normalize(l + (cos(angle) * side + sin(angle) * up) * radius);
-	rayQueryEXT query;
-	rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0x04, origin, 0.5, dir, 4096.0);
-	while (rayQueryProceedEXT(query)) {}
-	return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
+	return blocked(origin, normalize(l + (cos(angle) * side + sin(angle) * up) * radius), tMax);
 }
 
 void main()
@@ -67,25 +73,55 @@ void main()
 		Caster c = p.casters.c[i];
 		vec2 st = vec2(dot(c.rowS, eye), dot(c.rowT, eye));
 		if (world.z < c.params.x || any(lessThan(st, c.area.xy)) || any(greaterThan(st, c.area.zw))) continue;
+		int type = int(c.params.z + 0.5);
+		if (type == 2) {
+			// the contact shadow: short rays all around the surface (cosine weighted, as the light from all around
+			// falls on it), and how many of them a character stops; few, as it is soft (the blur does the rest), and
+			// only near the character
+			if (distance(world, c.light.xyz) > c.params.w) continue;
+			int rays = p.quality > 1u ? 4 : 3;
+			vec3 side = normalize(abs(n.z) < 0.9 ? cross(n, vec3(0.0, 0.0, 1.0)) : cross(n, vec3(1.0, 0.0, 0.0)));
+			vec3 up = cross(side, n);
+			float hits = 0.0;
+			for (int r = 0; r < rays; r++) {
+				float angle = turn + float(r) * 2.3999632, radius = sqrt((float(r) + 0.5) / float(rays));
+				vec3 dir = (cos(angle) * side + sin(angle) * up) * radius + n * sqrt(1.0 - radius * radius);
+				hits += blocked(world + n * 0.5, dir, c.light.w);
+			}
+			f *= 1.0 - c.params.y * hits / float(rays);
+			continue;
+		}
+
+		// towards the light: a direction, or a lamp (whose size, seen from here, the rays spread over)
 		vec3 l = normalize(c.light.xyz);
+		float spread = c.light.w, tMax = 4096.0;
+		if (type == 1) {
+			vec3 d = c.light.xyz - world;
+			float dist = length(d);
+			if (dist <= c.light.w + 2.0) continue;
+			l = d / dist;
+			spread = c.light.w / dist;
+			tMax = dist - c.light.w;
+		}
 		if (dot(n, l) <= 0.0) continue;	// facing away from the light: dark in the level's own lighting already
 
-		// the rays: around the light's direction in a disc, turned by a different amount at every pixel
+		// the rays: around the light's direction in a disc, turned by a different amount at every pixel; every other
+		// one first, the ones between them only where those disagree (the edge of a shadow)
 		vec3 side = normalize(abs(l.z) < 0.9 ? cross(l, vec3(0.0, 0.0, 1.0)) : cross(l, vec3(1.0, 0.0, 0.0)));
 		vec3 up = cross(side, l);
 		int rays = p.quality > 1u ? 8 : 4;
-		float blocked = 0.0;
-		for (int r = 0; r < rays; r += rays / 4) {	// (High: every other one first)
-			blocked += blockedTowards(world + n * 0.5, l, side, up, turn, r, rays, c.light.w);
+		float hidden = 0.0;
+		for (int r = 0; r < rays; r += 2) {
+			hidden += blockedTowards(world + n * 0.5, l, side, up, turn, r, rays, spread, tMax);
 		}
-		if (rays == 8 && blocked > 0.0 && blocked < 4.0) {
+		if (hidden > 0.0 && hidden < float(rays / 2)) {
 			for (int r = 1; r < rays; r += 2) {
-				blocked += blockedTowards(world + n * 0.5, l, side, up, turn, r, rays, c.light.w);
+				hidden += blockedTowards(world + n * 0.5, l, side, up, turn, r, rays, spread, tMax);
 			}
 		} else {
-			blocked *= float(rays) / 4.0;	// (the four traced agree: as if every ray was)
+			hidden *= 2.0;	// (those traced agree: as if every ray was)
 		}
-		f *= 1.0 - c.params.y * blocked / float(rays);
+		f *= 1.0 - c.params.y * hidden / float(rays);
 	}
 	outColor = vec4(f, f, f, 1.0);
 }

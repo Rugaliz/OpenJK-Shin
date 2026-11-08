@@ -1238,6 +1238,7 @@ void R_LoadEntities( lump_t *l, world_t &worldData ) {
 	tr.distanceCull = 12000;//DEFAULT_DISTANCE_CULL;
 
 	p = (char *)(fileBase + l->fileofs);
+	R_ShadowLampsLoad( p, l->filelen );	// (all the entities: the lamps' shadows, tr_shadow_volumes.h)
 
 	token = COM_ParseExt( &p, qtrue );
 	if (!*token || *token != '{') {

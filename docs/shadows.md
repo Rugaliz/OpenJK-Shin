@@ -15,10 +15,19 @@ code is shared by the single player and the multiplayer renderers, `shared/rende
   cancels shared edges, so open meshes and edges shared by more than two triangles work too. (There also was a hard
   limit of 32 edges per vertex.)
 * **The shadow always fell straight down**, whatever the light did (the light direction only leaned it by 30%). It now
-  follows the direction of the strongest light at the character (`r_shadowTilt`, 1 = the real direction, up to
-  45-50 degrees; the old behaviour is about 0.3).
-* **Flat darkness.** The shadow is as dark as the share of the light that comes from one direction, instead of
+  follows the direction of the strongest light of the level at the character (`r_shadowTilt`, 1 = the real direction,
+  up to 45-50 degrees; the old behaviour is about 0.3).
+* **Flat darkness.** The shadow is as dark as the share of the level's light that comes from one direction, instead of
   always 50%, so shadows are weak in a dark room and stronger in bright light (`r_shadowStrength` scales it).
+* **Dynamic lights turned and darkened the shadows.** The light at a character, as the game works it out, includes the
+  dynamic lights (sabers, blaster bolts, explosions), and the nearest one outweighs the level's light: a lit saber
+  turned the shadow of its wielder, and of everyone near, away from itself, at the darkest. The shadows now go by the
+  level's light alone (the dynamic lights cast their own shadows with Ray Tracing). The direction was also read in the
+  character's own axes as if they were the world's, so a shadow turned with the character.
+* **Dynamic lights were darkened by the shadows.** The shadows darken the finished picture, and the dynamic lights had
+  already added their light to it: a saber held over its wielder's shadow lost up to three quarters of its light
+  there. Their light is now added after the shadows (the dynamic lights drawn by the shader, `r_dlightGLSL`, as with
+  Ray Tracing), so a saber lights up the shadow under it.
 * **Hard edges.** The volumes are drawn several times with a slightly different light direction and the results add
   up, so the edge is soft, wider the higher the part of the body is above the floor. `r_shadowSoftness` is the width
   (0 = hard edges), `r_shadowSamples` is the number of volumes (1 to 16, 8 by default). Cost: the volumes are small,
@@ -85,17 +94,40 @@ Shadows: with it on, the shadows of the characters are ray traced whenever Shado
 Simple there are none to trace), and the dynamic lights get shadows whatever Shadows is. (It used to be a choice of the
 Shadows row, `cg_shadows 5`; a settings file that has it is turned into Soft with Ray Tracing at Medium.)
 
-The characters are found as for the shadow maps (their light, the floor under them, how dark, the area their shadow can
-fall in), but instead of a 128 x 128 depth map each, all their triangles go into a ray tracing structure every frame,
-and from every pixel in a character's area rays, spread around the direction of its light as wide as
-`r_shadowSoftness` says, are traced against it. So the shadow is exact at any size and distance: fingers, the hilt of a
-saber, the gap between the legs, with no blocks, soft at the edges. It is done in one pass for all the characters, and
-blurred along the surfaces at full size (the blur of the ambient occlusion, which stops at edges in depth):
+The characters are found as for the shadow maps (the floor under them, how dark, the area their shadow can fall in),
+but instead of a 128 x 128 depth map each, all their triangles go into a ray tracing structure every frame, and from
+every pixel in a character's area rays, spread over the size of its light, are traced against it. So the shadow is
+exact at any size and distance: fingers, the hilt of a saber, the gap between the legs, with no blocks, soft at the
+edges. It is done in one pass for all the characters, and blurred along the surfaces at full size (the blur of the
+ambient occlusion, which stops at edges in depth):
 
-* **Medium**: at half the size of the view (a quarter of the pixels), four rays a pixel.
-* **High**: at the full size of the view, four rays a pixel, and four more between them where the first four disagree
-  (the edge of a shadow: elsewhere the character is wholly in the way of the light, or wholly not). The edges are
-  smoother and finer, with less grain.
+* **Medium**: at half the size of the view (a quarter of the pixels), two rays a pixel for each light, and two more
+  between them where the first two disagree (the edge of a shadow: elsewhere the character is wholly in the way of the
+  light, or wholly not).
+* **High**: at the full size of the view, four rays a pixel for each light, and four more where they disagree. The
+  edges are smoother and finer, with less grain.
+
+**The lamps of the level.** The levels are lit by lamps (the "light" entities the map compiler lit them with), and the
+lighting of every surface was worked out from them when the level was made: it stays as it is, with the shadows the
+walls and pillars cast. The shadows of the characters, which move, are what is drawn live. Where the level still has
+its lamps (every Jedi Outcast level, 300 to 1,400 of them; only 3 of the 34 Jedi Academy levels, which were compiled
+without them), a character's shadow is cast from each of the up to four lamps that light it most and that it can see
+(the brightest at the character as the map compiler worked it out, colour and spotlight cones included): a soft shadow
+away from each, as dark as that lamp's share of the light. Standing between two lamps casts two faint shadows; walking
+past a lamp turns its shadow around the character. What a character can see is found with the game's own collision
+traces, and kept for the 16 units cube it stands in, so one that stands still costs nothing. Where there are no lamps,
+the shadow comes from the one direction of the level's light grid (the strongest light at the character, as worked out
+when the level was made), fainter and softer than a lamp's as it is a guess. `r_rtLamps 0` uses the grid's direction
+everywhere.
+
+**Contact shadows.** Around the feet of every character, short rays from the floor all around (32 units) find how much
+of the light from no one direction the character takes away close to it: the darkening where a foot meets the floor or
+a hand rests on a crate, which grounds the character even where the direction of the light is not known. Three rays
+at Medium, four at High, only within the character's size of its middle.
+
+With the lamps and the contact shadows, on a Jedi Outcast level at 3440 x 1440 with a character holding a lit saber
+close to the camera (its shadow areas take much of the view), a frame took 9.3 ms at Medium and 13.9 ms at High,
+against 8.8 and 12.0 ms with one shadow from the grid's direction.
 
 At 3440 x 1440 with 8x multisampling on a Radeon RX 7800 XT, nine characters in view, a frame took 6.1 ms with the soft
 shadows (shadow maps), 5.0 ms with Medium and 6.1 ms with High; with one of them holding a lit saber, 6.3, 5.9 and

@@ -32,6 +32,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define SHADOWMAP_TILES			4		// tiles on a side of the atlas
 #define SHADOWMAP_ATLAS			( SHADOWMAP_TILE * SHADOWMAP_TILES )
 #define SHADOWMAP_MAX_CASTERS	( SHADOWMAP_TILES * SHADOWMAP_TILES )
+#define SHADOWMAP_MAX_RT		( SHADOWMAP_MAX_CASTERS * 6 )	// ray traced: entries for all of them (up to 4 lamps, a contact shadow each)
 
 // One caster. Each row maps a position in the view's eye space (x, y, z, 1) to: s and t in the atlas, the height
 // towards the light normalized to the caster's own range (0 the lowest point of the caster, 1 the highest; the tile
@@ -44,8 +45,19 @@ typedef struct {
 	float	softness;		// atlas texels of penumbra per normalized height between the caster and the point
 	float	tile[2];		// the corner of the caster's tile in the atlas (s, t): nothing outside it is the caster's
 	float	rect[4];		// where on the view its shadow can be: left, bottom, right, top, 0 to 1 from the bottom left
-	float	light[4];		// ray traced: the direction to the light (world), and how wide the rays spread around it (a tangent)
+	float	light[4];		// ray traced: the direction to the light (world), and how wide the rays spread around it (a tangent);
+					// for a lamp its position and radius, for a contact shadow the middle of the caster and how far its rays go
+	float	area[4];		// ray traced: where the caster can be in (s, t) of rowS and rowT: lowest s and t, highest s and t
+	int		rtType;			// ray traced: SHADOW_RT_DIRECTION, SHADOW_RT_LAMP, SHADOW_RT_CONTACT
+	float	reach;			// ray traced, the contact shadow: how far from light it can be
 } shadowMapCaster_t;
+
+#define SHADOW_RT_DIRECTION		0	// from the light grid's direction
+#define SHADOW_RT_LAMP			1	// from a lamp of the level (light entity)
+#define SHADOW_RT_CONTACT		2	// all around, close to the caster
+
+// the lamps of the level (its "light" entities), read as it loads: the ray traced shadows are cast from them
+void		R_ShadowLampsLoad( const char *entities, int length );
 
 // The renderer can draw them (it has the shaders); r_shadowMapsAvail tells the menus
 qboolean	R_ShadowMaps_Available( void );
@@ -56,8 +68,8 @@ void		RB_ShadowMapsApply( const shadowMapCaster_t *casters, int numCasters, cons
 
 // Ray traced (r_rayTracing, Setup > More Video > Ray Tracing, makes the shadows of cg_shadows 2 and 4 ray traced): the
 // renderer can (Vulkan with ray tracing, r_rtAvail), what is asked of it (0 off, 1 medium, 2 high), and darkening the
-// 3D view by the casters with rays against the triangles of all of them (xyz: 3 floats a point, world space; indexes:
-// 3 a triangle)
+// 3D view by the entries (several for a caster, see rtType) with rays against the triangles of all casters (xyz: 3
+// floats a point, world space; indexes: 3 a triangle)
 qboolean	R_RayTracedShadows_Available( void );
 int			R_RayTracing( void );
 qboolean	R_DlightShadows( void );		// with them, dynamic lights do not go through walls (the shader dynamic lights' rays)
