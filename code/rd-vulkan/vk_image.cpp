@@ -248,6 +248,14 @@ vkTexture_t *VK_WhiteTexture( void )
 	return &whiteTexture;
 }
 
+// The last frame a texture's image was used in: by a draw, or by an upload, which the GPU may not have done yet (a
+// texture made and deleted again before a frame is drawn, as while a level loads, was destroyed under its upload, and
+// one whose upload was still being recorded under the command buffer sent later: a GPU can be lost over that)
+static int TextureLastUse( const vkTexture_t *texture )
+{
+	return Q_max( texture->lastUsedFrame, texture->lastUploadFrame );
+}
+
 static void DestroyImage( VkImage image, VkImageView view, vkAlloc_t *memory, int lastUsedFrame )
 {
 	if ( !image )
@@ -339,6 +347,7 @@ static bool CreateStorage( vkTexture_t *texture, int width, int height )
 	texture->serial = nextSerial++;
 
 	// every level starts out readable (a level that is never uploaded must still be in a valid layout)
+	texture->lastUploadFrame = vk.frameCounter;
 	ImageBarrier( UploadCommandBuffer(), texture->image, 0, (uint32_t)levels, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
 	return true;
@@ -382,6 +391,7 @@ static void UploadRegion( vkTexture_t *texture, int level, int x, int y, int wid
 		memcpy( stagingMapped + offset, rgba, (size_t)size );
 	}
 
+	texture->lastUploadFrame = vk.frameCounter;
 	VkCommandBuffer cmd = UploadCommandBuffer();
 	ImageBarrier( cmd, texture->image, (uint32_t)level, 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
@@ -409,7 +419,7 @@ void VK_TexImage2D( GLuint id, GLint level, GLint internalFormat, GLsizei width,
 	vkTexture_t *texture = VK_TextureForId( id, true );
 	if ( level == 0 && ( !texture->image || texture->width != width || texture->height != height ) )
 	{
-		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+		DestroyImage( texture->image, texture->view, &texture->memory, TextureLastUse( texture ) );
 		texture->image = VK_NULL_HANDLE;
 		texture->view = VK_NULL_HANDLE;
 		if ( !CreateStorage( texture, width, height ) )
@@ -453,7 +463,7 @@ void VK_CopyFramebuffer( GLuint id, int createWidth, int createHeight, int dstX,
 	vkTexture_t *texture = VK_TextureForId( id, true );
 	if ( createWidth > 0 && ( !texture->image || texture->width != createWidth || texture->height != createHeight ) )
 	{
-		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+		DestroyImage( texture->image, texture->view, &texture->memory, TextureLastUse( texture ) );
 		texture->image = VK_NULL_HANDLE;
 		texture->view = VK_NULL_HANDLE;
 		if ( !CreateStorage( texture, createWidth, createHeight ) )
@@ -517,7 +527,7 @@ void VK_SetExternalTexture( GLuint id, VkImage image, VkImageView view, int widt
 	vkTexture_t *texture = VK_TextureForId( id, true );
 	if ( !texture->external && texture->image )
 	{
-		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+		DestroyImage( texture->image, texture->view, &texture->memory, TextureLastUse( texture ) );
 	}
 	texture->external = true;
 	texture->image = image;
@@ -539,7 +549,7 @@ void VK_DeleteTexture( GLuint id )
 	}
 	if ( !texture->external )
 	{
-		DestroyImage( texture->image, texture->view, &texture->memory, texture->lastUsedFrame );
+		DestroyImage( texture->image, texture->view, &texture->memory, TextureLastUse( texture ) );
 	}
 	delete texture;
 	*TextureSlot( id, false ) = NULL;

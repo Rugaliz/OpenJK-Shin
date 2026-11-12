@@ -182,6 +182,7 @@ typedef struct vkTexture_s {
 	GLenum				minFilter, magFilter, wrapS, wrapT;
 	float				anisotropy;
 	int					lastUsedFrame;	// vk.frameCounter of the last draw with it
+	int					lastUploadFrame;	// vk.frameCounter when its last upload was recorded (it uses the image too)
 	unsigned int		lastUsedSubmit;	// vk.submitSerial of the last draw with it
 	bool				external;		// the image belongs to someone else (the post processing): not destroyed with the texture
 } vkTexture_t;
