@@ -23,5 +23,12 @@ void main()
 	if (p.a.w > 0.0 && p.a.w != 1.0) {
 		colour = 1.0 - pow(clamp(1.0 - colour, 0.0, 1.0), vec3(p.a.w));	// (black stays black, white white)
 	}
+	// Stored in 8 bits, a smooth gradient worked out here (a bloom halo, a dark room the eye adaptation brightens)
+	// would show its steps: a noise of up to one step on either side (two patterns, a triangle-shaped spread) turns
+	// them into an even grain too fine to see. Black is left black.
+	vec2 at = gl_FragCoord.xy;
+	float noise = fract(52.9829189 * fract(dot(at, vec2(0.06711056, 0.00583715)))) +
+		fract(52.9829189 * fract(dot(at + vec2(37.0, 17.0), vec2(0.06711056, 0.00583715)))) - 1.0;
+	colour += noise / 255.0 * clamp(colour * 255.0, 0.0, 1.0);
 	outColor = vec4(colour, 1.0);
 }

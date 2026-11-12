@@ -251,6 +251,13 @@ static const char *postCompositeFragmentSource =
 	"	if ( uExposure != 1.0 ) {\n"
 	"		colour = 1.0 - pow( clamp( 1.0 - colour, 0.0, 1.0 ), vec3( uExposure ) );\n"	// (black stays black, white white)
 	"	}\n"
+	// Stored in 8 bits, a smooth gradient worked out here (a bloom halo, a dark room the eye adaptation brightens)
+	// would show its steps: a noise of up to one step on either side (two patterns, a triangle-shaped spread) turns
+	// them into an even grain too fine to see. Black is left black.
+	"	vec2 at = gl_FragCoord.xy;\n"
+	"	float noise = fract( 52.9829189 * fract( dot( at, vec2( 0.06711056, 0.00583715 ) ) ) ) +\n"
+	"		fract( 52.9829189 * fract( dot( at + vec2( 37.0, 17.0 ), vec2( 0.06711056, 0.00583715 ) ) ) ) - 1.0;\n"
+	"	colour += noise / 255.0 * clamp( colour * 255.0, 0.0, 1.0 );\n"
 	"	gl_FragColor = vec4( colour, 1.0 );\n"
 	"}\n";
 
