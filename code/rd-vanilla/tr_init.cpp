@@ -1634,6 +1634,8 @@ void R_Register( void )
 	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.8", CVAR_ARCHIVE_ND );	// how bright, 0 to 1, a pixel has to be to glow
 	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "0.5", CVAR_ARCHIVE_ND );
 	r_sharpen = ri.Cvar_Get( "r_sharpen", "0", CVAR_ARCHIVE_ND );	// contrast adaptive sharpening of the 3D view, 0 (off) to 1
+	ri.Cvar_Get( "r_softParticles", "1", CVAR_ARCHIVE_ND );	// (read where they are drawn: RB_StageIsSoft; made here for the menu)
+	ri.Cvar_Get( "r_lampLighting", "1", CVAR_ARCHIVE_ND );	// (and R_LampLighting)
 	r_lightShafts = ri.Cvar_Get( "r_lightShafts", "0", CVAR_ARCHIVE_ND );	// rays of sunlight over the 3D view, on levels with a sun: 0 (off), 1 (normal) to 2
 	r_eyeAdaptation = ri.Cvar_Get( "r_eyeAdaptation", "0", CVAR_ARCHIVE_ND );	// the 3D view brightens in dark places, dims in bright ones: 0 (off), 1 (normal) to 2
 	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE_ND );	// 1 = SMAA, smooths edges without softening the rest of the picture (needs OpenGL 3.3)

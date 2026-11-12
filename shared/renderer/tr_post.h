@@ -275,6 +275,7 @@ void R_Post_Init( void ) {
 	Post_SetAvailable( "r_postAvail", qfalse );
 	Post_SetAvailable( "r_smaaAvail", qfalse );
 	Post_SetAvailable( "r_rtAvail", qfalse );	// (ray tracing is the Vulkan renderer's)
+	Post_SetAvailable( "r_softAvail", qfalse );	// (and so are the soft particles)
 
 	if ( !R_GLSL_Available() || !qglActiveTextureARB || !qglMultiTexCoord2fARB ) {
 		return;

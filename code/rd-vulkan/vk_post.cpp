@@ -1572,6 +1572,8 @@ void R_Post_Init( void )
 	ri.Cvar_Set( "r_postAvail", post.ready ? "1" : "0" );
 	ri.Cvar_Get( "r_smaaAvail", "0", 0 );
 	ri.Cvar_Set( "r_smaaAvail", post.ready && post.smaaOk ? "1" : "0" );
+	ri.Cvar_Get( "r_softAvail", "0", 0 );
+	ri.Cvar_Set( "r_softAvail", post.ready ? "1" : "0" );	// (the soft particles, RB_SoftParticlesBegin)
 	ri.Cvar_Get( "r_shadowMapsAvail", "0", 0 );
 	ri.Cvar_Set( "r_shadowMapsAvail", R_ShadowMaps_Available() ? "1" : "0" );
 	// (r_rtAvail, for the Ray Traced shadows, is set by VK_RT_Init)

@@ -129,7 +129,7 @@ few steps, a ledge), and a lamp's shadow fades where the ground is further from 
 character (it has less of the lamp's light there to lose), so it is not thrown dark onto ground far below.
 
 **The characters lit by the lamps** (`r_lampLighting`: 1, the default, with Ray Tracing on; 2 always, OpenGL too; 0
-never). A character, an item or a weapon is lit by the level's light grid: an amount of light from all around and one
+never; Setup > More Video > Lamp Lighting in single player). A character, an item or a weapon is lit by the level's light grid: an amount of light from all around and one
 from a single direction, into which the map compiler added up the lamps around. Where the level has its lamps, that
 directed light is shared out between the lamps that light the character and that it can see, each from its own side
 and in its own colour and light style (a flickering lamp flickers on it): a character is lit from where the lamps

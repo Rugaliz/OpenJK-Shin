@@ -137,7 +137,8 @@ All of these are described in [Graphics settings](#graphics-settings) below.
 ## Graphics settings
 
 The graphics settings are in **Setup > Video** and **Setup > More Video**. A row only appears if your graphics card
-and the renderer in use support it.
+and the renderer in use support it. In single player More Video has more rows than fit: scroll them with the bar beside
+them, the mouse wheel, or the arrow keys.
 
 | Setting | Where | What it does |
 | - | - | - |
@@ -151,6 +152,8 @@ and the renderer in use support it.
 | Shader Dynamic Lights (Off, On, Detailed) | More Video | The light of sabers, blaster bolts and explosions follows the shape of what it falls on instead of making square patches. Sabers light along the whole blade, and blaster bolts light the walls they pass and flash where they hit. **Detailed** also brings out the bumps of rock, brick and tiles. |
 | Light Shafts | More Video | Rays of sunlight through windows and gratings and around roof edges, on levels with a sun. |
 | Eye Adaptation | More Video | Dark places slowly brighten as if your eyes were adjusting, without washing out the bright parts. |
+| Lamp Lighting (Off, With Ray Tracing, Always) | More Video | Characters are lit from the level's own lamps, each from its side, in single player (the Jedi Outcast levels have them). |
+| Soft Particles | More Video | Smoke, sparks and glows fade where they meet walls and floors instead of ending in a hard line. Vulkan only. |
 
 ### Ray Tracing
 

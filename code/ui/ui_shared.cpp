@@ -1291,6 +1291,212 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 
 /*
 ================
+The rows of the "More Video" page, scrolled
+
+When there are more rows than the page has room for (Menu_AddEffectRows), as many as fit are shown with a scroll bar
+beside them: its arrows move a row, its track a page, its thumb can be dragged, and the mouse wheel over the rows
+scrolls them too. The rows out of view are hidden (they take no focus or click), and a row the keys move the focus to
+is scrolled into view.
+================
+*/
+void Item_UpdatePosition(itemDef_t *item);
+
+#define ROW_SCROLL_BAR	12.0f		// the width of the bar, and the height of its arrows and thumb
+
+typedef struct {
+	menuDef_t	*menu;
+	itemDef_t	*driverButton;		// shown with the page: the bar is shown then
+	itemDef_t	*rows[24];
+	const char	*enter[24];			// what a row does when the mouse comes over it, by the place it is shown at
+	int			numRows, visible, first;
+	float		left, firstY, pitch, barX;
+	bool		dragging;
+	float		dragOffset;
+} rowScroll_t;
+
+static rowScroll_t rowScrolls[4];	// by menu: the main and the in-game setup each have the page
+
+static rowScroll_t *RowScroll_For( const menuDef_t *menu )
+{
+	for ( size_t i = 0; menu && i < ARRAY_LEN( rowScrolls ); i++ )
+	{
+		if ( rowScrolls[i].menu == menu )
+			return &rowScrolls[i];
+	}
+	return NULL;
+}
+
+// the menu's rows when they scroll and the page is shown
+static rowScroll_t *RowScroll_Shown( const menuDef_t *menu )
+{
+	rowScroll_t *rs = RowScroll_For( menu );
+	return rs && rs->driverButton && ( rs->driverButton->window.flags & WINDOW_VISIBLE ) ? rs : NULL;
+}
+
+// the rows at their places for the first one shown, the ones out of view hidden
+static void RowScroll_Place( rowScroll_t &rowScroll )
+{
+	for ( int i = 0; i < rowScroll.numRows; i++ )
+	{
+		itemDef_t *row = rowScroll.rows[i];
+		const int at = i - rowScroll.first;
+		if ( at >= 0 && at < rowScroll.visible )
+		{
+			row->window.rectClient.y = rowScroll.firstY + at * rowScroll.pitch;
+			row->mouseEnter = rowScroll.enter[at];
+			row->window.flags |= WINDOW_VISIBLE;
+			Item_UpdatePosition( row );
+		}
+		else
+		{
+			row->window.flags &= ~( WINDOW_VISIBLE | WINDOW_HASFOCUS | WINDOW_MOUSEOVER );
+		}
+	}
+}
+
+static void RowScroll_By( rowScroll_t &rowScroll, int rows )
+{
+	rowScroll.first = Com_Clampi( 0, rowScroll.numRows - rowScroll.visible, rowScroll.first + rows );
+	RowScroll_Place( rowScroll );
+}
+
+// before the page is painted (showing the page shows every row of its group): a row with the focus in view
+static void RowScroll_Sync( menuDef_t *menu )
+{
+	rowScroll_t *rs = RowScroll_Shown( menu );
+	if ( !rs )
+	{
+		return;
+	}
+	rowScroll_t &rowScroll = *rs;
+	for ( int i = 0; i < rowScroll.numRows; i++ )
+	{
+		if ( rowScroll.rows[i]->window.flags & WINDOW_HASFOCUS )
+		{
+			if ( i < rowScroll.first )
+				rowScroll.first = i;
+			else if ( i >= rowScroll.first + rowScroll.visible )
+				rowScroll.first = i - rowScroll.visible + 1;
+		}
+	}
+	RowScroll_Place( rowScroll );
+}
+
+// where the thumb is, and how far it can go
+static float RowScroll_ThumbY( const rowScroll_t &rowScroll, float *track )
+{
+	const float top = rowScroll.menu->window.rect.y + rowScroll.firstY;
+	*track = rowScroll.visible * rowScroll.pitch - 3.0f * ROW_SCROLL_BAR;
+	return top + ROW_SCROLL_BAR + *track * rowScroll.first / Q_max( rowScroll.numRows - rowScroll.visible, 1 );
+}
+
+static void RowScroll_Paint( menuDef_t *menu )
+{
+	const rowScroll_t *rs = RowScroll_Shown( menu );
+	if ( !rs )
+	{
+		return;
+	}
+	const rowScroll_t &rowScroll = *rs;
+	const float x = menu->window.rect.x + rowScroll.barX, top = menu->window.rect.y + rowScroll.firstY;
+	const float h = rowScroll.visible * rowScroll.pitch;
+	float track;
+	const float thumb = RowScroll_ThumbY( rowScroll, &track );
+	DC->drawHandlePic( x, top, ROW_SCROLL_BAR, ROW_SCROLL_BAR, DC->Assets.scrollBarArrowUp );
+	DC->drawHandlePic( x, top + ROW_SCROLL_BAR, ROW_SCROLL_BAR, h - 2.0f * ROW_SCROLL_BAR, DC->Assets.scrollBar );
+	DC->drawHandlePic( x, top + h - ROW_SCROLL_BAR, ROW_SCROLL_BAR, ROW_SCROLL_BAR, DC->Assets.scrollBarArrowDown );
+	DC->drawHandlePic( x, thumb, ROW_SCROLL_BAR, ROW_SCROLL_BAR, DC->Assets.scrollBarThumb );
+}
+
+// the clicks on the bar and the mouse wheel over the rows; qtrue when it took the key
+static qboolean RowScroll_HandleKey( menuDef_t *menu, int key, qboolean down )
+{
+	rowScroll_t *rs = RowScroll_Shown( menu );
+	if ( !rs )
+	{
+		for ( size_t i = 0; i < ARRAY_LEN( rowScrolls ); i++ )
+			rowScrolls[i].dragging = false;
+		return qfalse;
+	}
+	rowScroll_t &rowScroll = *rs;
+	if ( !down )
+	{
+		if ( key == A_MOUSE1 && rowScroll.dragging )
+		{
+			rowScroll.dragging = false;
+			return qtrue;
+		}
+		return qfalse;
+	}
+	// the keys moving the focus past the rows shown: one more row in view first (the menu then moves the focus to it)
+	const int step = ( key == A_CURSOR_UP || key == A_KP_8 ) ? -1 : ( key == A_CURSOR_DOWN || key == A_KP_2 || key == A_TAB ) ? 1 : 0;
+	for ( int i = 0; step && i < rowScroll.numRows; i++ )
+	{
+		const int next = i + step;
+		if ( ( rowScroll.rows[i]->window.flags & WINDOW_HASFOCUS ) && next >= 0 && next < rowScroll.numRows
+			&& ( next < rowScroll.first || next >= rowScroll.first + rowScroll.visible ) )
+		{
+			RowScroll_By( rowScroll, step );
+			break;
+		}
+	}
+	if ( step )
+	{
+		return qfalse;
+	}
+
+	const float cx = DC->cursorx, cy = DC->cursory;
+	const float x = menu->window.rect.x + rowScroll.barX, top = menu->window.rect.y + rowScroll.firstY;
+	const float h = rowScroll.visible * rowScroll.pitch;
+	if ( cy < top || cy >= top + h || cx < menu->window.rect.x + rowScroll.left || cx >= x + ROW_SCROLL_BAR )
+	{
+		return qfalse;
+	}
+	if ( key == A_MWHEELUP || key == A_MWHEELDOWN )
+	{
+		RowScroll_By( rowScroll, key == A_MWHEELUP ? -1 : 1 );
+		return qtrue;
+	}
+	if ( key != A_MOUSE1 || cx < x )
+	{
+		return qfalse;
+	}
+	float track;
+	const float thumb = RowScroll_ThumbY( rowScroll, &track );
+	if ( cy < top + ROW_SCROLL_BAR )
+		RowScroll_By( rowScroll, -1 );
+	else if ( cy >= top + h - ROW_SCROLL_BAR )
+		RowScroll_By( rowScroll, 1 );
+	else if ( cy >= thumb && cy < thumb + ROW_SCROLL_BAR )
+	{
+		rowScroll.dragging = true;
+		rowScroll.dragOffset = cy - thumb;
+	}
+	else
+		RowScroll_By( rowScroll, cy < thumb ? -rowScroll.visible : rowScroll.visible );
+	return qtrue;
+}
+
+// the thumb dragged; qtrue while it is
+static qboolean RowScroll_MouseMove( menuDef_t *menu, float y )
+{
+	rowScroll_t *rs = RowScroll_For( menu );
+	if ( !rs || !rs->dragging )
+	{
+		return qfalse;
+	}
+	rowScroll_t &rowScroll = *rs;
+	float track;
+	RowScroll_ThumbY( rowScroll, &track );
+	const float top = menu->window.rect.y + rowScroll.firstY + ROW_SCROLL_BAR;
+	const int span = rowScroll.numRows - rowScroll.visible;
+	const int first = track > 0.0f ? (int)floorf( ( y - rowScroll.dragOffset - top ) / track * span + 0.5f ) : 0;
+	RowScroll_By( rowScroll, first - rowScroll.first );
+	return qtrue;
+}
+
+/*
+================
 Menu_AddEffectRows
 
 The "More Video" page of Setup has room for one more row. Make room for one row for each of the screen effects and
@@ -1311,6 +1517,8 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 		{ "lightshafts", "r_lightShafts", "r_postAvail", "Light Shafts:", "Rays of sunlight through gaps and around edges, on levels with a sun." },
 		{ "eyeadaptation", "r_eyeAdaptation", "r_postAvail", "Eye Adaptation:", "Dark places brighten as your eyes get used to them, over a second or two." },
 		{ "raytracing", "r_rayTracing", "r_rtAvail", "Ray Tracing:", "Exact shadows of the characters, and the light of sabers, blasters and explosions stops at walls. High: smoother shadows, slower." },
+		{ "lamplighting", "r_lampLighting", NULL, "Lamp Lighting:", "Characters lit from the level's own lamps, each from its side, as their shadows say (Jedi Outcast levels have them)." },
+		{ "softparticles", "r_softParticles", "r_softAvail", "Soft Particles:", "Smoke, sparks and glows fade where they meet walls and floors, instead of ending in a hard line." },
 	};
 	itemDef_t	*rows[24];
 	int			numRows = 0;
@@ -1344,7 +1552,7 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 	// one new row for each effect that can be used, a copy of the row of the wall marks (an off and on row)
 	for ( size_t e = 0; e < ARRAY_LEN( effects ); e++ )
 	{
-		if ( !DC->getCVarValue( effects[e].avail ) || menu->itemCount >= MAX_MENUITEMS )
+		if ( ( effects[e].avail && !DC->getCVarValue( effects[e].avail ) ) || menu->itemCount >= MAX_MENUITEMS )
 			continue;
 
 		itemDef_t *row = (itemDef_t *)UI_Alloc( sizeof( itemDef_t ) );
@@ -1372,6 +1580,21 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 			{
 				multiPtr->cvarList[multiPtr->count] = String_Alloc( names[k] );
 				multiPtr->cvarValue[multiPtr->count] = values[k];
+				multiPtr->count++;
+			}
+			multiPtr->strDef = qfalse;
+		}
+		else if ( !Q_stricmp( effects[e].name, "lamplighting" ) )
+		{
+			// off (copied), with ray tracing (the default: its shadows are cast from the same lamps), always
+			static const char *const names[] = { "With Ray Tracing", "Always" };
+			multiDef_t *multiPtr = (multiDef_t *)row->typeData;
+
+			multiPtr->count = 1;
+			for ( size_t k = 0; k < ARRAY_LEN( names ) && multiPtr->count < MAX_MULTI_CVARS; k++ )
+			{
+				multiPtr->cvarList[multiPtr->count] = String_Alloc( names[k] );
+				multiPtr->cvarValue[multiPtr->count] = (float)( k + 1 );
 				multiPtr->count++;
 			}
 			multiPtr->strDef = qfalse;
@@ -1406,17 +1629,46 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 #endif
 	if ( brightnessY > 0 )
 		brightness->window.rectClient.y = brightnessY;
+
+	// as many rows as fit above the driver info, at the bottom of the screen; with more, a scroll bar (RowScroll_*)
+	const int visible = Q_min( numRows, Q_max( 4, (int)( ( SCREEN_HEIGHT - 4 - ( barHeight + 2 ) - 2 - firstY ) / pitch ) ) );
+	rowScroll_t *rs = RowScroll_For( menu );	// (the same menu again: ui_load, vid_restart)
+	for ( size_t i = 0; !rs && i < ARRAY_LEN( rowScrolls ); i++ )
+	{
+		if ( !rowScrolls[i].menu )
+			rs = &rowScrolls[i];
+	}
+	static rowScroll_t unused;			// (more menus with the page than slots: those don't scroll)
+	rowScroll_t &rowScroll = rs ? *rs : unused;
+	memset( &rowScroll, 0, sizeof( rowScroll ) );
 	for ( int i = 0; i < numRows; i++ )
 	{
-		const float y = firstY + i * pitch;
-
-		rows[i]->window.rectClient.y = y;
 		rows[i]->window.rectClient.h = pitch;
-		rows[i]->mouseEnter = String_Alloc( va( "\"show\" \"%s\" \"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ", bar, bar, x, y, w, barHeight ) );
 		rows[i]->mouseExit = String_Alloc( va( "\"hide\" \"%s\" ", bar ) );
+		rowScroll.rows[i] = rows[i];
+	}
+	for ( int at = 0; at < visible; at++ )
+	{
+		rowScroll.enter[at] = String_Alloc( va( "\"show\" \"%s\" \"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ", bar, bar, x, firstY + at * pitch, w, barHeight ) );
+	}
+	rowScroll.numRows = numRows;
+	rowScroll.visible = visible;
+	rowScroll.left = x;
+	rowScroll.firstY = firstY;
+	rowScroll.pitch = pitch;
+#ifdef JK2_MODE
+	rowScroll.barX = x + w + 2;
+#else
+	rowScroll.barX = x + w - ROW_SCROLL_BAR - 4;	// (inside the panel)
+#endif
+	RowScroll_Place( rowScroll );
+	if ( numRows > visible )
+	{
+		rowScroll.menu = menu;		// (the bar and its keys: only then)
+		rowScroll.driverButton = driverButton;
 	}
 
-	const float driverY = firstY + numRows * pitch + 2;
+	const float driverY = firstY + visible * pitch + 2;
 	driverButton->window.rectClient.y = driverY;
 	if ( panelGrows )
 	{
@@ -1434,7 +1686,7 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 #else
 	driverButton->mouseEnter = String_Alloc( va( "\"show\" \"%s\" \"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ", bar, bar, x, driverY, w, barHeight + 2 ) );
 #endif
-	Com_Printf( "More Video: %d rows, the driver info at %.0f\n", numRows, driverY );
+	Com_Printf( "More Video: %d rows (%d shown at once), the driver info at %.0f\n", numRows, visible, driverY );
 }
 
 /*
@@ -6457,6 +6709,8 @@ void Menu_Paint(menuDef_t *menu, qboolean forcePaint)
 	// paint the background and or border
 	Window_Paint(&menu->window, menu->fadeAmount, menu->fadeClamp, menu->fadeCycle );
 
+	RowScroll_Sync( menu );	// (the rows of the More Video page)
+
 	// Loop through all items for the menu and paint them
 	int iSlotsVisible = 0;
 	for (i = 0; i < menu->itemCount; i++)
@@ -6482,6 +6736,7 @@ void Menu_Paint(menuDef_t *menu, qboolean forcePaint)
 		menu->appearanceTime = DC->realTime + menu->appearanceIncrement;
 		menu->appearanceCnt++;
 	}
+	RowScroll_Paint( menu );
 
 
 	if (uis.debugMode)
@@ -9757,6 +10012,11 @@ void Menu_HandleMouseMove(menuDef_t *menu, float x, float y)
 		return;
 	}
 
+	if ( RowScroll_MouseMove( menu, y ) )	// (the thumb of the More Video page's scroll bar dragged)
+	{
+		return;
+	}
+
 	if (itemCapture)
 	{
 		//Item_MouseMove(itemCapture, x, y);
@@ -11640,6 +11900,12 @@ void Menu_HandleKey(menuDef_t *menu, int key, qboolean down)
 	}
 
 	if (menu == NULL)
+	{
+		inHandler = qfalse;
+		return;
+	}
+
+	if ( RowScroll_HandleKey( menu, key, down ) )	// (the scroll bar of the More Video page)
 	{
 		inHandler = qfalse;
 		return;

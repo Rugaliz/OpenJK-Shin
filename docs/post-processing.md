@@ -73,6 +73,8 @@ original game modules, keeps its lights as they were.
 
 ## Soft particles (`r_softParticles`, default 1, Vulkan)
 
+Setup > More Video > Soft Particles (single player, with the Vulkan renderer).
+
 The sprites of effects (smoke, sparks, explosions, the glow of sabers and blaster bolts) are flat pictures, and where
 one goes into a wall or the floor it used to end in a hard straight line. They now fade out within 6 units in front of
 what is behind them, so smoke rolls along the floor and a glow touching a wall has no edge: once the opaque surfaces
