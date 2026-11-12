@@ -17,7 +17,7 @@ struct Caster {
 	vec4 light;			// a direction: towards it (world), how wide the rays spread (a tangent); a lamp: its position,
 						// its radius; the contact shadow: the middle of the character, how far its rays go
 	vec4 params;		// the floor under it, darkness, the type (0 direction, 1 lamp, 2 contact), for the contact
-						// shadow how far from the middle it reaches
+						// shadow how far from the middle it reaches, for a lamp how far the character is from it
 };
 
 layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Casters { Caster c[]; };
@@ -92,6 +92,7 @@ void main()
 		// below the floor under the character (down a step, off a ledge) its shadow goes on where the level is not
 		// between them (not on the floor of the room under it, which is what the rays alone would darken)
 		bool below = world.z < c.params.x;
+		if (below && world.z < c.params.x - 128.0) continue;	// (no further down than a few steps)
 		if (type == 2) {
 			if (below) continue;
 			// the contact shadow: short rays all around the surface (cosine weighted, as the light from all around
@@ -113,7 +114,7 @@ void main()
 
 		// towards the light: a direction, or a lamp (whose size, seen from here, the rays spread over)
 		vec3 l = normalize(c.light.xyz);
-		float spread = c.light.w, tMax = 4096.0;
+		float spread = c.light.w, tMax = 4096.0, darkness = c.params.y;
 		if (type == 1) {
 			vec3 d = c.light.xyz - world;
 			float dist = length(d);
@@ -121,6 +122,8 @@ void main()
 			l = d / dist;
 			spread = c.light.w / dist;
 			tMax = dist - c.light.w;
+			// further from the lamp than the character, it has less of the lamp's light to lose: the shadow fades
+			darkness *= min(c.params.w * c.params.w / (dist * dist), 1.0);
 		}
 		if (dot(n, l) <= 0.0) continue;	// facing away from the light: dark in the level's own lighting already
 
@@ -141,7 +144,7 @@ void main()
 			hidden *= 2.0;	// (those traced agree: as if every ray was)
 		}
 		if (below && hidden > 0.0 && levelBefore(world + n * 0.5, l, tMax)) continue;
-		f *= 1.0 - c.params.y * hidden / float(rays);
+		f *= 1.0 - darkness * hidden / float(rays);
 	}
 	outColor = vec4(f, f, f, 1.0);
 }

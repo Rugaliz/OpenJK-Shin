@@ -124,7 +124,9 @@ The shadows used to stop 24 units below the floor under the character (the rays 
 further down they would darken the floor of the room under it, through its ceiling): a lamp's shadow running off a
 ledge or down a step was cut off where the ground dropped. The frame's structure the rays go against now has the level
 in it too (its surfaces, doors and lifts), and below that floor a shadow is kept where the level is not between the
-point and the character: down the step it goes on, in the room below there is none.
+point and the character: down the step it goes on, in the room below there is none. It goes down 128 units at most (a
+few steps, a ledge), and a lamp's shadow fades where the ground is further from the lamp than the floor under the
+character (it has less of the lamp's light there to lose), so it is not thrown dark onto ground far below.
 
 **The characters lit by the lamps** (`r_lampLighting`: 1, the default, with Ray Tracing on; 2 always, OpenGL too; 0
 never). A character, an item or a weapon is lit by the level's light grid: an amount of light from all around and one

@@ -49,7 +49,7 @@ typedef struct {
 					// for a lamp its position and radius, for a contact shadow the middle of the caster and how far its rays go
 	float	area[4];		// ray traced: where the caster can be in (s, t) of rowS and rowT: lowest s and t, highest s and t
 	int		rtType;			// ray traced: SHADOW_RT_DIRECTION, SHADOW_RT_LAMP, SHADOW_RT_CONTACT
-	float	reach;			// ray traced, the contact shadow: how far from light it can be
+	float	reach;			// ray traced: the contact shadow, how far from light it can be; a lamp, how far the caster is from it
 } shadowMapCaster_t;
 
 #define SHADOW_RT_DIRECTION		0	// from the light grid's direction

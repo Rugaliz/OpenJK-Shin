@@ -1032,10 +1032,14 @@ static void RB_ShadowRtEntries( const vec3_t mins, const vec3_t maxs, float floo
 			// the shadow is the caster's seen from the lamp, larger the further the ground is behind it than the caster
 			// (down to SHADOW_RT_BELOW under its floor: down a step or off a ledge, post_rt_shadow.frag)
 			const float toFloor = ( lamp->origin[2] - ( floorZ - SHADOW_RT_BELOW ) ) / Q_max( toLamp[2], 0.1f );
-			RB_ShadowRtArea( &e, mins, maxs, toLamp, Com_Clamp( 1.0f, 6.0f, toFloor / Q_max( dist, 1.0f ) ), pad );
+			RB_ShadowRtArea( &e, mins, maxs, toLamp, Com_Clamp( 1.0f, 4.0f, toFloor / Q_max( dist, 1.0f ) ), pad );
 			VectorCopy( lamp->origin, e.light );
 			e.light[3] = lamp->radius;
 			e.darkness = darkness * choice->weights[i] / total;
+			// (where the ground is further from the lamp than the floor under the character, the shadow fades:
+			// post_rt_shadow.frag)
+			const vec3_t underfoot = { mid[0], mid[1], floorZ + 24.0f };
+			e.reach = Distance( lamp->origin, underfoot );
 			e.rtType = SHADOW_RT_LAMP;
 			shRtEntries.push_back( e );
 			numLamps++;
