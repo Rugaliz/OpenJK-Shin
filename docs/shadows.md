@@ -120,6 +120,12 @@ the shadow comes from the one direction of the level's light grid (the strongest
 when the level was made), fainter and softer than a lamp's as it is a guess. `r_rtLamps 0` uses the grid's direction
 everywhere.
 
+The shadows used to stop 24 units below the floor under the character (the rays only look at the characters, so
+further down they would darken the floor of the room under it, through its ceiling): a lamp's shadow running off a
+ledge or down a step was cut off where the ground dropped. The frame's structure the rays go against now has the level
+in it too (its surfaces, doors and lifts), and below that floor a shadow is kept where the level is not between the
+point and the character: down the step it goes on, in the room below there is none.
+
 **The characters lit by the lamps** (`r_lampLighting`: 1, the default, with Ray Tracing on; 2 always, OpenGL too; 0
 never). A character, an item or a weapon is lit by the level's light grid: an amount of light from all around and one
 from a single direction, into which the map compiler added up the lamps around. Where the level has its lamps, that

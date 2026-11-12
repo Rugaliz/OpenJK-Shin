@@ -78,7 +78,9 @@ one goes into a wall or the floor it used to end in a hard straight line. They n
 what is behind them, so smoke rolls along the floor and a glow touching a wall has no edge: once the opaque surfaces
 of a view are drawn, their depth is copied, and a blended stage of an effect (not of a model or of the level, nor a
 mark laid on a surface, like a scorch) reads it and fades its alpha or its colour, as its blending allows. The effects
-themselves are unchanged. The Vulkan renderer only, so far; 0 turns it off.
+themselves are unchanged. The depth is only kept when such an effect is in the view, in the pause of the drawing
+the shadows make (about 0.3 to 0.5 ms a frame at 3440 x 1440 with 8x multisampling on a Radeon RX 7800 XT). The Vulkan
+renderer only, so far; 0 turns it off.
 
 The effects' pass also dithers the picture it stores (8 bits a colour): a noise of up to one step on either side, so
 that the smooth gradients it makes (a bloom halo, a dark room the eye adaptation brightens) show no steps.
