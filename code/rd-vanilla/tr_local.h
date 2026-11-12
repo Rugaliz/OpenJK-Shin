@@ -1324,6 +1324,11 @@ void	RB_PostProcess( void );
 #include "renderer/tr_shadow_maps.h"	// (the shadow maps of the characters)
 qboolean	R_Post_GammaAvailable( void );
 void	RB_GammaPass( void );	// brightness and overbright for the whole picture (tr_post.h)
+// The soft particles (r_softParticles, vk_post.cpp; none in OpenGL yet): once the opaque surfaces of a view are drawn,
+// their depth is kept; then a stage of an effect drawn between RB_SoftParticles( units ) and RB_SoftParticles( 0 )
+// fades out within units in front of it (qfalse: it can't)
+void	RB_SoftParticlesBegin( void );
+qboolean	RB_SoftParticles( float units );
 
 // tr_backend.cpp
 void	SetViewportAndScissor( void );
@@ -1487,6 +1492,7 @@ struct shaderCommands_s
 	int			fogNum;
 
 	int			dlightBits;	// or together of all vertexDlightBits
+	bool		effectPolys;	// polygons of effects are in it (RB_SurfacePolychain: soft particles)
 
 	int			numIndexes;
 	int			numVertexes;

@@ -42,6 +42,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define POST_GAMMA_ID		0x7ffe0004u	// (the picture through the brightness table, RB_GammaPass)
 #define POST_SHADOW_ID		0x7ffe0005u	// (the darkening of the shadow maps, RB_ShadowMapsApply)
 #define POST_ATLAS_ID		0x7ffe0006u	// (the atlas of the shadow maps)
+#define POST_SOFT_ID		0x7ffe0007u	// (the depth of the opaque surfaces, RB_SoftParticlesBegin)
 
 enum {
 	PASS_SSAO, PASS_SSAO_BLUR, PASS_BLOOM_DOWN, PASS_BLOOM_UP, PASS_COMPOSITE,
@@ -114,6 +115,12 @@ static struct {
 	postImage_t			scene, aoA, aoB, final, edges, weights, result;
 	postImage_t			sharp;						// the view sharpened (r_sharpen)
 	postImage_t			shadow;						// the darkening of the shadow maps
+	VkImage				softImage;					// the depth of the opaque surfaces of the view (RB_SoftParticlesBegin)
+	vkAlloc_t			softMemory;
+	VkImageView			softView;
+	int					softWidth, softHeight;
+	bool				softReady;					// for the view being drawn
+	bool				softFailed;
 	postImage_t			rtShadow;					// the ray traced shadows before the blur (RtShadowSize)
 	vkRtBuffer_t		rtCasters[VK_FRAMES_IN_FLIGHT];	// their casters (RT_CASTER_SECTIONS lots a frame, read by address)
 	int					rtCastersFrame[VK_FRAMES_IN_FLIGHT], rtCastersUsed[VK_FRAMES_IN_FLIGHT];
@@ -1294,6 +1301,7 @@ render pass, so it ends the one that is open; the view's first draw opens anothe
 */
 void VK_RT_BeginView( void )
 {
+	post.softReady = false;	// (the soft particles need the depth of this view, RB_SoftParticlesBegin)
 	if ( !R_DlightShadows() || ( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
 	{
 		VK_DrawSetScene( VK_NULL_HANDLE );
@@ -1418,6 +1426,138 @@ void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters,
 }
 
 /*
+=================
+RB_SoftParticlesBegin, RB_SoftParticles
+
+The soft particles (r_softParticles): the stages of effects (smoke, sparks, explosions, the glow of sabers and
+bolts) fade out within a few units in front of what is behind them, instead of cutting a hard line where they go into
+a wall or the floor. Once the opaque surfaces of a view are drawn, their depth is copied into an image of its own (the
+depth buffer itself goes on being drawn into); a stage that fades reads it in the second texture unit's place
+(fixed.frag, SOFT).
+=================
+*/
+static void FreeSoftDepth( void )
+{
+	if ( post.softImage )
+	{
+		vkDestroyImageView( vk.device, post.softView, NULL );
+		vkDestroyImage( vk.device, post.softImage, NULL );
+		VK_FreeMemory( &post.softMemory );
+	}
+	post.softImage = VK_NULL_HANDLE;
+	post.softView = VK_NULL_HANDLE;
+	post.softWidth = post.softHeight = 0;
+}
+
+static bool EnsureSoftDepth( void )
+{
+	if ( post.softImage && post.softWidth == vk.width && post.softHeight == vk.height )
+	{
+		return true;
+	}
+	if ( post.softImage )
+	{
+		vkDeviceWaitIdle( vk.device );	// (the window changed size: frames in flight may still read the old one)
+		FreeSoftDepth();
+	}
+	VkImageCreateInfo info = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	info.imageType = VK_IMAGE_TYPE_2D;
+	info.format = vk.depthFormat;
+	info.extent.width = (uint32_t)vk.width;
+	info.extent.height = (uint32_t)vk.height;
+	info.extent.depth = 1;
+	info.mipLevels = 1;
+	info.arrayLayers = 1;
+	info.samples = VK_SAMPLE_COUNT_1_BIT;
+	info.tiling = VK_IMAGE_TILING_OPTIMAL;
+	info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	if ( vkCreateImage( vk.device, &info, NULL, &post.softImage ) != VK_SUCCESS )
+	{
+		post.softImage = VK_NULL_HANDLE;
+		return false;
+	}
+	VkMemoryRequirements requirements;
+	vkGetImageMemoryRequirements( vk.device, post.softImage, &requirements );
+	if ( !VK_AllocateMemory( &requirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &post.softMemory ) )
+	{
+		vkDestroyImage( vk.device, post.softImage, NULL );
+		post.softImage = VK_NULL_HANDLE;
+		return false;
+	}
+	VK_CheckResult( vkBindImageMemory( vk.device, post.softImage, post.softMemory.memory, post.softMemory.offset ), "vkBindImageMemory" );
+	VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	viewInfo.image = post.softImage;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.format = vk.depthFormat;
+	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.layerCount = 1;
+	VK_CheckResult( vkCreateImageView( vk.device, &viewInfo, NULL, &post.softView ), "vkCreateImageView" );
+	post.softWidth = vk.width;
+	post.softHeight = vk.height;
+
+	// read as the second texture unit (its first copy makes its layout one for reading)
+	VK_SetExternalTexture( POST_SOFT_ID, post.softImage, post.softView, vk.width, vk.height );
+	VK_TexParameter( POST_SOFT_ID, GL_TEXTURE_MIN_FILTER, (GLfloat)GL_NEAREST );
+	VK_TexParameter( POST_SOFT_ID, GL_TEXTURE_MAG_FILTER, (GLfloat)GL_NEAREST );
+	return true;
+}
+
+void RB_SoftParticlesBegin( void )
+{
+	static cvar_t *soft = NULL;
+	if ( !soft )
+	{
+		soft = ri.Cvar_Get( "r_softParticles", "1", CVAR_ARCHIVE_ND );
+	}
+	post.softReady = false;
+	if ( !soft->integer || !post.ready || post.softFailed || backEnd.viewParms.isPortal || ( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
+	{
+		return;
+	}
+	VK_EnsureFrame();
+	VK_EndRenderPass();	// (resolves the depth of a multisampled view into vk.depthImage)
+	if ( !EnsureSoftDepth() )
+	{
+		post.softFailed = true;
+		return;
+	}
+
+	const VkImageAspectFlags depthAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT );
+	// (barriers on both aspects of a depth and stencil format; only the depth is copied and read)
+	Barrier( post.softImage, depthAspects, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
+	VkImageCopy region = {};
+	region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	region.srcSubresource.layerCount = 1;
+	region.dstSubresource = region.srcSubresource;
+	region.extent.width = (uint32_t)vk.width;
+	region.extent.height = (uint32_t)vk.height;
+	region.extent.depth = 1;
+	vkCmdCopyImage( vk.cmd, vk.depthImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, post.softImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region );
+	Barrier( vk.depthImage, depthAspects, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
+	Barrier( post.softImage, depthAspects, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+	post.softReady = true;
+}
+
+qboolean RB_SoftParticles( float units )
+{
+	if ( units > 0.0f && !post.softReady )
+	{
+		return qfalse;
+	}
+	VK_SetSoftParticles( units, POST_SOFT_ID );
+	return qtrue;
+}
+
+/*
 =============================================================================
 
 START AND END
@@ -1525,6 +1665,7 @@ void VK_ShutdownPost( void )
 	}
 	vkDeviceWaitIdle( vk.device );
 	FreeImages();
+	FreeSoftDepth();
 	if ( post.eyeBuffer )
 	{
 		vkUnmapMemory( vk.device, post.eyeMemory );

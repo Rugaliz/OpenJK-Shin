@@ -11,6 +11,7 @@ layout(constant_id = 3) const int ALPHA_FUNC = 0;	// 0 off, 1 less, 2 equal, 3 l
 layout(constant_id = 4) const float ALPHA_REF = 0.0;
 layout(constant_id = 5) const int FOG_MODE = 0;		// 0 off, 1 linear, 2 exp2
 layout(constant_id = 6) const int CLIP = 0;
+layout(constant_id = 7) const int SOFT = 0;			// the soft particles: 0 off, how it fades: 1 alpha, 2 colour, 3 both, 4 to white
 
 layout(push_constant) uniform Constants
 {
@@ -67,6 +68,20 @@ void main()
 		float d = pc.fogColorDensity.a * vFogDepth;
 		float f = clamp(exp(-d * d), 0.0, 1.0);
 		color.rgb = mix(pc.fogColorDensity.rgb, color.rgb, f);
+	}
+
+	// The soft particles: within pc.fogRange.z units in front of what is behind (the depth of the opaque surfaces, a copy
+	// in tex1), as distances from the eye (the projection's depth terms in clipPlane.xy), the stage fades out, as its
+	// blend can: its alpha, its colour, both, or towards white for one that multiplies.
+	if (SOFT != 0) {
+		float behind = texture(tex1, gl_FragCoord.xy * pc.clipPlane.zw).r * 2.0 - 1.0;
+		float here = gl_FragCoord.z * 2.0 - 1.0;
+		float gap = pc.clipPlane.y / (behind + pc.clipPlane.x) - pc.clipPlane.y / (here + pc.clipPlane.x);
+		float f = clamp(gap / pc.fogRange.z, 0.0, 1.0);
+		if (SOFT == 1) color.a *= f;
+		else if (SOFT == 2) color.rgb *= f;
+		else if (SOFT == 3) color *= f;
+		else color.rgb = mix(vec3(1.0), color.rgb, f);
 	}
 
 	if (ALPHA_FUNC == 1 && !(color.a < ALPHA_REF)) discard;

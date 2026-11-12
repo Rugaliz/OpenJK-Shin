@@ -783,6 +783,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 				{
 					RB_ShadowFinish();
 					RB_DrawDeferredDlights();
+					RB_SoftParticlesBegin();	// (what follows is see-through: effects fade near the depth kept)
 					didShadowPass = true;
 				}
 			}

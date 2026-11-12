@@ -71,6 +71,18 @@ modules ask for these with a new call, `AddLineLightToScene` (`cgi_R_AddLineLigh
 does not have it (rend2), it is the light at the middle the game always had. Jedi Outcast multiplayer, which runs the
 original game modules, keeps its lights as they were.
 
+## Soft particles (`r_softParticles`, default 1, Vulkan)
+
+The sprites of effects (smoke, sparks, explosions, the glow of sabers and blaster bolts) are flat pictures, and where
+one goes into a wall or the floor it used to end in a hard straight line. They now fade out within 6 units in front of
+what is behind them, so smoke rolls along the floor and a glow touching a wall has no edge: once the opaque surfaces
+of a view are drawn, their depth is copied, and a blended stage of an effect (not of a model or of the level, nor a
+mark laid on a surface, like a scorch) reads it and fades its alpha or its colour, as its blending allows. The effects
+themselves are unchanged. The Vulkan renderer only, so far; 0 turns it off.
+
+The effects' pass also dithers the picture it stores (8 bits a colour): a noise of up to one step on either side, so
+that the smooth gradients it makes (a bloom halo, a dark room the eye adaptation brightens) show no steps.
+
 ## Brightness and overbright (`r_gamma`, `r_overBrightBits`)
 
 The original games set the brightness (the Brightness slider of the video setup, `r_gamma`) with the gamma ramps of the graphics

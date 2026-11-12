@@ -1228,6 +1228,14 @@ void RB_RayTracedShadowsApply( const shadowMapCaster_t *casters, int numCasters,
 							   const int *indexes, int numTriangles, int stencilSkip ) {
 }
 
+// (the soft particles are the Vulkan renderer's only, so far)
+void RB_SoftParticlesBegin( void ) {
+}
+
+qboolean RB_SoftParticles( float units ) {
+	return qfalse;
+}
+
 qboolean R_ShadowMaps_Available( void ) {
 	return (qboolean)( R_GLSL_Available() && qglActiveTextureARB && qglMultiTexCoord2fARB && !shadowPass.failed );
 }

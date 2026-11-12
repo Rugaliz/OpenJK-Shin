@@ -913,6 +913,7 @@ void RB_SurfacePolychain( srfPoly_t *p ) {
 	int		numv;
 
 	RB_CHECKOVERFLOW( p->numVerts, 3*(p->numVerts - 2) );
+	tess.effectPolys = true;	// (the polygons the effects add: soft particles)
 
 	// fan triangles into the tess array
 	numv = tess.numVertexes;

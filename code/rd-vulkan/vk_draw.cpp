@@ -264,17 +264,18 @@ static VkPipeline CreatePipeline( const vkPipelineKey_t *key )
 	dynamic.dynamicStateCount = sizeof( dynamicStates ) / sizeof( dynamicStates[0] );
 	dynamic.pDynamicStates = dynamicStates;
 
-	struct { int unitMask, env0, env1, alphaFunc; float alphaRef; int fog, clip; } values = {
-		key->unitMask, EnvNumber( key->env0 ), EnvNumber( key->env1 ), AlphaFuncNumber( key->alphaFunc ), key->alphaRef, key->fogMode, key->clip };
-	VkSpecializationMapEntry entries[7];
-	const uint32_t offsets[7] = { 0, 4, 8, 12, 16, 20, 24 };
-	for ( uint32_t i = 0; i < 7; i++ )
+	struct { int unitMask, env0, env1, alphaFunc; float alphaRef; int fog, clip, soft; } values = {
+		key->unitMask, EnvNumber( key->env0 ), EnvNumber( key->env1 ), AlphaFuncNumber( key->alphaFunc ), key->alphaRef, key->fogMode, key->clip,
+		key->soft };
+	VkSpecializationMapEntry entries[8];
+	const uint32_t offsets[8] = { 0, 4, 8, 12, 16, 20, 24, 28 };
+	for ( uint32_t i = 0; i < 8; i++ )
 	{
 		entries[i].constantID = i;
 		entries[i].offset = offsets[i];
 		entries[i].size = 4;
 	}
-	VkSpecializationInfo specialization = { 7, entries, sizeof( values ), &values };
+	VkSpecializationInfo specialization = { 8, entries, sizeof( values ), &values };
 
 	VkPipelineShaderStageCreateInfo stages[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO }, { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
 	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;

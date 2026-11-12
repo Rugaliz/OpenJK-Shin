@@ -90,6 +90,10 @@ static struct vkglState_s {
 	float			uniformShadow;
 	float			uniformLightHalf[3];	// a light along a line
 
+	// the soft particles (VK_SetSoftParticles)
+	float			softUnits;
+	GLuint			softDepth;
+
 	// current values
 	float			color[4];
 	float			texCoord[MAX_UNITS][2];
@@ -666,6 +670,23 @@ static int EnvCode( GLenum env )
 }
 
 // everything the pipeline and the shaders are told about the state of the moment
+void VK_SetSoftParticles( float units, GLuint depthTexture )
+{
+	gl.softUnits = units;
+	gl.softDepth = depthTexture;
+}
+
+// how a stage blended so fades (fixed.frag SOFT): 1 by its alpha, 2 its colour (added), 3 both (premultiplied), 4 towards
+// white (it multiplies); 0 it can't
+static unsigned char SoftMode( GLenum src, GLenum dst )
+{
+	if ( src == GL_SRC_ALPHA && ( dst == GL_ONE_MINUS_SRC_ALPHA || dst == GL_ONE ) ) return 1;
+	if ( src == GL_ONE && dst == GL_ONE ) return 2;
+	if ( src == GL_ONE && dst == GL_ONE_MINUS_SRC_ALPHA ) return 3;
+	if ( ( src == GL_DST_COLOR && dst == GL_ZERO ) || ( src == GL_ZERO && dst == GL_SRC_COLOR ) ) return 4;
+	return 0;
+}
+
 static void PrepareDraw( vkPipelineKey_t *key, vkDynamicState_t *dynamic, vkConstants_t *constants,
 	bool lines, bool colorConst, bool uv0Const, bool uv1Const )
 {
@@ -1011,6 +1032,26 @@ static void Emit( GLenum mode, const source_t &position, const source_t &color, 
 
 	vkTexture_t *texture0 = gl.texture2D[0] ? VK_TextureForId( gl.bound[0], false ) : NULL;
 	vkTexture_t *texture1 = gl.texture2D[1] ? VK_TextureForId( gl.bound[1], false ) : NULL;
+
+	// the soft particles: the depth of what is behind in the second unit's place, the projection's depth terms and the
+	// size of the window in the clip plane's (there is none), how far it fades in the fog range's third
+	if ( gl.softUnits > 0.0f && !gl.program && !gl.clip0 && texture0 && !texture1 && gl.blend && !gl.depthMask && !lines )
+	{
+		key.soft = SoftMode( gl.srcBlend, gl.dstBlend );
+		texture1 = key.soft ? VK_TextureForId( gl.softDepth, false ) : NULL;
+		if ( !texture1 )
+		{
+			key.soft = 0;
+		}
+		else
+		{
+			constants.clipPlane[0] = gl.projection[10];
+			constants.clipPlane[1] = gl.projection[14];
+			constants.clipPlane[2] = 1.0f / vk.width;
+			constants.clipPlane[3] = 1.0f / vk.height;
+			constants.fogRange[2] = gl.softUnits;
+		}
+	}
 	vkDlightShadow_t shadow;
 	if ( gl.program )
 	{

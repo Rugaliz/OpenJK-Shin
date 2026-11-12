@@ -225,6 +225,7 @@ typedef struct vkPipelineKey_s {
 	unsigned char	sampleShading;				// percent of the samples of a pixel that are shaded on their own, 0: off
 	unsigned char	program;					// 0: the fixed function shaders, 1: the dynamic light program (normals come in the second texture coordinate's place)
 	unsigned char	rayQuery;					// the dynamic light program with its rays (dlight_rt.frag, VK_DrawSetScene)
+	unsigned char	soft;						// the soft particles: how the stage fades near what is behind it (fixed.frag), 0 not
 } vkPipelineKey_t;
 
 // Set per draw (dynamic state of the pipelines). Viewport and scissor are OpenGL style (origin bottom left).
@@ -267,6 +268,9 @@ typedef struct vkDlightShadow_s {
 
 // this frame's ray tracing structure of the level, for the rays of the dynamic lights (VK_NULL_HANDLE: none)
 void		VK_DrawSetScene( VkAccelerationStructureKHR scene );
+// The soft particles (RB_SoftParticles): the draws that can fade out within units of the depth in the texture of
+// depthTexture do so (0: none)
+void		VK_SetSoftParticles( float units, GLuint depthTexture );
 void		VK_Draw( const vkPipelineKey_t *key, const vkDynamicState_t *dynamic, const vkConstants_t *constants,
 				const vkTexture_t *texture0, const vkTexture_t *texture1, const vkGeometry_t *geometry,
 				const vkDlightShadow_t *shadow = NULL );
