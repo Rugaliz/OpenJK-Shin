@@ -37,10 +37,19 @@ layout(location = 0) out vec4 outColor;
 float depthAt(vec2 t) { return texture(uDepth, t * p.b.zw + p.c.xy).r; }
 float viewZ(float depth) { return -p.b.y / (depth * 2.0 - 1.0 + p.b.x); }
 
+// A ray query must get numbers (no NaN, no infinity), a direction that is not zero, and an end beyond its start:
+// otherwise the GPU can hang (device lost). A NaN comes from a model with a broken point, or a direction of length 0.
+bool rayOk(vec3 origin, vec3 dir, float tMin, float tMax)
+{
+	return !any(isnan(origin)) && !any(isinf(origin)) && !any(isnan(dir)) && !any(isinf(dir)) && dot(dir, dir) > 1e-12 &&
+		tMax > tMin && !isinf(tMax);	// (false for a NaN tMax too)
+}
+
 // 1 if the ray from origin along dir hits a character before tMax; blockedTowards: the ray r of rays (a spiral over a
 // disc around the light's direction l, as wide as spread, turned by turn)
 float blocked(vec3 origin, vec3 dir, float tMax)
 {
+	if (!rayOk(origin, dir, 0.5, tMax)) return 0.0;
 	rayQueryEXT query;
 	rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0x04, origin, 0.5, dir, tMax);
 	while (rayQueryProceedEXT(query)) {}
@@ -50,8 +59,9 @@ float blocked(vec3 origin, vec3 dir, float tMax)
 // along dir (or tMax when there is none)
 bool levelBefore(vec3 origin, vec3 dir, float tMax)
 {
+	if (!rayOk(origin, dir, 0.5, max(tMax, 0.6))) return false;
 	rayQueryEXT query;
-	rayQueryInitializeEXT(query, uScene, gl_RayFlagsOpaqueEXT, 0x04, origin, 0.5, dir, tMax);
+	rayQueryInitializeEXT(query, uScene, gl_RayFlagsOpaqueEXT, 0x04, origin, 0.5, dir, max(tMax, 0.6));
 	while (rayQueryProceedEXT(query)) {}
 	if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
 		tMax = rayQueryGetIntersectionTEXT(query, true);

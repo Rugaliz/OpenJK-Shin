@@ -39,6 +39,14 @@ layout(location = 0) out vec4 outColor;
 float height(vec2 st) { return dot(texture(uDiffuse, st).rgb, vec3(0.299, 0.587, 0.114)) * pc.alphaTest.y; }
 
 #ifdef RAY_QUERY
+// A ray query must get numbers (no NaN, no infinity), a direction that is not zero, and an end beyond its start:
+// otherwise the GPU can hang (device lost). A NaN comes from a model with a broken point, or a direction of length 0.
+bool rayOk(vec3 origin, vec3 dir, float tMin, float tMax)
+{
+	return !any(isnan(origin)) && !any(isinf(origin)) && !any(isnan(dir)) && !any(isinf(dir)) && dot(dir, dir) > 1e-12 &&
+		tMax > tMin && !isinf(tMax);	// (false for a NaN tMax too)
+}
+
 // 1 if a ray from wPos (on a surface of normal n, 0 when unknown) gets to target, 0 if something is in between
 float seenFrom(vec3 wPos, vec3 n, vec3 target, float tMin)
 {
@@ -47,9 +55,10 @@ float seenFrom(vec3 wPos, vec3 n, vec3 target, float tMin)
 	if (dist - 12.0 <= tMin + 1.0) {
 		return 1.0;	// (nothing in between worth a ray; and a ray query must not end before it starts: the GPU can hang)
 	}
+	vec3 origin = wPos + (dot(n, d) < 0.0 ? -n : n);
+	if (!rayOk(origin, d / dist, tMin, dist - 12.0)) return 1.0;
 	rayQueryEXT query;
-	rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x07,
-		wPos + (dot(n, d) < 0.0 ? -n : n), tMin, d / dist, dist - 12.0);
+	rayQueryInitializeEXT(query, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x07, origin, tMin, d / dist, dist - 12.0);
 	RT_PROCEED(query)
 	return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
 }
