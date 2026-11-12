@@ -533,6 +533,8 @@ static struct {
 		vkRtBuffer_t	charactersInput, charactersScratch, charactersTopScratch;
 		int				charactersBuilt;	// vk.frameCounter + 1 of the frame they were made in (the next frame's level
 											// structure places them: the dynamic lights' rays are blocked by characters)
+		VkDeviceSize	charactersInputUsed;	// how much of charactersInput the views of the frame took (each its own part)
+		int				charactersInputFrame;	// vk.frameCounter + 1 of that frame
 	} frames[VK_FRAMES_IN_FLIGHT];
 } rtScene;
 
@@ -1068,20 +1070,56 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	{
 		return VK_NULL_HANDLE;
 	}
-	auto &frame = rtScene.frames[vk.frameIndex];
-	const VkDeviceSize vertexBytes = ( (VkDeviceSize)numPoints * 3 * sizeof( float ) + 15 ) & ~(VkDeviceSize)15;
-	const VkDeviceSize bytes = vertexBytes + (VkDeviceSize)numTriangles * 3 * sizeof( uint32_t );
-	if ( frame.charactersInput.size < bytes )
+	// a triangle with a corner that is not among the points would have the build read past them (a GPU page fault),
+	// and a structure made of it, or of points that are no numbers or far outside any level, could hang the rays that
+	// go through it
+	for ( int i = 0; i < numPoints * 3; i++ )
 	{
-		VK_RT_RetireBuffer( &frame.charactersInput );
-		if ( !VK_RT_NewBuffer( &frame.charactersInput, bytes + bytes / 2 + ( RT_MAX_INSTANCES + 1 ) * sizeof( VkAccelerationStructureInstanceKHR ) + 16,
-				VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
+		if ( !( xyz[i] > -262144.0f && xyz[i] < 262144.0f ) )	// (false for NaN too)
 		{
+			ri.Printf( PRINT_DEVELOPER, S_COLOR_YELLOW "ray tracing: a character's point is at %f, not traced\n", xyz[i] );
 			return VK_NULL_HANDLE;
 		}
 	}
-	memcpy( frame.charactersInput.mapped, xyz, (size_t)numPoints * 3 * sizeof( float ) );
-	memcpy( (byte *)frame.charactersInput.mapped + vertexBytes, indexes, (size_t)numTriangles * 3 * sizeof( uint32_t ) );
+	for ( int i = 0; i < numTriangles * 3; i++ )
+	{
+		if ( (unsigned)indexes[i] >= (unsigned)numPoints )
+		{
+			ri.Printf( PRINT_DEVELOPER, S_COLOR_YELLOW "ray tracing: a character's triangle has a corner %d of %d points, not traced\n", indexes[i], numPoints );
+			return VK_NULL_HANDLE;
+		}
+	}
+
+	// Each view of the frame (a sky portal, a mirror, a camera and the view itself) has its own part of the input: the
+	// builds recorded for the views before are sent with the frame, and read theirs then. (One part for all had the
+	// next view's points and triangles written over the ones of a build not sent yet, which read past its points.)
+	auto &frame = rtScene.frames[vk.frameIndex];
+	if ( frame.charactersInputFrame != vk.frameCounter + 1 )
+	{
+		frame.charactersInputFrame = vk.frameCounter + 1;
+		frame.charactersInputUsed = 0;
+	}
+	const VkDeviceSize vertexBytes = ( (VkDeviceSize)numPoints * 3 * sizeof( float ) + 15 ) & ~(VkDeviceSize)15;
+	const VkDeviceSize bytes = vertexBytes + (VkDeviceSize)numTriangles * 3 * sizeof( uint32_t );
+	const VkDeviceSize instanceOffset = ( bytes + 15 ) & ~(VkDeviceSize)15;
+	const VkDeviceSize partBytes = ( instanceOffset + ( RT_MAX_INSTANCES + 1 ) * sizeof( VkAccelerationStructureInstanceKHR ) + 255 ) & ~(VkDeviceSize)255;
+	if ( frame.charactersInput.size < frame.charactersInputUsed + partBytes )
+	{
+		// (the builds recorded with the one there was still read it: retired, it stays until they are done)
+		VK_RT_RetireBuffer( &frame.charactersInput );
+		if ( !VK_RT_NewBuffer( &frame.charactersInput, 2 * partBytes, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
+		{
+			frame.charactersInputUsed = 0;
+			return VK_NULL_HANDLE;
+		}
+		frame.charactersInputUsed = 0;
+	}
+	const VkDeviceSize partOffset = frame.charactersInputUsed;
+	frame.charactersInputUsed += partBytes;
+	byte *part = (byte *)frame.charactersInput.mapped + partOffset;
+	const VkDeviceAddress partAddress = frame.charactersInput.address + partOffset;
+	memcpy( part, xyz, (size_t)numPoints * 3 * sizeof( float ) );
+	memcpy( part + vertexBytes, indexes, (size_t)numTriangles * 3 * sizeof( uint32_t ) );
 
 	// When the structure has to be made again larger, the frame before (in flight) may still read the old one, through
 	// the level's structure of its dynamic lights: what was recorded is sent, and all of it waited for, first.
@@ -1097,8 +1135,8 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
 	vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, NULL, 0, NULL );
-	if ( !VK_RT_BuildTriangles( cmd, &frame.characters, &frame.charactersScratch, frame.charactersInput.address, (uint32_t)numPoints,
-			frame.charactersInput.address + vertexBytes, (uint32_t)numTriangles, true, true ) )
+	if ( !VK_RT_BuildTriangles( cmd, &frame.characters, &frame.charactersScratch, partAddress, (uint32_t)numPoints,
+			partAddress + vertexBytes, (uint32_t)numTriangles, true, true ) )
 	{
 		return VK_NULL_HANDLE;
 	}
@@ -1106,8 +1144,7 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	// the instances, after the indexes: the level's of the frame (its surfaces and brush models, but not the characters
 	// of the frame before), as the shadows' rays also look whether the level is between (below the floor under a
 	// character: post_rt_shadow.frag), and the characters
-	const VkDeviceSize instanceOffset = ( bytes + 15 ) & ~(VkDeviceSize)15;
-	VkAccelerationStructureInstanceKHR *list = (VkAccelerationStructureInstanceKHR *)( (byte *)frame.charactersInput.mapped + instanceOffset );
+	VkAccelerationStructureInstanceKHR *list = (VkAccelerationStructureInstanceKHR *)( part + instanceOffset );
 	uint32_t numInstances = 0;
 	if ( frame.frame == vk.frameCounter + 1 && frame.instances.mapped )
 	{
@@ -1122,7 +1159,7 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	}
 	VK_RT_Place( &list[numInstances++], &frame.characters, 0, NULL, NULL, RT_MASK_CHARACTERS );	// (in world space already)
 	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );
-	if ( !VK_RT_BuildInstances( cmd, &frame.charactersTop, &frame.charactersTopScratch, frame.charactersInput.address + instanceOffset, numInstances ) )
+	if ( !VK_RT_BuildInstances( cmd, &frame.charactersTop, &frame.charactersTopScratch, partAddress + instanceOffset, numInstances ) )
 	{
 		return VK_NULL_HANDLE;
 	}
