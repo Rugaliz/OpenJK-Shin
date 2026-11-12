@@ -2024,6 +2024,11 @@ static bool RB_TestZFlare( vec3_t point) {
 	if ( r_flares->integer !=1 ) {	//skipping the the z-test
 		return true;
 	}
+#ifdef RD_VULKAN
+	// (the depth there two frames before, read without waiting for the GPU)
+	return VK_FlareVisible( point, (int)( backEnd.viewParms.viewportX + window[0] ), (int)( backEnd.viewParms.viewportY + window[1] ), eye[2],
+		backEnd.viewParms.projectionMatrix[10], backEnd.viewParms.projectionMatrix[11], backEnd.viewParms.projectionMatrix[14] );
+#endif
 	// doing a readpixels is as good as doing a glFinish(), so
 	// don't bother with another sync
 	glState.finishCalled = qfalse;

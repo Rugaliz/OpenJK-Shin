@@ -33,3 +33,8 @@ void VK_RT_NewLevel( void );
 
 // Before a view is drawn: the ray tracing structure the dynamic lights' rays use (vk_post.cpp).
 void VK_RT_BeginView( void );
+
+// Whether nothing is in front of a flare (key: the same for the same flare each frame), from the depth at its pixel (x, y
+// from the bottom left) two frames before, read without waiting for the GPU (vk_frame.cpp). eyeZ and the projection's
+// [10], [11], [14] are those of this frame's view, kept to judge the depth with when it comes.
+bool VK_FlareVisible( const void *key, int x, int y, float eyeZ, float proj10, float proj11, float proj14 );

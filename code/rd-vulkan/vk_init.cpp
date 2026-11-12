@@ -1035,6 +1035,7 @@ void VK_Shutdown( void )
 	}
 	vkDeviceWaitIdle( vk.device );
 	VK_ShutdownReadback();
+	VK_ShutdownFlares();
 	VK_RT_Shutdown();
 	VK_ShutdownPost();
 	VK_ShutdownDraw();

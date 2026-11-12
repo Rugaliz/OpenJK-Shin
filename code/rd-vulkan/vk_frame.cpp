@@ -25,6 +25,10 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../rd-vanilla/tr_local.h"
 #include "vk_priv.h"
 #include <chrono>
+#include <unordered_map>
+
+static void VK_FlaresCollect( void );
+static void VK_FlaresCopy( void );
 
 cvar_t *r_vkProfile;
 
@@ -71,7 +75,10 @@ static void VK_BeginCommandBuffer( void )
 	int &count = vk.frameCommandBufferCount[vk.frameIndex];
 	if ( count >= (int)( sizeof( vk.frameCommandBuffers[0] ) / sizeof( vk.frameCommandBuffers[0][0] ) ) )
 	{
-		ri.Error( ERR_FATAL, "Vulkan: too many command buffers in a frame" );
+		// (sent that often in one frame: once all of it is done, the frame's command buffers are used again from the first)
+		VK_CheckResult( vkQueueWaitIdle( vk.queue ), "vkQueueWaitIdle" );
+		VK_CheckResult( vkResetCommandPool( vk.device, frame->pool, 0 ), "vkResetCommandPool" );
+		count = 0;
 	}
 	// Made once and used again each time the pool is reset (a reset keeps them): one made every time was never given
 	// back, and the driver's memory for each grew by megabytes a second until the system ran out
@@ -167,6 +174,7 @@ void VK_EnsureFrame( void )
 
 	VK_CheckResult( vkResetCommandPool( vk.device, frame->pool, 0 ), "vkResetCommandPool" );
 	vk.frameCommandBufferCount[vk.frameIndex] = 0;
+	VK_FlaresCollect();
 	VK_ProcessDeferredDeletes();
 	VK_BeginFrameDraw();
 	VK_BeginFramePost();
@@ -297,6 +305,7 @@ void VK_PresentFrame( window_t *window )
 	VK_EnsureFrame();
 	VK_EndRenderPass();
 	VK_FlushUploads( false );
+	VK_FlaresCopy();
 
 	vkFrame_t *frame = &vk.frames[vk.frameIndex];
 	VkImage target = vk.swapchainImages[vk.imageIndex];
@@ -600,4 +609,171 @@ float VK_ReadDepth( int x, int y )
 		depth = (float)( *(const unsigned int *)mapped & 0xFFFFFFu ) / 16777215.0f;
 	}
 	return depth;
+}
+
+/*
+=============================================================================
+
+FLARES
+
+A flare is drawn when nothing is in front of it: the original reads the depth at its pixel as it is drawn
+(glReadPixels). Here that sent the frame so far and waited for the GPU, once for each flare in view: slow, and a level
+with many (t1_sour has 36) used up the frame's command buffers. Now the pixels of the frame's flares are copied
+together when the frame is shown, without waiting, and each flare goes by its own from two frames before (the frame
+with the same index, waited for before this one began): about 14 ms at 144 frames a second, too little to see.
+
+=============================================================================
+*/
+
+#define VK_MAX_FLARES	256
+
+typedef struct {
+	const void	*key;
+	int			x, y;
+	float		eyeZ, proj10, proj11, proj14;
+} vkFlareRead_t;
+
+static struct {
+	VkBuffer		buffer[VK_FRAMES_IN_FLIGHT];
+	VkDeviceMemory	memory[VK_FRAMES_IN_FLIGHT];
+	const byte		*mapped[VK_FRAMES_IN_FLIGHT];
+	vkFlareRead_t	reads[VK_FRAMES_IN_FLIGHT][VK_MAX_FLARES];
+	int				count[VK_FRAMES_IN_FLIGHT];		// asked for in the frame being recorded with that index
+	int				copied[VK_FRAMES_IN_FLIGHT];	// of them, copied when it was shown
+} flares;
+
+static std::unordered_map<const void *, bool> flareVisible;	// by key: what the last depth read said
+
+static bool EnsureFlareBuffer( int index )
+{
+	if ( flares.buffer[index] )
+	{
+		return true;
+	}
+	VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bufferInfo.size = VK_MAX_FLARES * sizeof( uint32_t );
+	bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	if ( vkCreateBuffer( vk.device, &bufferInfo, NULL, &flares.buffer[index] ) != VK_SUCCESS )
+	{
+		flares.buffer[index] = VK_NULL_HANDLE;
+		return false;
+	}
+	VkMemoryRequirements requirements;
+	vkGetBufferMemoryRequirements( vk.device, flares.buffer[index], &requirements );
+	const VkMemoryPropertyFlags wanted = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	uint32_t type = 0xFFFFFFFFu;
+	for ( uint32_t t = 0; t < vk.memoryProperties.memoryTypeCount && type == 0xFFFFFFFFu; t++ )
+	{
+		if ( ( requirements.memoryTypeBits & ( 1u << t ) ) && ( vk.memoryProperties.memoryTypes[t].propertyFlags & wanted ) == wanted )
+		{
+			type = t;
+		}
+	}
+	VkMemoryAllocateInfo allocate = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	allocate.allocationSize = requirements.size;
+	allocate.memoryTypeIndex = type;
+	void *mapped = NULL;
+	if ( type == 0xFFFFFFFFu || vkAllocateMemory( vk.device, &allocate, NULL, &flares.memory[index] ) != VK_SUCCESS )
+	{
+		vkDestroyBuffer( vk.device, flares.buffer[index], NULL );
+		flares.buffer[index] = VK_NULL_HANDLE;
+		flares.memory[index] = VK_NULL_HANDLE;
+		return false;
+	}
+	VK_CheckResult( vkBindBufferMemory( vk.device, flares.buffer[index], flares.memory[index], 0 ), "vkBindBufferMemory" );
+	VK_CheckResult( vkMapMemory( vk.device, flares.memory[index], 0, requirements.size, 0, &mapped ), "vkMapMemory" );
+	flares.mapped[index] = (const byte *)mapped;
+	return true;
+}
+
+// as a frame begins (the one before with its index is done): what its flares' pixels said
+static void VK_FlaresCollect( void )
+{
+	const int index = vk.frameIndex;
+	for ( int i = 0; i < flares.copied[index] && flares.mapped[index]; i++ )
+	{
+		const vkFlareRead_t *read = &flares.reads[index][i];
+		const uint32_t texel = ( (const uint32_t *)flares.mapped[index] )[i];
+		float depth;
+		if ( vk.depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT )
+		{
+			memcpy( &depth, &texel, sizeof( depth ) );
+		}
+		else
+		{
+			depth = (float)( texel & 0xFFFFFFu ) / 16777215.0f;	// (24 bit depth comes out in the low bits)
+		}
+		// (as RB_TestZFlare: the eye distance of what is there, against the flare's own)
+		const float screenZ = read->proj14 / ( ( 2.0f * depth - 1.0f ) * read->proj11 - read->proj10 );
+		flareVisible[read->key] = ( -read->eyeZ - -screenZ ) < 24.0f;
+	}
+	flares.count[index] = 0;
+	flares.copied[index] = 0;
+}
+
+// as the frame is shown (its views drawn, out of the render pass): the depth at the flares' pixels, copied together
+static void VK_FlaresCopy( void )
+{
+	const int index = vk.frameIndex;
+	const int count = flares.count[index];
+	if ( !count || !EnsureFlareBuffer( index ) )
+	{
+		return;
+	}
+	VkBufferImageCopy regions[VK_MAX_FLARES];
+	for ( int i = 0; i < count; i++ )
+	{
+		VkBufferImageCopy &region = regions[i];
+		memset( &region, 0, sizeof( region ) );
+		region.bufferOffset = (VkDeviceSize)i * sizeof( uint32_t );
+		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+		region.imageSubresource.layerCount = 1;
+		region.imageOffset.x = flares.reads[index][i].x;
+		region.imageOffset.y = vk.height - 1 - flares.reads[index][i].y;
+		region.imageExtent.width = 1;
+		region.imageExtent.height = 1;
+		region.imageExtent.depth = 1;
+	}
+	const VkImageAspectFlags aspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	VK_ImageBarrier( vk.cmd, vk.depthImage, aspects, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT );
+	vkCmdCopyImageToBuffer( vk.cmd, vk.depthImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, flares.buffer[index], (uint32_t)count, regions );
+	VK_ImageBarrier( vk.cmd, vk.depthImage, aspects, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT );
+	// (for the host, which reads them once the frame's fence says it is done: VK_FlaresCollect)
+	VkMemoryBarrier toHost = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	toHost.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	toHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+	vkCmdPipelineBarrier( vk.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &toHost, 0, NULL, 0, NULL );
+	flares.copied[index] = count;
+}
+
+bool VK_FlareVisible( const void *key, int x, int y, float eyeZ, float proj10, float proj11, float proj14 )
+{
+	VK_EnsureFrame();
+	const int index = vk.frameIndex;
+	if ( x >= 0 && y >= 0 && x < vk.width && y < vk.height && flares.count[index] < VK_MAX_FLARES )
+	{
+		const vkFlareRead_t read = { key, x, y, eyeZ, proj10, proj11, proj14 };
+		flares.reads[index][flares.count[index]++] = read;
+	}
+	const auto found = flareVisible.find( key );
+	return found != flareVisible.end() && found->second;	// (not known yet: not drawn, for the first two frames)
+}
+
+void VK_ShutdownFlares( void )
+{
+	for ( int i = 0; i < VK_FRAMES_IN_FLIGHT; i++ )
+	{
+		if ( flares.buffer[i] )
+		{
+			vkUnmapMemory( vk.device, flares.memory[i] );
+			vkDestroyBuffer( vk.device, flares.buffer[i], NULL );
+			vkFreeMemory( vk.device, flares.memory[i], NULL );
+		}
+	}
+	memset( &flares, 0, sizeof( flares ) );
+	flareVisible.clear();
 }

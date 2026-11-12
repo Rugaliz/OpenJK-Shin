@@ -94,7 +94,7 @@ typedef struct vk_s {
 	bool						waitedForImage;		// the first submit of the frame waits for the acquired image
 	uint32_t					imageIndex;
 	VkCommandBuffer				cmd;				// current command buffer of the frame
-	VkCommandBuffer				frameCommandBuffers[VK_FRAMES_IN_FLIGHT][16];	// of the frame's pool, made when first needed
+	VkCommandBuffer				frameCommandBuffers[VK_FRAMES_IN_FLIGHT][32];	// of the frame's pool, made when first needed
 	int							frameCommandBufferCount[VK_FRAMES_IN_FLIGHT];	// in use this frame
 
 	// what the GL state machine of the layer says is wanted
@@ -131,6 +131,7 @@ void		VK_ImageBarrier( VkCommandBuffer cmd, VkImage image, VkImageAspectFlags as
 void		VK_ReadPixels( int x, int y, int width, int height, GLenum format, GLenum type, void *pixels );
 void		VK_WaitIdle( void );
 float		VK_ReadDepth( int x, int y );
+void		VK_ShutdownFlares( void );	// (the flares' depth reads: VK_FlareVisible)
 void		VK_ShutdownReadback( void );
 
 // vk_rt.cpp: ray tracing for shadows
