@@ -663,6 +663,23 @@ typedef struct
 static postRender_t g_postRenders[MAX_POST_RENDERS];
 static int g_numPostRenders = 0;
 
+// whether an effect that can fade (the soft particles, RB_StageIsSoft) is among the surfaces from first on: only then
+// is the depth of the opaque ones kept (RB_SoftParticlesBegin, which costs a pause of the frame's drawing)
+static bool RB_EffectsFollow( const drawSurf_t *drawSurfs, int first, int numDrawSurfs ) {
+	for ( int i = first; i < numDrawSurfs; i++ ) {
+		int entityNum, fogNum, dlighted;
+		shader_t *shader;
+		R_DecomposeSort( drawSurfs[i].sort, &entityNum, &shader, &fogNum, &dlighted );
+		if ( shader->polygonOffset || shader->sort <= SS_DECAL ) {
+			continue;
+		}
+		if ( entityNum == REFENTITYNUM_WORLD ? *drawSurfs[i].surface == SF_POLY : backEnd.refdef.entities[entityNum].e.reType != RT_MODEL ) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	shader_t		*shader, *oldShader;
 	int				fogNum, oldFogNum;
@@ -781,9 +798,13 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 				if (!didShadowPass && shader && shader->sort > SS_BANNER)
 				{
+					// (what follows is see-through: effects fade near the depth of the opaque surfaces, kept first,
+					// in the pause of the drawing the shadows make anyway; neither they nor the lights change it)
+					if ( RB_EffectsFollow( drawSurfs, i, numDrawSurfs ) ) {
+						RB_SoftParticlesBegin();
+					}
 					RB_ShadowFinish();
 					RB_DrawDeferredDlights();
-					RB_SoftParticlesBegin();	// (what follows is see-through: effects fade near the depth kept)
 					didShadowPass = true;
 				}
 			}
