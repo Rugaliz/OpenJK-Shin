@@ -527,6 +527,7 @@ static struct {
 		vkRtStructure_t	tlas;
 		vkRtBuffer_t	instances, scratch;
 		int				frame;				// vk.frameCounter + 1 it was built for
+		int				count;				// the instances in it
 		vkRtStructure_t	characters;			// the characters of the frame (VK_RT_Characters), in a top level structure
 		vkRtStructure_t	charactersTop;		// of their own (the level's is read by draws before they are known)
 		vkRtBuffer_t	charactersInput, charactersScratch, charactersTopScratch;
@@ -1029,6 +1030,7 @@ VkAccelerationStructureKHR VK_RT_Scene( void )
 		return VK_NULL_HANDLE;
 	}
 
+	frame.count = (int)count;
 	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );
 	if ( !VK_RT_BuildInstances( cmd, &frame.tlas, &frame.scratch, frame.instances.address, count ) )
 	{
@@ -1072,7 +1074,7 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 	if ( frame.charactersInput.size < bytes )
 	{
 		VK_RT_RetireBuffer( &frame.charactersInput );
-		if ( !VK_RT_NewBuffer( &frame.charactersInput, bytes + bytes / 2 + sizeof( VkAccelerationStructureInstanceKHR ) + 16,
+		if ( !VK_RT_NewBuffer( &frame.charactersInput, bytes + bytes / 2 + ( RT_MAX_INSTANCES + 1 ) * sizeof( VkAccelerationStructureInstanceKHR ) + 16,
 				VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true ) )
 		{
 			return VK_NULL_HANDLE;
@@ -1101,12 +1103,26 @@ VkAccelerationStructureKHR VK_RT_Characters( const float *xyz, int numPoints, co
 		return VK_NULL_HANDLE;
 	}
 
-	// the instance, after the indexes
+	// the instances, after the indexes: the level's of the frame (its surfaces and brush models, but not the characters
+	// of the frame before), as the shadows' rays also look whether the level is between (below the floor under a
+	// character: post_rt_shadow.frag), and the characters
 	const VkDeviceSize instanceOffset = ( bytes + 15 ) & ~(VkDeviceSize)15;
-	VK_RT_Place( (VkAccelerationStructureInstanceKHR *)( (byte *)frame.charactersInput.mapped + instanceOffset ), &frame.characters, 0,
-		NULL, NULL, RT_MASK_CHARACTERS );	// (in world space already)
+	VkAccelerationStructureInstanceKHR *list = (VkAccelerationStructureInstanceKHR *)( (byte *)frame.charactersInput.mapped + instanceOffset );
+	uint32_t numInstances = 0;
+	if ( frame.frame == vk.frameCounter + 1 && frame.instances.mapped )
+	{
+		const VkAccelerationStructureInstanceKHR *level = (const VkAccelerationStructureInstanceKHR *)frame.instances.mapped;
+		for ( int i = 0; i < frame.count && numInstances < RT_MAX_INSTANCES; i++ )
+		{
+			if ( level[i].mask != RT_MASK_CHARACTERS )
+			{
+				list[numInstances++] = level[i];
+			}
+		}
+	}
+	VK_RT_Place( &list[numInstances++], &frame.characters, 0, NULL, NULL, RT_MASK_CHARACTERS );	// (in world space already)
 	VK_RT_Barrier( cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR );
-	if ( !VK_RT_BuildInstances( cmd, &frame.charactersTop, &frame.charactersTopScratch, frame.charactersInput.address + instanceOffset, 1 ) )
+	if ( !VK_RT_BuildInstances( cmd, &frame.charactersTop, &frame.charactersTopScratch, frame.charactersInput.address + instanceOffset, numInstances ) )
 	{
 		return VK_NULL_HANDLE;
 	}

@@ -46,6 +46,21 @@ float blocked(vec3 origin, vec3 dir, float tMax)
 	while (rayQueryProceedEXT(query)) {}
 	return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
 }
+// whether the level (its surfaces and brush models, masks 0x01 and 0x02) is between origin and the first character
+// along dir (or tMax when there is none)
+bool levelBefore(vec3 origin, vec3 dir, float tMax)
+{
+	rayQueryEXT query;
+	rayQueryInitializeEXT(query, uScene, gl_RayFlagsOpaqueEXT, 0x04, origin, 0.5, dir, tMax);
+	while (rayQueryProceedEXT(query)) {}
+	if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+		tMax = rayQueryGetIntersectionTEXT(query, true);
+	}
+	rayQueryEXT level;
+	rayQueryInitializeEXT(level, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0x03, origin, 0.5, dir, max(tMax, 0.6));
+	while (rayQueryProceedEXT(level)) {}
+	return rayQueryGetIntersectionTypeEXT(level, true) != gl_RayQueryCommittedIntersectionNoneEXT;
+}
 float blockedTowards(vec3 origin, vec3 l, vec3 side, vec3 up, float turn, int r, int rays, float spread, float tMax)
 {
 	float angle = turn + float(r) * 2.3999632;
@@ -72,9 +87,13 @@ void main()
 	for (uint i = 0u; i < p.count; i++) {
 		Caster c = p.casters.c[i];
 		vec2 st = vec2(dot(c.rowS, eye), dot(c.rowT, eye));
-		if (world.z < c.params.x || any(lessThan(st, c.area.xy)) || any(greaterThan(st, c.area.zw))) continue;
+		if (any(lessThan(st, c.area.xy)) || any(greaterThan(st, c.area.zw))) continue;
 		int type = int(c.params.z + 0.5);
+		// below the floor under the character (down a step, off a ledge) its shadow goes on where the level is not
+		// between them (not on the floor of the room under it, which is what the rays alone would darken)
+		bool below = world.z < c.params.x;
 		if (type == 2) {
+			if (below) continue;
 			// the contact shadow: short rays all around the surface (cosine weighted, as the light from all around
 			// falls on it), and how many of them a character stops; few, as it is soft (the blur does the rest), and
 			// only near the character
@@ -121,6 +140,7 @@ void main()
 		} else {
 			hidden *= 2.0;	// (those traced agree: as if every ray was)
 		}
+		if (below && hidden > 0.0 && levelBefore(world + n * 0.5, l, tMax)) continue;
 		f *= 1.0 - c.params.y * hidden / float(rays);
 	}
 	outColor = vec4(f, f, f, 1.0);

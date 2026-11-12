@@ -766,6 +766,7 @@ typedef struct {
 #define SHADOW_CONTACT_REACH	32.0f
 #define SHADOW_CONTACT_SHARE	0.5f	// of the light from no one direction, what the contact shadow takes where all its rays are blocked
 #define SHADOW_GRID_GUESS		0.6f	// the grid direction's darkness, where there are no lamps
+#define SHADOW_RT_BELOW			128.0f	// how far below its floor a lamp's shadow is looked for
 
 static std::vector<shadowLamp_t>						shLamps;
 #ifdef _JK2EXE
@@ -1028,9 +1029,10 @@ static void RB_ShadowRtEntries( const vec3_t mins, const vec3_t maxs, float floo
 			vec3_t toLamp;
 			VectorSubtract( lamp->origin, mid, toLamp );
 			const float dist = VectorNormalize( toLamp );
-			// the shadow is the caster's seen from the lamp, larger the further the floor is behind it than the caster
-			const float toFloor = ( lamp->origin[2] - floorZ ) / Q_max( toLamp[2], 0.1f );
-			RB_ShadowRtArea( &e, mins, maxs, toLamp, Com_Clamp( 1.0f, 4.0f, toFloor / Q_max( dist, 1.0f ) ), pad );
+			// the shadow is the caster's seen from the lamp, larger the further the ground is behind it than the caster
+			// (down to SHADOW_RT_BELOW under its floor: down a step or off a ledge, post_rt_shadow.frag)
+			const float toFloor = ( lamp->origin[2] - ( floorZ - SHADOW_RT_BELOW ) ) / Q_max( toLamp[2], 0.1f );
+			RB_ShadowRtArea( &e, mins, maxs, toLamp, Com_Clamp( 1.0f, 6.0f, toFloor / Q_max( dist, 1.0f ) ), pad );
 			VectorCopy( lamp->origin, e.light );
 			e.light[3] = lamp->radius;
 			e.darkness = darkness * choice->weights[i] / total;
