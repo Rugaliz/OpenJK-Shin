@@ -735,6 +735,9 @@ static void Upload32( unsigned *data,
 			int		miplevel;
 
 			miplevel = 0;
+			// a cut-out texture keeps the share of it the alpha test keeps (tr_mip_lanczos.h)
+			const bool cutout = r_simpleMipMaps->integer >= 2 && R_MipAlphaIsCutout( (const byte *)data, width * height );
+			const float coverage = cutout ? R_MipAlphaCoverage( (const byte *)data, width * height ) : 0.0f;
 			while (width > 1 || height > 1)
 			{
 				R_MipMap( (byte *)data, width, height );
@@ -745,6 +748,10 @@ static void Upload32( unsigned *data,
 				if (height < 1)
 					height = 1;
 				miplevel++;
+
+				if ( cutout ) {
+					R_MipKeepAlphaCoverage( (byte *)data, width * height, coverage );
+				}
 
 				if ( r_colorMipLevels->integer )
 				{

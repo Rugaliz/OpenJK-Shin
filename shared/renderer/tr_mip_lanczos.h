@@ -36,11 +36,27 @@ R_MipMapLanczos
 Halves the size of the texture in place with a windowed sinc (Lanczos, 3 lobes) filter, one dimension at a time.
 The box filter of the original averages 2x2 pixels, which smears the detail of every mip level; this keeps it
 sharp, so that textures seen at a grazing angle stay clear under anisotropic filtering. The textures repeat, so
-the filter wraps around the edges. Needs power of two sizes of at least 2x2, and temp room for
+the filter wraps around the edges. The colour is filtered as light (the stored values are made linear first, gamma
+2.2, and back after): averaged as stored, fine bright detail on a dark texture (lit panels, stripes on metal) went
+darker the further it was. Needs power of two sizes of at least 2x2, and temp room for
 R_MipMapLanczosTempSize( inWidth, inHeight ) bytes.
 ================
 */
 #define MIP_LANCZOS_LOBES	3
+#define MIP_GAMMA			2.2f
+
+// a stored colour value as light
+static const float *R_MipLinear( void ) {
+	static float	linear[256];
+	static bool		ready = false;
+	if ( !ready ) {
+		for ( int i = 0; i < 256; i++ ) {
+			linear[i] = powf( i / 255.0f, MIP_GAMMA );
+		}
+		ready = true;
+	}
+	return linear;
+}
 
 typedef struct lanczosJob_s {
 	byte		*in;
@@ -60,11 +76,13 @@ static void R_MipMapLanczosHorizontal( int begin, int end, void *context ) {
 	for ( int y = begin; y < end; y++ ) {
 		const byte *row = job->in + (size_t)y * job->inWidth * 4;
 		float *out = job->temp + (size_t)y * job->outWidth * 4;
+		const float *linear = R_MipLinear();
 		for ( int x = 0; x < job->outWidth; x++, out += 4 ) {
 			for ( int c = 0; c < 4; c++ ) {
 				float total = 0.0f;
 				for ( int k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
-					total += job->weights[k] * ( row[( ( x * 2 - k ) & widthMask ) * 4 + c] + row[( ( x * 2 + 1 + k ) & widthMask ) * 4 + c] );
+					const byte a = row[( ( x * 2 - k ) & widthMask ) * 4 + c], b = row[( ( x * 2 + 1 + k ) & widthMask ) * 4 + c];
+					total += job->weights[k] * ( c < 3 ? linear[a] + linear[b] : (float)a + b );	// (alpha as it is)
 				}
 				out[c] = total;
 			}
@@ -84,6 +102,9 @@ static void R_MipMapLanczosVertical( int begin, int end, void *context ) {
 				float total = 0.0f;
 				for ( int k = 0; k < MIP_LANCZOS_LOBES; k++ ) {
 					total += job->weights[k] * ( job->temp[( ( ( y * 2 - k ) & heightMask ) * outWidth + x ) * 4 + c] + job->temp[( ( ( y * 2 + 1 + k ) & heightMask ) * outWidth + x ) * 4 + c] );
+				}
+				if ( c < 3 ) {
+					total = 255.0f * powf( Q_max( total, 0.0f ), 1.0f / MIP_GAMMA );
 				}
 				out[c] = (byte) Com_Clampi( 0, 255, (int) ( total + 0.5f ) );
 			}
@@ -124,4 +145,51 @@ static void R_MipMapLanczos( byte *in, int inWidth, int inHeight, float *temp ) 
 	Jobs::ParallelFor( inHeight, rowsPerPiece, R_MipMapLanczosHorizontal, &job );
 	// vertical pass: outWidth x inHeight -> outWidth x outHeight, written back over the input
 	Jobs::ParallelFor( outHeight, rowsPerPiece, R_MipMapLanczosVertical, &job );
+}
+
+/*
+================
+R_MipAlphaIsCutout, R_MipAlphaCoverage, R_MipKeepAlphaCoverage
+
+A texture whose alpha is a cut-out (almost all of it fully there or fully not: grates, railings, leaves, made for an
+alpha test) loses its shape in the smaller levels, whose alpha is the average: fewer pixels pass the test the further
+it is, until grates and leaves fade away at a distance. The alpha of each smaller level is scaled so that the test
+keeps the same share of the texture as in the full size one (as in "Computing Alpha Mipmaps", Castano, 2010).
+================
+*/
+#define MIP_ALPHA_TEST	128		// the share is counted at this threshold, the alpha test of most cut-out stages
+
+static bool R_MipAlphaIsCutout( const byte *data, int count ) {
+	int clear = 0, solid = 0;
+	for ( int i = 0; i < count; i++ ) {
+		const byte a = data[i * 4 + 3];
+		clear += ( a <= 8 );
+		solid += ( a >= 247 );
+	}
+	return clear + solid >= count * 95 / 100 && clear >= count / 50 && solid >= count / 50;
+}
+
+// the share of the texture the alpha test keeps, with its alpha scaled by scale
+static float R_MipAlphaCoverage( const byte *data, int count, float scale = 1.0f ) {
+	int kept = 0;
+	for ( int i = 0; i < count; i++ ) {
+		kept += ( data[i * 4 + 3] * scale >= MIP_ALPHA_TEST );
+	}
+	return count ? (float)kept / count : 0.0f;
+}
+
+static void R_MipKeepAlphaCoverage( byte *data, int count, float coverage ) {
+	float lo = 0.0f, hi = 8.0f;
+	for ( int i = 0; i < 12; i++ ) {
+		const float mid = 0.5f * ( lo + hi );
+		if ( R_MipAlphaCoverage( data, count, mid ) < coverage ) {
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+	const float scale = 0.5f * ( lo + hi );
+	for ( int i = 0; i < count; i++ ) {
+		data[i * 4 + 3] = (byte) Com_Clampi( 0, 255, (int)( data[i * 4 + 3] * scale + 0.5f ) );
+	}
 }
