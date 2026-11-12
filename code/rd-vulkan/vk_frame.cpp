@@ -172,7 +172,10 @@ void VK_EnsureFrame( void )
 	VK_BeginFramePost();
 	vk.waitedForImage = false;
 	VK_BeginCommandBuffer();
-	VK_BeginRenderPass( true );
+	// The pass that clears is begun by the first draw (VK_EnsureRenderPass), not here: the ray tracing structure of a
+	// view is built outside a pass first (VK_RT_BeginView), and a pass begun here would have been ended at once,
+	// writing out and loading again every sample of a multisampled view for nothing.
+	vk.clearPending = true;
 	vk.frameStarted = true;
 }
 
@@ -181,7 +184,8 @@ void VK_EnsureRenderPass( void )
 	VK_EnsureFrame();
 	if ( !vk.inRenderPass )
 	{
-		VK_BeginRenderPass( false );
+		VK_BeginRenderPass( vk.clearPending );
+		vk.clearPending = false;
 	}
 }
 

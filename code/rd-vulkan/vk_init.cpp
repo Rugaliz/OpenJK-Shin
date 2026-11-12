@@ -400,9 +400,9 @@ static VkRenderPass VK_CreateRenderPass( bool clear )
 	VkAttachmentDescription attachments[2] = {};
 	attachments[0].format = vk.colorFormat;
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-	// (the colour is never cleared by the pass: like the back buffer of OpenGL, what was drawn last frame stays until it
-	// is drawn over, which is what a screenshot taken at the start of a frame expects)
-	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	// (the colour is cleared by the frame's first pass, begun by its first draw: a screenshot taken before it still
+	// finds the last frame; anything after it draws over the whole picture, so last frame's colour is not loaded)
+	attachments[0].loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -471,7 +471,7 @@ static VkRenderPass VK_CreateRenderPassMultisampled( bool clear )
 	}
 	attachments[0].format = vk.colorFormat;
 	attachments[0].samples = vk.samples;
-	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		// (as in the single sample pass, the colour is not cleared)
+	attachments[0].loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;	// (as in the single sample pass)
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;

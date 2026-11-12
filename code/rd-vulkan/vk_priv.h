@@ -84,6 +84,7 @@ typedef struct vk_s {
 	int							frameIndex;
 	bool						frameStarted;		// the command buffer is recording, the swapchain image is acquired
 	bool						inRenderPass;
+	bool						clearPending;		// the frame's first pass, which clears, is not begun yet
 	bool						waitedForImage;		// the first submit of the frame waits for the acquired image
 	uint32_t					imageIndex;
 	VkCommandBuffer				cmd;				// current command buffer of the frame
