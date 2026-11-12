@@ -31,6 +31,10 @@ static cvar_t	*r_vkValidation;
 static cvar_t	*r_vkRayTracing;
 static cvar_t	*r_vkDevice;
 cvar_t			*r_rayTracing;
+cvar_t			*r_lowLatency;
+#ifdef VK_KHR_present_wait
+PFN_vkWaitForPresentKHR	qvkWaitForPresentKHR;
+#endif
 
 void APIENTRY vkglActiveTextureARB( GLenum texture );
 void APIENTRY vkglClientActiveTextureARB( GLenum texture );
@@ -317,18 +321,43 @@ static bool VK_CreateDevice( void )
 		features2.pNext = VK_RT_AddToDevice( extensions, &extensionCount );
 	}
 
+	// waiting for a frame to be shown (r_lowLatency, VK_PresentFrame), where the device has it
+	vk.presentWait = false;
+#ifdef VK_KHR_present_wait
+	VkPhysicalDevicePresentIdFeaturesKHR presentId = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR };
+	VkPhysicalDevicePresentWaitFeaturesKHR presentWait = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR };
+	if ( VK_DeviceHasExtension( vk.physicalDevice, VK_KHR_PRESENT_ID_EXTENSION_NAME )
+		&& VK_DeviceHasExtension( vk.physicalDevice, VK_KHR_PRESENT_WAIT_EXTENSION_NAME ) )
+	{
+		VkPhysicalDeviceFeatures2 query = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		query.pNext = &presentId;
+		presentId.pNext = &presentWait;
+		vkGetPhysicalDeviceFeatures2( vk.physicalDevice, &query );
+		if ( presentId.presentId && presentWait.presentWait )
+		{
+			vk.presentWait = true;
+			extensions[extensionCount++] = VK_KHR_PRESENT_ID_EXTENSION_NAME;
+			extensions[extensionCount++] = VK_KHR_PRESENT_WAIT_EXTENSION_NAME;
+			presentWait.pNext = features2.pNext;	// (in front of the ray tracing's)
+			features2.pNext = &presentId;
+		}
+	}
+#endif
+	const bool chained = features2.pNext != NULL;
+
 	VkDeviceCreateInfo info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	info.queueCreateInfoCount = 1;
 	info.pQueueCreateInfos = &queueInfo;
 	info.enabledExtensionCount = extensionCount;
 	info.ppEnabledExtensionNames = extensions;
-	info.pNext = vk.rayTracing ? &features2 : NULL;
-	info.pEnabledFeatures = vk.rayTracing ? NULL : &enabled;
+	info.pNext = chained ? &features2 : NULL;
+	info.pEnabledFeatures = chained ? NULL : &enabled;
 	VkResult created = vkCreateDevice( vk.physicalDevice, &info, NULL, &vk.device );
-	if ( created != VK_SUCCESS && vk.rayTracing )
+	if ( created != VK_SUCCESS && chained )
 	{
-		Com_Printf( "...the device could not be made with ray tracing (VkResult %d), trying without\n", (int)created );
+		Com_Printf( "...the device could not be made with ray tracing or waiting for presents (VkResult %d), trying without\n", (int)created );
 		vk.rayTracing = false;
+		vk.presentWait = false;
 		info.enabledExtensionCount = 1;
 		info.pNext = NULL;
 		info.pEnabledFeatures = &enabled;
@@ -340,6 +369,10 @@ static bool VK_CreateDevice( void )
 		return VK_Fail( "vkCreateDevice failed (VkResult %d)", (int)created );
 	}
 	vkGetDeviceQueue( vk.device, vk.queueFamily, 0, &vk.queue );
+#ifdef VK_KHR_present_wait
+	qvkWaitForPresentKHR = vk.presentWait ? (PFN_vkWaitForPresentKHR)vkGetDeviceProcAddr( vk.device, "vkWaitForPresentKHR" ) : NULL;
+	vk.presentWait = qvkWaitForPresentKHR != NULL;
+#endif
 	return true;
 }
 
@@ -814,6 +847,7 @@ void VK_CreateSwapchain( void )
 		vkDestroySwapchainKHR( vk.device, vk.swapchain, NULL );
 	}
 	vk.swapchain = swapchain;
+	vk.presentIdFirst = vk.presentId + 1;	// (the frames shown before were the old swapchain's: not to be waited for)
 	vk.swapchainFormat = chosen.format;
 	vk.swapchainExtent = extent;
 
@@ -898,6 +932,9 @@ bool VK_Init( glconfig_t *glConfig )
 	r_vkValidation = ri.Cvar_Get( "r_vkValidation", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_vkDevice = ri.Cvar_Get( "r_vkDevice", "-1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_vkProfile = ri.Cvar_Get( "r_vkProfile", "0", 0 );
+	// 1: the next frame's input is read only once the frame before last is drawn and, with vsync, the last but one is
+	// on screen (VK_PresentFrame); 0: frames are queued as far as the driver lets them
+	r_lowLatency = ri.Cvar_Get( "r_lowLatency", "1", CVAR_ARCHIVE_ND );
 	r_vkRayTracing = ri.Cvar_Get( "r_vkRayTracing", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 0: never turn ray tracing on, even where the device has it
 	r_rayTracing = ri.Cvar_Get( "r_rayTracing", "0", CVAR_ARCHIVE_ND );
 

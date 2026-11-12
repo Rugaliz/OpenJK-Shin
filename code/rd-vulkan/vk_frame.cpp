@@ -244,6 +244,49 @@ void VK_WaitIdle( void )
 
 /*
 =================
+VK_LimitLatency
+
+After a frame is presented, before the game reads the input for the next one (r_lowLatency 1). The next frame waits
+for the GPU to have drawn the frame before last anyway (VK_EnsureFrame): waiting here instead, the input is read after
+that wait, not before it. And with vsync, the display takes the frames one a refresh while the game makes them faster:
+they would queue up to the number of swapchain images (4 here) and each would be shown that many refreshes after its
+input was read. Waiting for the last but one frame to be on screen keeps at most one waiting. (A window that is not
+shown may never show its frames: the wait gives up after a while.)
+=================
+*/
+static void VK_LimitLatency( void )
+{
+	if ( !r_lowLatency || !r_lowLatency->integer )
+	{
+		return;
+	}
+
+	vkFrame_t *next = &vk.frames[vk.frameIndex];
+	if ( next->fenceSubmitted )
+	{
+		VK_CheckResult( vkWaitForFences( vk.device, 1, &next->fence, VK_TRUE, UINT64_MAX ), "vkWaitForFences" );
+		next->fenceSubmitted = false;
+	}
+
+#ifdef VK_KHR_present_wait
+	const bool queues = vk.presentMode == VK_PRESENT_MODE_FIFO_KHR || vk.presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+	if ( vk.presentWait && queues && vk.presentId > vk.presentIdFirst && !vk.swapchainDirty )
+	{
+		const VkResult result = qvkWaitForPresentKHR( vk.device, vk.swapchain, vk.presentId - 1, 100ull * 1000 * 1000 );
+		if ( result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_ERROR_SURFACE_LOST_KHR )
+		{
+			vk.swapchainDirty = true;
+		}
+		else if ( result != VK_SUCCESS && result != VK_TIMEOUT && result != VK_SUBOPTIMAL_KHR )
+		{
+			VK_CheckResult( result, "vkWaitForPresentKHR" );
+		}
+	}
+#endif
+}
+
+/*
+=================
 VK_PresentFrame
 
 Replaces ri.WIN_Present: blits the render target to the swapchain image and shows it.
@@ -315,6 +358,16 @@ void VK_PresentFrame( window_t *window )
 	present.swapchainCount = 1;
 	present.pSwapchains = &vk.swapchain;
 	present.pImageIndices = &vk.imageIndex;
+#ifdef VK_KHR_present_wait
+	VkPresentIdKHR presentId = { VK_STRUCTURE_TYPE_PRESENT_ID_KHR };
+	if ( vk.presentWait )
+	{
+		vk.presentId++;
+		presentId.swapchainCount = 1;
+		presentId.pPresentIds = &vk.presentId;
+		present.pNext = &presentId;
+	}
+#endif
 	const VkResult result = vkQueuePresentKHR( vk.queue, &present );
 	if ( result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR )
 	{
@@ -339,6 +392,8 @@ void VK_PresentFrame( window_t *window )
 	vk.frameStarted = false;
 	vk.inRenderPass = false;
 	vk.frameIndex = ( vk.frameIndex + 1 ) % VK_FRAMES_IN_FLIGHT;
+
+	VK_LimitLatency();
 }
 
 // The buffer the GPU copies into for read backs, kept between calls. It is in cached host memory: the CPU reads

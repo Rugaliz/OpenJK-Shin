@@ -66,6 +66,7 @@ again. Choosing the OpenGL renderer yourself shows no warning.
 |---|---|---|
 | `r_ext_multisample` | 0 | Multisampling (2, 4, 8, 16: the highest the graphics card has up to what is asked). Same setting as in OpenGL. |
 | `r_swapInterval`, `r_adaptiveVsync` | as in OpenGL | Vertical sync; 0 shows frames as soon as they are done, 1 waits for the display (with `r_adaptiveVsync` a late frame tears instead of waiting a whole refresh). |
+| `r_lowLatency` | 1 | 1: after a frame is shown, the next one's input is read only once the GPU has drawn the frame before last and, with vsync, the last but one is on screen (VK_KHR_present_wait, where the driver has it), so at most one finished frame waits for the display. With vsync at 144 Hz this took the time from input to screen from about 35 ms to about 14 ms at the same frame rate. 0: frames queue up as far as the driver lets them (4 swapchain images). |
 | `r_vkDevice` | -1 | Which graphics card (the numbers are listed in the log at start-up); -1 takes the best one that can show the window. |
 | `r_vkValidation` | 0 | Turns on the Khronos validation layer if it is installed (for developers). |
 | `r_vkRayTracing` | 1 | Turns ray tracing on where the graphics card has it (see below); 0 never does. Needs a restart. |

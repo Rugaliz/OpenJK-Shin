@@ -57,6 +57,12 @@ typedef struct vk_s {
 	VkSemaphore					renderFinished[VK_MAX_SWAPCHAIN_IMAGES];
 	VkPresentModeKHR			presentMode;
 
+	// latency (r_lowLatency, VK_PresentFrame): the frames shown are numbered (VK_KHR_present_id), so that the next one
+	// can wait for the one before to be on screen (VK_KHR_present_wait)
+	bool						presentWait;		// the device has both
+	uint64_t					presentId;			// of the last frame presented
+	uint64_t					presentIdFirst;		// of the first frame presented to this swapchain
+
 	// the render target (vidWidth x vidHeight)
 	int							width, height;
 	VkFormat					colorFormat;
@@ -294,6 +300,10 @@ void		VK_ShutdownPost( void );
 double		VK_Now( void );			// milliseconds
 void		VK_Slow( const char *what, double start );
 extern cvar_t	*r_vkProfile;
+extern cvar_t	*r_lowLatency;
+#ifdef VK_KHR_present_wait
+extern PFN_vkWaitForPresentKHR	qvkWaitForPresentKHR;
+#endif
 
 // r_rayTracing: 0 off, 1 medium, 2 high (Setup > More Video > Ray Tracing); R_RayTracing says what is drawn
 extern cvar_t	*r_rayTracing;
