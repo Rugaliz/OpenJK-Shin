@@ -72,6 +72,8 @@ typedef struct dlight_s {
 
 // a trRefEntity_t has all the information passed in by
 // the client game, as well as some locally derived info
+#define MAX_ENTITY_LIGHTS	5	// the lamps of the level (LAMPS_AT_MAX) and the dynamic lights as one
+
 typedef struct {
 	refEntity_t	e;
 
@@ -88,6 +90,11 @@ typedef struct {
 	// would turn towards themselves and darken): world space, towards it, and the share of it from that direction
 	vec3_t		shadowLightDir;
 	float		shadowStrength;
+	// lit by the level's lamps (r_lampLighting, tr_light.cpp) instead of directedLight from lightDir: each light's
+	// direction (the entity's axes) and colour, the lamps and then the dynamic lights as one
+	int			numLights;
+	vec3_t		lightDirs[MAX_ENTITY_LIGHTS];
+	vec3_t		lightColors[MAX_ENTITY_LIGHTS];
 } trRefEntity_t;
 
 

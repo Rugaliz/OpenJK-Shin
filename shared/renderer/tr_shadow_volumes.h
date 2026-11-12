@@ -750,7 +750,9 @@ traces through the level): one that stands still costs nothing.
 typedef struct {
 	vec3_t	origin;
 	float	photons;			// q3map's: the intensity times its point scale
-	float	luminance;			// of its colour (the brightest component 1)
+	vec3_t	color;				// the brightest component 1
+	float	luminance;			// of its colour
+	int		style;				// its light style (flickering, switched), 0 none
 	float	radius;				// how big it is: how soft its shadows are
 	bool	linear;				// it falls off with the distance (spawnflags 1), not with its square
 	bool	spot;				// a spotlight: towards its target, in a cone
@@ -758,21 +760,17 @@ typedef struct {
 	float	spotRadiusByDist;	// the radius of the cone for each unit along it
 } shadowLamp_t;
 
-#define SHADOW_LAMPS_MAX		4		// for a caster
+#define SHADOW_LAMPS_MAX		LAMPS_AT_MAX	// for a caster
 #define SHADOW_LAMP_TRACES		12		// at most this many tried for one, the brightest first
 #define SHADOW_LAMP_RADIUS		12.0f	// when the entity does not say (_deviance)
 #define SHADOW_CONTACT_REACH	32.0f
 #define SHADOW_CONTACT_SHARE	0.5f	// of the light from no one direction, what the contact shadow takes where all its rays are blocked
 #define SHADOW_GRID_GUESS		0.6f	// the grid direction's darkness, where there are no lamps
 
-typedef struct {
-	int		count;
-	int		lamps[SHADOW_LAMPS_MAX];
-	float	weights[SHADOW_LAMPS_MAX];
-} shadowLampChoice_t;
-
 static std::vector<shadowLamp_t>						shLamps;
-static std::unordered_map<long long, shadowLampChoice_t>	shLampChoices;
+#ifdef _JK2EXE
+static std::unordered_map<long long, lampChoice_t>		shLampChoices;
+#endif
 static std::vector<shadowMapCaster_t>					shRtEntries;
 
 static float RB_EntityFloat( const std::vector<std::pair<std::string, std::string> > &ent, const char *key, float def )
@@ -803,7 +801,9 @@ void R_ShadowLampsLoad( const char *text, int length )
 	int numTokens = 0;
 
 	shLamps.clear();
+#ifdef _JK2EXE
 	shLampChoices.clear();
+#endif
 
 	// { "key" "value" ... } ...
 	for ( int i = 0; i < length && text[i]; i++ ) {
@@ -848,7 +848,16 @@ void R_ShadowLampsLoad( const char *text, int length )
 		vec3_t color = { 1.0f, 1.0f, 1.0f };
 		sscanf( RB_EntityString( ents[e], "_color" ), "%f %f %f", &color[0], &color[1], &color[2] );
 		const float brightest = Q_max( color[0], Q_max( color[1], color[2] ) );
-		lamp.luminance = brightest > 0.0f ? ( 0.299f * color[0] + 0.587f * color[1] + 0.114f * color[2] ) / brightest : 1.0f;
+		if ( brightest > 0.0f ) {
+			VectorScale( color, 1.0f / brightest, lamp.color );
+		} else {
+			VectorSet( lamp.color, 1.0f, 1.0f, 1.0f );
+		}
+		lamp.luminance = 0.299f * lamp.color[0] + 0.587f * lamp.color[1] + 0.114f * lamp.color[2];
+		lamp.style = (int)RB_EntityFloat( ents[e], "style", 0.0f );
+		if ( lamp.style < 0 || lamp.style >= MAX_LIGHT_STYLES ) {
+			lamp.style = 0;
+		}
 		lamp.radius = RB_EntityFloat( ents[e], "_deviance", 0.0f );
 		if ( lamp.radius <= 0.0f ) {
 			lamp.radius = SHADOW_LAMP_RADIUS;
@@ -876,7 +885,7 @@ void R_ShadowLampsLoad( const char *text, int length )
 	ri.Printf( PRINT_DEVELOPER, "shadows: %d lamps in the level\n", (int)shLamps.size() );
 }
 
-#ifdef RD_VULKAN
+#ifdef _JK2EXE
 // How much light the lamp gave a point in q3map, for its colour (without the angle: the point is a character, lit
 // from all sides); 0 outside a spotlight's cone
 static float RB_LampAt( const shadowLamp_t *lamp, const vec3_t point )
@@ -908,9 +917,7 @@ static float RB_LampAt( const shadowLamp_t *lamp, const vec3_t point )
 	return add > 0.0f ? add * scale * lamp->luminance : 0.0f;
 }
 
-// The lamps that light a point most and that it can see, with how much (the server's traces: only the single player
-// renderer has them, and only the Vulkan one ray traces)
-static const shadowLampChoice_t *RB_ShadowLampsAt( const vec3_t point )
+const lampChoice_t *R_LampsAt( const vec3_t point )
 {
 	const long long key = ( (long long)( (int)floorf( point[0] / 16.0f ) & 0xFFFFF ) << 40 ) |
 		( (long long)( (int)floorf( point[1] / 16.0f ) & 0xFFFFF ) << 20 ) | ( (int)floorf( point[2] / 16.0f ) & 0xFFFFF );
@@ -938,7 +945,7 @@ static const shadowLampChoice_t *RB_ShadowLampsAt( const vec3_t point )
 	}
 
 	// those it can see, brightest first; one much fainter than the brightest of them is left out
-	shadowLampChoice_t choice = {};
+	lampChoice_t choice = {};
 	for ( int b = 0; b < numBest && choice.count < SHADOW_LAMPS_MAX; b++ ) {
 		const shadowLamp_t *lamp = &shLamps[best[b].second];
 		if ( choice.count && best[b].first < 0.05f * choice.weights[0] ) {
@@ -953,6 +960,14 @@ static const shadowLampChoice_t *RB_ShadowLampsAt( const vec3_t point )
 		choice.weights[choice.count++] = best[b].first;
 	}
 	return &( shLampChoices[key] = choice );
+}
+
+void R_LampInfo( int lamp, vec3_t origin, vec3_t color, float *luminance, int *style )
+{
+	VectorCopy( shLamps[lamp].origin, origin );
+	VectorCopy( shLamps[lamp].color, color );
+	*luminance = shLamps[lamp].luminance;
+	*style = shLamps[lamp].style;
 }
 #endif
 
@@ -996,14 +1011,14 @@ static void RB_ShadowRtEntries( const vec3_t mins, const vec3_t maxs, float floo
 	const float pad = 4.0f + 24.0f * r_shadowSoftness->value;
 
 	int numLamps = 0;
-#ifdef RD_VULKAN
+#ifdef _JK2EXE
 	static cvar_t *lampsCvar = NULL;
 	if ( !lampsCvar ) {
 		lampsCvar = ri.Cvar_Get( "r_rtLamps", "1", CVAR_ARCHIVE_ND );	// 0: the grid's direction, as without the lamps
 	}
 	// (a view of the level only: the lamps are of the last level loaded, the server's traces need it to be running)
 	if ( lampsCvar->integer && !shLamps.empty() && tr.world && !( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) ) {
-		const shadowLampChoice_t *choice = RB_ShadowLampsAt( mid );
+		const lampChoice_t *choice = R_LampsAt( mid );
 		float total = 0.0f;
 		for ( int i = 0; i < choice->count; i++ ) {
 			total += choice->weights[i];

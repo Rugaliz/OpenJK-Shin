@@ -120,6 +120,16 @@ the shadow comes from the one direction of the level's light grid (the strongest
 when the level was made), fainter and softer than a lamp's as it is a guess. `r_rtLamps 0` uses the grid's direction
 everywhere.
 
+**The characters lit by the lamps** (`r_lampLighting`: 1, the default, with Ray Tracing on; 2 always, OpenGL too; 0
+never). A character, an item or a weapon is lit by the level's light grid: an amount of light from all around and one
+from a single direction, into which the map compiler added up the lamps around. Where the level has its lamps, that
+directed light is shared out between the lamps that light the character and that it can see, each from its own side
+and in its own colour and light style (a flickering lamp flickers on it): a character is lit from where the lamps
+are, as its shadows say, and a little darker where a ledge or a pillar hides one of them. It is never lit more than
+the grid says, so the level looks as it was made; the light from all around stays the grid's. The lamps' brightness
+is turned into the grid's units once for a level, from points of its grid (the median of their ratio). Where no lamp
+is seen, and in the Jedi Academy levels without lamps, the grid's light as before.
+
 **Contact shadows.** Around the feet of every character, short rays from the floor all around (32 units) find how much
 of the light from no one direction the character takes away close to it: the darkening where a foot meets the floor or
 a hand rests on a crate, which grounds the character even where the direction of the light is not known. Three rays

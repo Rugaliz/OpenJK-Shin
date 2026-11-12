@@ -56,8 +56,25 @@ typedef struct {
 #define SHADOW_RT_LAMP			1	// from a lamp of the level (light entity)
 #define SHADOW_RT_CONTACT		2	// all around, close to the caster
 
-// the lamps of the level (its "light" entities), read as it loads: the ray traced shadows are cast from them
+// the lamps of the level (its "light" entities), read as it loads: the ray traced shadows are cast from them, and the
+// single player renderers light the characters with them (r_lampLighting)
 void		R_ShadowLampsLoad( const char *entities, int length );
+
+#ifdef _JK2EXE
+#define LAMPS_AT_MAX	4
+
+// The lamps that light a point most and that it can see (the server's traces, so single player only), with how much
+// light each gave it in the map compiler's units, colour included (kept for the 16 units cube the point is in)
+typedef struct {
+	int		count;
+	int		lamps[LAMPS_AT_MAX];
+	float	weights[LAMPS_AT_MAX];
+} lampChoice_t;
+
+const lampChoice_t	*R_LampsAt( const vec3_t point );
+// where a lamp is, its colour (the brightest component 1), the luminance of that colour and its light style
+void				R_LampInfo( int lamp, vec3_t origin, vec3_t color, float *luminance, int *style );
+#endif
 
 // The renderer can draw them (it has the shaders); r_shadowMapsAvail tells the menus
 qboolean	R_ShadowMaps_Available( void );
