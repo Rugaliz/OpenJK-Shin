@@ -1027,6 +1027,31 @@ qboolean MenuParse_fadeCycle( itemDef_t *item)
 	return qtrue;
 }
 
+// "Desktop resolution" in the language of the game (the games' own strings have no such words; in Latin-1, as theirs)
+static const char *UI_DesktopResolutionLabel( void )
+{
+#ifdef JK2_MODE
+	switch ( sp_language->integer )
+	{
+	case SP_LANGUAGE_FRENCH:	return "R\xe9solution du bureau";
+	case SP_LANGUAGE_GERMAN:	return "Desktop-Aufl\xf6sung";
+	case SP_LANGUAGE_ITALIAN:	return "Risoluzione del desktop";
+	case SP_LANGUAGE_SPANISH:	return "Resoluci\xf3n del escritorio";
+	default:					return "Desktop resolution";
+	}
+#else
+	if ( !Q_stricmp( se_language->string, "french" ) )
+		return "R\xe9solution du bureau";
+	if ( !Q_stricmp( se_language->string, "german" ) )
+		return "Desktop-Aufl\xf6sung";
+	if ( !Q_stricmp( se_language->string, "italian" ) )
+		return "Risoluzione del desktop";
+	if ( !Q_stricmp( se_language->string, "spanish" ) )
+		return "Resoluci\xf3n del escritorio";
+	return "Desktop resolution";
+#endif
+}
+
 /*
 ===============
 Item_ApplyHacks
@@ -1157,7 +1182,7 @@ static void Item_ApplyHacks( itemDef_t *item ) {
 
 		memset( multiPtr, 0, sizeof( *multiPtr ) );
 		multiPtr->strDef = qtrue;
-		multiPtr->cvarList[0] = String_Alloc( "Desktop resolution" );
+		multiPtr->cvarList[0] = String_Alloc( UI_DesktopResolutionLabel() );
 		multiPtr->cvarStr[0] = String_Alloc( "desktop" );
 		multiPtr->count = 1;
 		for ( i = first; i < numModes; i++ )

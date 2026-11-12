@@ -1031,8 +1031,9 @@ void	cgi_R_RenderScene( const refdef_t *fd );
 void	cgi_R_SetColor( const float *rgba );	// NULL = 1,1,1,1
 
 // Where the 2D drawing that follows sticks to on a screen wider than 4:3 (it is centred in the 4:3 area otherwise).
-// The corner parts of the HUD use these, and put it back to ANCHOR_CENTRE.
-enum { ANCHOR_LEFT = -1, ANCHOR_CENTRE = 0, ANCHOR_RIGHT = 1 };
+// The corner parts of the HUD use these, and put it back to ANCHOR_CENTRE. ANCHOR_KEEP_SHAPE: centred, and the
+// pictures that span the whole 640 wide area too (they are stretched over the screen otherwise).
+enum { ANCHOR_LEFT = -1, ANCHOR_CENTRE = 0, ANCHOR_RIGHT = 1, ANCHOR_KEEP_SHAPE = 2 };
 void	cgi_R_Set2DAnchor( int anchor );
 void	cgi_R_DrawStretchPic( float x, float y, float w, float h,
 	float s1, float t1, float s2, float t2, qhandle_t hShader );

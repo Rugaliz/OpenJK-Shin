@@ -190,7 +190,7 @@ typedef struct {
 	qboolean(*GetLighting)( const vec3_t org, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir);
 
 	void	(*SetColor)( const float *rgba );	// NULL = 1,1,1,1
-	void	(*Set2DAnchor)( int anchor );		// where 2D drawing sticks to on a wide screen: -1 left edge, 0 centre (default), 1 right edge
+	void	(*Set2DAnchor)( int anchor );		// where 2D drawing sticks to on a wide screen: -1 left edge, 0 centre (default), 1 right edge, 2 centre with full-screen pictures not stretched
 	void	(*DrawStretchPic) ( float x, float y, float w, float h,
 		float s1, float t1, float s2, float t2, qhandle_t hShader );	// 0 = white
 	void	(*DrawRotatePic) ( float x, float y, float w, float h,

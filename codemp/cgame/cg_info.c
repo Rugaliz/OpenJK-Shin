@@ -146,8 +146,16 @@ void CG_DrawInformation( void ) {
 	if ( !levelshot ) {
 		levelshot = trap->R_RegisterShaderNoMip( "menu/art/unknownmap_mp" );
 	}
+	// (in its shape, between black sides on a wide screen)
+	{
+		static const vec4_t black = { 0.0f, 0.0f, 0.0f, 1.0f };
+		CG_FillRect( -SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, black );
+		CG_FillRect( SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, black );
+	}
 	trap->R_SetColor( NULL );
+	trap->ext.R_Set2DAnchor( ANCHOR_KEEP_SHAPE );
 	CG_DrawPic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, levelshot );
+	trap->ext.R_Set2DAnchor( ANCHOR_CENTRE );
 
 	CG_LoadBar();
 

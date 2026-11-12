@@ -383,7 +383,13 @@ void Con_CheckResize (void)
 	con.charWidth = charWidth;
 	con.charHeight = scale * SMALLCHAR_HEIGHT;
 	con.linewidth = width;
-	con.xadjust = ((float)SCREEN_WIDTH) / cls.glconfig.vidWidth;
+	// the width of the 2D drawing (480 high): wider than 640 on a screen wider than 4:3 with r_wideUI, as the renderer
+	// has it (R_Get2DVirtualWidth); the console then spans the screen from its left edge (Con_DrawConsole)
+	float virtualWidth = SCREEN_WIDTH;
+	if ( Cvar_VariableIntegerValue( "r_wideUI" ) && cls.glconfig.vidWidth * SCREEN_HEIGHT > cls.glconfig.vidHeight * SCREEN_WIDTH ) {
+		virtualWidth = (float)SCREEN_HEIGHT * cls.glconfig.vidWidth / cls.glconfig.vidHeight;
+	}
+	con.xadjust = virtualWidth / cls.glconfig.vidWidth;
 	con.yadjust = ((float)SCREEN_HEIGHT) / cls.glconfig.vidHeight;
 	g_consoleField.widthInChars = width - 1; // Command prompt
 
@@ -847,15 +853,13 @@ void Con_DrawConsole( void ) {
 	// check for console width changes from a vid mode change
 	Con_CheckResize ();
 
-	// if disconnected, render console full screen
-	if ( cls.state == CA_DISCONNECTED ) {
-		if ( !( Key_GetCatcher( ) & KEYCATCH_UI) ) {
-			Con_DrawSolidConsole( 1.0 );
-			return;
-		}
-	}
+	// (from the left edge of a wide screen, Con_CheckResize: the 2D drawing is centred otherwise)
+	re.Set2DAnchor( -1 );
 
-	if ( con.displayFrac ) {
+	// if disconnected, render console full screen
+	if ( cls.state == CA_DISCONNECTED && !( Key_GetCatcher( ) & KEYCATCH_UI) ) {
+		Con_DrawSolidConsole( 1.0 );
+	} else if ( con.displayFrac ) {
 		Con_DrawSolidConsole( con.displayFrac );
 	} else {
 		// draw notify lines
@@ -863,6 +867,8 @@ void Con_DrawConsole( void ) {
 			Con_DrawNotify ();
 		}
 	}
+
+	re.Set2DAnchor( 0 );
 }
 
 //================================================================

@@ -78,6 +78,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #define ANCHOR_LEFT			-1		// the left edge of the screen
 #define ANCHOR_CENTRE		0		// the centred 640x480 area
 #define ANCHOR_RIGHT		1		// the right edge of the screen
+#define ANCHOR_KEEP_SHAPE	2		// centred, and the pictures spanning the whole 640 wide area too (stretched otherwise)
 #define	TEXT_ICON_SPACE		4
 
 // very large characters

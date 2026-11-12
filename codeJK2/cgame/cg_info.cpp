@@ -412,9 +412,15 @@ void CG_DrawInformation( void ) {
 #endif
 	{
 		// put up the pre-defined levelshot for this map...
+		// (in its shape, between black sides on a wide screen)
 		//
+		static const vec4_t black = { 0.0f, 0.0f, 0.0f, 1.0f };
+		CG_FillRect( -SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, black );
+		CG_FillRect( SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, black );
 		cgi_R_SetColor( NULL );
+		cgi_R_Set2DAnchor( ANCHOR_KEEP_SHAPE );
 		CG_DrawPic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, levelshot );
+		cgi_R_Set2DAnchor( ANCHOR_CENTRE );
 	}
 
 	if ( g_eSavedGameJustLoaded != eFULL && !strcmp(s,"kejim_post") )//special case for first map!

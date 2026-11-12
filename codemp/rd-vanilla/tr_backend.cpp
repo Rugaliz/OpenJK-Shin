@@ -1426,13 +1426,14 @@ const void *RB_StretchPic ( const void *data ) {
 	baDest = (byteAlias_t *)&tess.vertexColors[numVerts + 3]; baDest->ui = baSource->ui;
 
 	// On widescreen displays centre the 640x480 area, except for quads spanning its full width
-	// (backgrounds, fades, screen flashes, bars), which are stretched to cover the whole screen.
+	// (backgrounds, fades, screen flashes, bars), which are stretched to cover the whole screen
+	// unless they must keep their shape.
 	float x = cmd->x;
 	float w = cmd->w;
 	const float bias = R_Get2DBias();
 	if ( bias > 0.0f )
 	{
-		if ( x <= 0.0f && x + w >= SCREEN_WIDTH )
+		if ( x <= 0.0f && x + w >= SCREEN_WIDTH && !cmd->keepShape )
 		{
 			w += 2.0f * bias;
 		}

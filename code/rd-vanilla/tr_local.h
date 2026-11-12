@@ -1810,6 +1810,7 @@ typedef struct {
 	float	w, h;
 	float	s1, t1;
 	float	s2, t2;
+	qboolean	keepShape;		// spanning the 640 wide area, but centred on a wide screen instead of stretched (RE_Set2DAnchor)
 } stretchPicCommand_t;
 
 typedef struct {

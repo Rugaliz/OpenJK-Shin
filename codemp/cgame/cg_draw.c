@@ -178,6 +178,25 @@ void CG_Text_Paint(float x, float y, float scale, vec4_t color, const char *text
 
 /*
 ================
+CG_DrawScreenMask
+
+A picture over the whole 640x480 screen that must keep its shape, as a scope's round lens: on a wider screen it is
+centred instead of stretched, and its own left and right edges are drawn across the sides (black for the scopes).
+With the colour already set, which is kept.
+================
+*/
+static void CG_DrawScreenMask( qhandle_t mask )
+{
+	// (beside the 640 wide area, however wide the screen is: off a 4:3 screen)
+	trap->R_DrawStretchPic( -SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0.002f, 0.0f, 0.002f, 1.0f, mask );
+	trap->R_DrawStretchPic( SCREEN_WIDTH, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0.998f, 0.0f, 0.998f, 1.0f, mask );
+	trap->ext.R_Set2DAnchor( ANCHOR_KEEP_SHAPE );
+	CG_DrawPic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, mask );
+	trap->ext.R_Set2DAnchor( ANCHOR_CENTRE );
+}
+
+/*
+================
 CG_DrawZoomMask
 
 ================
@@ -273,7 +292,7 @@ static void CG_DrawZoomMask( void )
 		color1[3] = 1.0f;
 		trap->R_SetColor( color1 );
 
-		CG_DrawPic( 0, 0, 640, 480, cgs.media.binocularMask );
+		CG_DrawScreenMask( cgs.media.binocularMask );
 
 		CG_DrawPic( 4, 282 - level, 16, 16, cgs.media.binocularArrow );
 
@@ -312,7 +331,7 @@ static void CG_DrawZoomMask( void )
 
 		// Draw target mask
 		trap->R_SetColor( colorTable[CT_WHITE] );
-		CG_DrawPic( 0, 0, 640, 480, cgs.media.disruptorMask );
+		CG_DrawScreenMask( cgs.media.disruptorMask );
 
 		// apparently 99.0f is the full zoom level
 		if ( level >= 99 )
