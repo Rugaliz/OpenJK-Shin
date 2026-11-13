@@ -1924,6 +1924,7 @@ void RB_ShowImages( void ) {
 
 static void RB_GammaCorrectRender()
 {
+#ifndef RD_VULKAN	// (Vulkan applies the gamma in its own pass, vk_post.cpp; this is the OpenGL shader programs' way)
 	qglPushAttrib(GL_CLIENT_ALL_ATTRIB_BITS);
 
 	RB_SetGL2D();
@@ -1965,6 +1966,7 @@ static void RB_GammaCorrectRender()
 	GL_SelectTexture(0);
 
 	qglPopAttrib();
+#endif
 }
 
 
