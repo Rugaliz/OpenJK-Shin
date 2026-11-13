@@ -19,6 +19,7 @@ vkCmdBlitImage
 vkCmdClearAttachments
 vkCmdClearColorImage
 vkCmdCopyBufferToImage
+vkCmdCopyImage
 vkCmdCopyImageToBuffer
 vkCmdDraw
 vkCmdDrawIndexed
