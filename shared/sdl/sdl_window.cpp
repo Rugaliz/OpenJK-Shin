@@ -51,6 +51,7 @@ cvar_t	*r_customwidth;
 cvar_t	*r_customheight;
 cvar_t	*r_swapInterval;
 cvar_t	*r_adaptiveVsync;
+static cvar_t	*r_bypassCompositor;
 static cvar_t	*com_levelLoading;
 cvar_t	*r_stereo;
 cvar_t	*r_mode;
@@ -396,6 +397,13 @@ GLimp_CreateWindow
 */
 static SDL_Window *GLimp_CreateWindow( const char *title, int x, int y, int width, int height, bool opengl, bool vulkan, bool borderless )
 {
+	// Fullscreen on X11, SDL asks the compositor to step aside (_NET_WM_BYPASS_COMPOSITOR), and the X server then
+	// shows the game's frames itself. With XLibre 25.1.11 and KDE (Nov 2026) that froze the whole PC, with OpenGL and
+	// with Vulkan alike; composited, it does not. So the compositor stays unless r_bypassCompositor 1 (the environment
+	// variable SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR wins over both). Other video drivers ignore it.
+	SDL_SetHintWithPriority( SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR,
+		( r_bypassCompositor && r_bypassCompositor->integer ) ? "1" : "0", SDL_HINT_DEFAULT );
+
 	const SDL_PropertiesID props = SDL_CreateProperties();
 
 	SDL_SetStringProperty( props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title );
@@ -846,6 +854,7 @@ window_t WIN_Init( const windowDesc_t *windowDesc, glconfig_t *glConfig )
 	// Window cvars
 	// Out of the box, run fullscreen at the desktop resolution so no setup is needed on modern displays
 	r_fullscreen		= Cvar_Get( "r_fullscreen",			"1",		CVAR_ARCHIVE|CVAR_LATCH );
+	r_bypassCompositor	= Cvar_Get( "r_bypassCompositor",	"0",		CVAR_ARCHIVE_ND|CVAR_LATCH );	// (X11: GLimp_CreateWindow)
 	r_noborder			= Cvar_Get( "r_noborder",			"0",		CVAR_ARCHIVE|CVAR_LATCH );
 	r_centerWindow		= Cvar_Get( "r_centerWindow",		"0",		CVAR_ARCHIVE|CVAR_LATCH );
 	r_customwidth		= Cvar_Get( "r_customwidth",		"1600",		CVAR_ARCHIVE|CVAR_LATCH );

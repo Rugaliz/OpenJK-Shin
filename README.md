@@ -62,6 +62,9 @@ Settings are named as they appear in the game's menus. The console command is gi
 - **Widescreen and ultrawide screens** show more to the sides, as they should, instead of cutting off the top and
   bottom. Menus and the HUD keep their proportions, videos get black bars, and the HUD sits in the corners of the
   screen.
+- **Linux (X11):** in fullscreen the desktop's compositor keeps drawing the screen, as it does for a window. Letting
+  the game draw it directly froze the whole PC with some X server and driver versions (XLibre 25.1.11 with KDE, in
+  November 2026). Where that works, `r_bypassCompositor 1` turns it back on.
 
 ### Frame rate
 - **Single player runs at your monitor's refresh rate** (60, 144, 240 Hz...) without tearing. On a G-Sync or FreeSync
