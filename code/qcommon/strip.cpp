@@ -952,6 +952,10 @@ bool cStringPackageSingle::UnderstandToken(char *&Data, int &Size, int token, ch
 					return false;
 				}
 				pos = atol(data);
+				if (pos < 0 || pos >= MAX_STRINGS)
+				{
+					return false;	// (an index past the table: it wrote past its end)
+				}
 				if (!Strings[pos].Load(Data, Size))
 				{
 					return false;
@@ -969,6 +973,26 @@ bool cStringPackageSingle::UnderstandToken(char *&Data, int &Size, int token, ch
 	}
 }
 
+
+// every copy of strip/<package>.sp (the game's, then the mods' in the order they are loaded: FS_ReadFileVersions), each
+// over the ones before it: a mod that adds or changes some strings keeps the strings the others gave the package,
+// instead of the last copy replacing it whole
+extern int FS_ReadFileVersions( const char *qpath, void ( *callback )( const char *data, int len, const char *where, void *user ),
+	void *user );
+
+static void SP_LoadCopy( const char *data, int len, const char *where, void *user )
+{
+	if ( len <= 0 )
+		return;
+	cStringPackageSingle *sp = (cStringPackageSingle *)user;
+	char *copy = new char[len + 1];
+	memcpy( copy, data, len );
+	copy[len] = '\0';
+	int size = len;
+	if ( !sp->Load( copy, size ) )
+		Com_Printf( S_COLOR_YELLOW "The copy of string package %s in %s is not read whole\n", sp->GetName(), where );
+	delete[] copy;
+}
 
 // A map of loaded string packages
 std::map<std::string, cStringPackageSingle *>		JK2SP_ListByName;
@@ -989,9 +1013,7 @@ std::map<byte, cStringPackageSingle *>		JK2SP_ListByID;
  ************************************************************************************************/
 qboolean JK2SP_Register(const char *inPackage, unsigned char Registration)
 {
-	char											*buffer;
 	char											Package[MAX_QPATH];
-	int												size;
 	cStringPackageSingle							*new_sp;
 	std::map<std::string, cStringPackageSingle *>::iterator	i;
 
@@ -1009,20 +1031,17 @@ qboolean JK2SP_Register(const char *inPackage, unsigned char Registration)
 	else
 	{
 
-		size = FS_ReadFile(va("strip/%s.sp", Package), (void **)&buffer);
-		if (size == -1)
+		// Create the new string package, from every copy of its file
+		new_sp = new cStringPackageSingle(Package);
+		if ( !FS_ReadFileVersions( va("strip/%s.sp", Package), SP_LoadCopy, new_sp ) )
 		{
+			delete new_sp;
 			if ( Registration & SP_REGISTER_REQUIRED )
 			{
 				Com_Error(ERR_FATAL, "Could not open string package '%s'", Package);
 			}
 			return qfalse;
 		}
-
-		// Create the new string package
-		new_sp = new cStringPackageSingle(Package);
-		new_sp->Load(buffer, size );
-		FS_FreeFile(buffer);
 
 		if (Registration & SP_REGISTER_CLIENT)
 		{

@@ -2634,8 +2634,8 @@ int	FS_GetModList( char *listbuf, int bufsize ) {
 		if (bDrop) {
 			continue;
 		}
-		// we drop "." and ".."
-		if (Q_stricmpn(name, ".", 1)) {
+		// we drop "." and "..", and the folder of the packages (fs_packages.h)
+		if (Q_stricmpn(name, ".", 1) && Q_stricmp(name, "mods")) {
 			// now we need to find some .pk3 files to validate the mod
 			// NOTE TTimo: (actually I'm not sure why .. what if it's a mod under developement with no .pk3?)
 			// we didn't keep the information when we merged the directory names, as to what OS Path it was found under
@@ -3379,6 +3379,8 @@ void FS_Shutdown( qboolean closemfp, qboolean keepModuleFiles ) {
 	Cmd_RemoveCommand( "touchFile" );
 	Cmd_RemoveCommand( "which" );
 	Cmd_RemoveCommand( "fs_restart" );
+	Cmd_RemoveCommand( "fs_mods" );
+	Cmd_RemoveCommand( "fs_conflicts" );
 
 #ifdef FS_MISSING
 	if (closemfp) {
@@ -3588,6 +3590,9 @@ void FS_LoadReflists( void ) {
 	}
 }
 
+#define FS_PACKAGES_MULTIPLAYER	1
+#include "qcommon/fs_packages.h"	// (the mods folders, conflicts, every copy of a file)
+
 void FS_Startup( const char *gameName ) {
 	const char *homePath;
 
@@ -3636,6 +3641,9 @@ void FS_Startup( const char *gameName ) {
 		FS_CreatePath ( fs_homepath->string );
 		FS_AddGameDirectory ( fs_homepath->string, gameName );
 	}
+
+	// the packages of the mods folders, after the pk3 files of base and before a mod folder (fs_packages.h)
+	FS_Packages_Mount();
 
 	// check for additional base game so mods can be based upon other mods
 	if ( fs_basegame->string[0] && Q_stricmp( fs_basegame->string, gameName ) ) {
@@ -3686,6 +3694,8 @@ void FS_Startup( const char *gameName ) {
 	Cmd_AddCommand ("touchFile", FS_TouchFile_f, "Touches a file" );
 	Cmd_AddCommand ("which", FS_Which_f, "Determines which search path a file was loaded from" );
 	Cmd_AddCommand ("fs_restart", FS_Restart_f, "Restarts the filesystem if no module is currently using files from a pk3" );
+	Cmd_AddCommand ("fs_mods", FS_Mods_f, "Lists the mods of the mods folders and their order" );
+	Cmd_AddCommand ("fs_conflicts", FS_Conflicts_f, "Lists the pk3 files that replace files of others" );
 
 	// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=506
 	// reorder the pure pk3 files according to server order

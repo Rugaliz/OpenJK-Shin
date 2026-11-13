@@ -259,6 +259,7 @@ void CStringEdPackage::SetupNewFileParse( const char *psFileName, SE_BOOL bLoadD
 	m_strLoadingLanguage_ParseOnly = ExtractLanguageFromPath( psFileName );
 	m_bLoadingEnglish_ParseOnly = (!Q_stricmp( m_strLoadingLanguage_ParseOnly.c_str(), "english" )) ? SE_TRUE : SE_FALSE;
 	m_bLoadDebug = bLoadDebug;
+	m_bEndMarkerFound_ParseOnly = SE_FALSE;	// (each file has its own: it was only reset when everything was cleared)
 }
 
 
@@ -839,51 +840,80 @@ void CStringEdPackage::SetString( const char *psLocalReference, const char *psNe
 //
 // return is either NULL for good else error message to display...
 //
-static const char *SE_Load_Actual( const char *psFileName, SE_BOOL bLoadDebug, SE_BOOL bSpeculativeLoad )
+// one copy of a string file, into the table (what it has replaces the same entries of the copies before it)
+static const char *SE_ParseCopy( const char *psFileName, const char *psData, SE_BOOL bLoadDebug )
 {
 	const char *psErrorMessage = NULL;
+	const char *psParsePos = psData;
 
-	unsigned char *psLoadedData = SE_LoadFileData( psFileName );
-	if ( psLoadedData )
+	TheStringPackage.SetupNewFileParse( psFileName, bLoadDebug );
+
+	char sLineBuffer[16384];	// should be enough for one line of text (some of them can be BIG though)
+	while ( !psErrorMessage && TheStringPackage.ReadLine( psParsePos, sLineBuffer ) )
 	{
-		// now parse the data...
-		//
-		char *psParsePos = (char *) psLoadedData;
-
-		TheStringPackage.SetupNewFileParse( psFileName, bLoadDebug );
-
-		char sLineBuffer[16384];	// should be enough for one line of text (some of them can be BIG though)
-		while ( !psErrorMessage && TheStringPackage.ReadLine((const char *&) psParsePos, sLineBuffer ) )
+		if (strlen(sLineBuffer))
 		{
-			if (strlen(sLineBuffer))
-			{
-//				__DEBUGOUT( sLineBuffer );
-//				__DEBUGOUT( "\n" );
-
-				psErrorMessage = TheStringPackage.ParseLine( sLineBuffer );
-			}
+			psErrorMessage = TheStringPackage.ParseLine( sLineBuffer );
 		}
+	}
 
-		SE_FreeFileDataAfterLoad( psLoadedData);
+	if (!psErrorMessage && !TheStringPackage.EndMarkerFoundDuringParse())
+	{
+		psErrorMessage = va("Truncated file, failed to find \"%s\" at file end!", sSE_KEYWORD_ENDMARKER);
+	}
+	return psErrorMessage;
+}
 
-		if (!psErrorMessage && !TheStringPackage.EndMarkerFoundDuringParse())
-		{
-			psErrorMessage = va("Truncated file, failed to find \"%s\" at file end!", sSE_KEYWORD_ENDMARKER);
-		}
+typedef struct {
+	const char	*psFileName;
+	SE_BOOL		bLoadDebug;
+	int			iCopies, iGood;
+	const char	*psLastError;
+} seCopies_t;
+
+static void SE_ParseEachCopy( const char *psData, int iLength, const char *psWhere, void *pUser )
+{
+	seCopies_t *pCopies = (seCopies_t *)pUser;
+	pCopies->iCopies++;
+	const char *psErrorMessage = iLength > 0 ? SE_ParseCopy( pCopies->psFileName, psData, pCopies->bLoadDebug ) : "empty";
+	if ( psErrorMessage )
+	{
+		Com_Printf( S_COLOR_YELLOW "The copy of %s in %s is left out: %s\n", pCopies->psFileName, psWhere, psErrorMessage );
+		static char sLastError[1024];
+		Q_strncpyz( sLastError, psErrorMessage, sizeof( sLastError ) );
+		pCopies->psLastError = sLastError;
 	}
 	else
 	{
-		if ( bSpeculativeLoad )
-		{
-			// then it's ok to not find the file, so do nothing...
-		}
-		else
-		{
-			psErrorMessage = va("Unable to load \"%s\"!", psFileName);
-		}
+		pCopies->iGood++;
 	}
+}
 
-	return psErrorMessage;
+extern int FS_ReadFileVersions( const char *qpath, void ( *callback )( const char *data, int len, const char *where, void *user ),
+	void *user );
+
+// filename is local here, eg:	"strings/german/obj.str"
+//
+// Every copy of the file is read, the game's first and then the ones of the mods in the order they are loaded
+// (FS_ReadFileVersions): a mod that adds or changes some lines of a table keeps the lines the others (and a
+// translation) gave it, instead of the last copy replacing the whole table.
+//
+// return is either NULL for good else error message to display...
+//
+static const char *SE_Load_Actual( const char *psFileName, SE_BOOL bLoadDebug, SE_BOOL bSpeculativeLoad )
+{
+	seCopies_t copies = { psFileName, bLoadDebug, 0, 0, NULL };
+	FS_ReadFileVersions( psFileName, SE_ParseEachCopy, &copies );
+
+	if ( copies.iGood )
+	{
+		return NULL;
+	}
+	if ( copies.iCopies )
+	{
+		return copies.psLastError;
+	}
+	return bSpeculativeLoad ? NULL : va("Unable to load \"%s\"!", psFileName);
 }
 
 static const char *SE_GetFoundFile( std::string &strResult )

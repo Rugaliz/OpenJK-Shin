@@ -2325,8 +2325,8 @@ int	FS_GetModList( char *listbuf, int bufsize ) {
 		if (bDrop) {
 			continue;
 		}
-		// we drop "." and ".."
-		if (Q_stricmpn(name, ".", 1)) {
+		// we drop "." and "..", and the folder of the packages (fs_packages.h)
+		if (Q_stricmpn(name, ".", 1) && Q_stricmp(name, "mods")) {
 			// now we need to find some .pk3 files to validate the mod
 			// NOTE TTimo: (actually I'm not sure why .. what if it's a mod under developement with no .pk3?)
 			// we didn't keep the information when we merged the directory names, as to what OS Path it was found under
@@ -2854,6 +2854,8 @@ void FS_Shutdown( qboolean keepModuleFiles ) {
 	Cmd_RemoveCommand( "touchFile" );
 	Cmd_RemoveCommand( "which" );
 	Cmd_RemoveCommand( "fs_restart" );
+	Cmd_RemoveCommand( "fs_mods" );
+	Cmd_RemoveCommand( "fs_conflicts" );
 }
 
 /*
@@ -2890,6 +2892,9 @@ static qboolean FS_HomePathIsWritable( const char *dir ) {
 	remove( probe );
 	return qtrue;
 }
+
+#define FS_PACKAGES_MULTIPLAYER	0
+#include "qcommon/fs_packages.h"	// (the mods folders, conflicts, every copy of a file)
 
 /*
 ================
@@ -2945,6 +2950,9 @@ void FS_Startup( const char *gameName ) {
 		FS_AddGameDirectory ( fs_homepath->string, gameName );
 	}
 
+	// the packages of the mods folders, after the pk3 files of base and before a mod folder (fs_packages.h)
+	FS_Packages_Mount();
+
 	// check for additional base game so mods can be based upon other mods
 	if ( fs_basegame->string[0] && Q_stricmp( fs_basegame->string, gameName ) ) {
 		if (fs_cdpath->string[0]) {
@@ -2978,6 +2986,8 @@ void FS_Startup( const char *gameName ) {
 	Cmd_AddCommand ("touchFile", FS_TouchFile_f );
 	Cmd_AddCommand ("which", FS_Which_f );
 	Cmd_AddCommand ("fs_restart", FS_Restart_f );
+	Cmd_AddCommand ("fs_mods", FS_Mods_f );
+	Cmd_AddCommand ("fs_conflicts", FS_Conflicts_f );
 
 	// print the current search paths
 	FS_Path_f();
