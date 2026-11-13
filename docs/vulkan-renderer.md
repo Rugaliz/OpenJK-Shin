@@ -1,4 +1,4 @@
-# Vulkan renderer (single player) - plan and status
+# Vulkan renderer - plan and status
 
 Goal: a Vulkan renderer for the single player games (Jedi Outcast and Jedi Academy) that looks the same as the OpenGL
 one, as a **separate renderer module** (`rdsp-vulkan` for Jedi Academy, `rdjosp-vulkan` for Jedi Outcast). The OpenGL
@@ -117,6 +117,19 @@ of the point (a storage buffer of triangles, from the instance's custom index an
 hit where the texture's alpha passes the shader's test, read from an atlas of the level's alpha textures
 (`VK_RT_PrepareLevel`, at the level's first frame with ray tracing). The dynamic lights' set and the post passes' set
 have the atlas and the buffer next to the structure.
+
+## Multiplayer
+
+The multiplayer renderer (`codemp/rd-vanilla`) is built the same way into `rd-vulkan` (Jedi Academy) and
+`rdjomp-vulkan` (Jedi Outcast): its own sources with `RD_VULKAN` and `RD_VULKAN_MP`, and the same layer from
+`code/rd-vulkan`, which finds the renderer it is built into through `vk_renderer.h` (the include path picks the
+multiplayer `tr_local.h`; the few calls that differ, `Cvar_Get` and the allocation, are wrapped there). The engine
+gives the renderer the window's Vulkan functions (`REF_API_VERSION` 12 in multiplayer), loads the Vulkan module by
+default and falls back to OpenGL with the same note on the screen as single player. Ray traced shadows and lights,
+soft particles, the lamps (lighting and shadows: traced with `CM_BoxTrace` on the client's collision map) and the
+flares without waiting come with it. The frame rate stays where multiplayer keeps it (`com_maxfps` 125, vsync off by
+default: the jump heights of most servers depend on it); `r_lowLatency` waits for the frame before last before each
+frame, which costs nothing at 125.
 
 ## What is not there yet
 

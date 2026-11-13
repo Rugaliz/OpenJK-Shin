@@ -637,3 +637,5 @@ void CL_WriteAVIVideoFrame( const byte *imageBuffer, int size );
 void CL_WriteAVIAudioFrame( const byte *pcmBuffer, int size );
 qboolean CL_CloseAVI( void );
 qboolean CL_VideoRecording( void );
+
+extern	char	cl_rendererWarning[256];	// set when the Vulkan renderer could not be used, drawn on the screen

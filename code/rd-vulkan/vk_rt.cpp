@@ -26,10 +26,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // building the structures. vk.rayTracing says it is on (the device has it, r_vkRayTracing, and the test at start-up
 // worked); r_rtAvail tells the menus.
 
-#include "../server/exe_headers.h"
-#include "../rd-vanilla/tr_local.h"
+#include "vk_renderer.h"	// (the single or multiplayer renderer)
 #include "vk_priv.h"
-#include "../game/surfaceflags.h"
 #include <vector>
 
 static const char *const rtExtensions[] = {
@@ -1251,7 +1249,7 @@ After the device is made with VK_RT_AddToDevice (vk.rayTracing true): the entry 
 */
 void VK_RT_Init( void )
 {
-	ri.Cvar_Get( "r_rtAvail", "0", 0 );
+	VK_CvarGet( "r_rtAvail", "0", 0 );
 	ri.Cvar_Set( "r_rtAvail", "0" );
 	if ( !vk.rayTracing )
 	{

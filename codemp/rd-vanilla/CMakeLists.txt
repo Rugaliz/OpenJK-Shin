@@ -129,6 +129,7 @@ list(APPEND MPVanillaRendererLibraries          ${ZLIB_LIBRARIES})
 list(APPEND MPVanillaRendererIncludeDirectories ${MINIZIP_INCLUDE_DIRS})
 list(APPEND MPVanillaRendererLibraries          ${MINIZIP_LIBRARIES})
 
+set(MPVulkanRendererLibrariesBase ${MPVanillaRendererLibraries})	# (the Vulkan module does not link OpenGL)
 find_package(OpenGL REQUIRED)
 set(MPVanillaRendererIncludeDirectories ${MPVanillaRendererIncludeDirectories} ${OPENGL_INCLUDE_DIR})
 set(MPVanillaRendererLibraries ${MPVanillaRendererLibraries} ${OPENGL_LIBRARIES})
@@ -173,3 +174,79 @@ if(BuildJK2MPRdVanilla)
 	set(InstallDir ${JK2InstallDir})
 	add_mp_vanilla_renderer_project(${JK2MPVanillaRenderer} "${SharedDefines};JK2_MODE" "${MPVanillaRendererIncludeDirectories}")
 endif(BuildJK2MPRdVanilla)
+
+# The Vulkan renderer module: these same sources compiled with RD_VULKAN (and RD_VULKAN_MP), plus the Vulkan layer of
+# the single player renderer in code/rd-vulkan, which builds against this renderer (vk_renderer.h). See
+# docs/vulkan-renderer.md.
+if(BuildMPRdVulkan OR BuildJK2MPRdVulkan)
+	find_package(Vulkan)
+	set(MPVulkanIncludeDir ${Vulkan_INCLUDE_DIRS})
+	set(MPVulkanLibrary Vulkan::Vulkan)
+	# MinGW (the Windows version built on Linux): an import library for vulkan-1.dll made from the list of what the
+	# renderer calls, and a copy of the headers (as for the single player module, code/rd-vanilla/CMakeLists.txt)
+	if(NOT Vulkan_FOUND AND MINGW AND CMAKE_DLLTOOL AND Vulkan_INCLUDE_DIR AND EXISTS "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.h")
+		set(MPVulkanImportLibrary "${CMAKE_CURRENT_BINARY_DIR}/libvulkan-1.dll.a")
+		execute_process(COMMAND ${CMAKE_DLLTOOL} -m i386:x86-64 -d "${SPDir}/rd-vulkan/vulkan-1.def" -l "${MPVulkanImportLibrary}"
+			RESULT_VARIABLE MPVulkanImportResult)
+		if(MPVulkanImportResult EQUAL 0)
+			file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			file(COPY "${Vulkan_INCLUDE_DIR}/vulkan" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			if(EXISTS "${Vulkan_INCLUDE_DIR}/vk_video")
+				file(COPY "${Vulkan_INCLUDE_DIR}/vk_video" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			endif()
+			set(MPVulkanIncludeDir "${CMAKE_CURRENT_BINARY_DIR}/vulkan-include")
+			set(MPVulkanLibrary "${MPVulkanImportLibrary}")
+			set(Vulkan_FOUND TRUE)
+		endif()
+	endif()
+	if(NOT Vulkan_FOUND)
+		message(STATUS "Vulkan headers/loader not found, not building the MP Vulkan renderer module")
+	else()
+		# (tr_glsl.cpp and tr_post.cpp are the OpenGL versions of what vk_post.cpp does)
+		set(MPVulkanRendererFiles ${MPVanillaRendererFiles})
+		list(REMOVE_ITEM MPVulkanRendererFiles "${MPDir}/rd-vanilla/tr_glsl.cpp" "${MPDir}/rd-vanilla/tr_post.cpp")
+		list(APPEND MPVulkanRendererFiles
+			"${SPDir}/rd-vulkan/qgl.h"
+			"${SPDir}/rd-vulkan/vk_local.h"
+			"${SPDir}/rd-vulkan/vk_priv.h"
+			"${SPDir}/rd-vulkan/vk_renderer.h"
+			"${SPDir}/rd-vulkan/vk_spirv.h"
+			"${SPDir}/rd-vulkan/vk_draw.cpp"
+			"${SPDir}/rd-vulkan/vk_frame.cpp"
+			"${SPDir}/rd-vulkan/vk_gl.cpp"
+			"${SPDir}/rd-vulkan/vk_image.cpp"
+			"${SPDir}/rd-vulkan/vk_init.cpp"
+			"${SPDir}/rd-vulkan/vk_mem.cpp"
+			"${SPDir}/rd-vulkan/vk_post.cpp"
+			"${SPDir}/rd-vulkan/vk_rt.cpp"
+			)
+		set(MPVulkanRendererIncludeDirectories ${MPVanillaRendererIncludeDirectories} "${SPDir}/rd-vulkan" ${MPVulkanIncludeDir})
+		list(REMOVE_ITEM MPVulkanRendererIncludeDirectories ${OPENGL_INCLUDE_DIR})
+
+		function(add_mp_vulkan_renderer_project TargetName InstallDir Component Defines Label)
+			add_library(${TargetName} SHARED ${MPVulkanRendererFiles})
+			if(NOT MSVC)
+				set_target_properties(${TargetName} PROPERTIES PREFIX "")
+			endif()
+			if(WIN32)
+				install(TARGETS ${TargetName} RUNTIME DESTINATION ${InstallDir} COMPONENT ${Component})
+			else(WIN32)
+				install(TARGETS ${TargetName} LIBRARY DESTINATION ${InstallDir} COMPONENT ${Component})
+			endif()
+			set_target_properties(${TargetName} PROPERTIES COMPILE_DEFINITIONS "${Defines}")
+			set_property(TARGET ${TargetName} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})
+			set_target_properties(${TargetName} PROPERTIES INCLUDE_DIRECTORIES "${MPVulkanRendererIncludeDirectories}")
+			set_target_properties(${TargetName} PROPERTIES PROJECT_LABEL ${Label})
+			target_link_libraries(${TargetName} ${MPVulkanRendererLibrariesBase} ${MPVulkanLibrary})
+		endfunction(add_mp_vulkan_renderer_project)
+
+		if(BuildMPRdVulkan)
+			add_mp_vulkan_renderer_project(${MPVulkanRenderer} ${JKAInstallDir} ${JKAMPClientComponent}
+				"${SharedDefines};RD_VULKAN;RD_VULKAN_MP" "MP Vulkan Renderer")
+		endif(BuildMPRdVulkan)
+		if(BuildJK2MPRdVulkan)
+			add_mp_vulkan_renderer_project(${JK2MPVulkanRenderer} ${JK2InstallDir} ${JKAMPClientComponent}
+				"${SharedDefines};JK2_MODE;RD_VULKAN;RD_VULKAN_MP" "JK2 MP Vulkan Renderer")
+		endif(BuildJK2MPRdVulkan)
+	endif()
+endif(BuildMPRdVulkan OR BuildJK2MPRdVulkan)

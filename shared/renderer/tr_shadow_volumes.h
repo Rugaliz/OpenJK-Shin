@@ -769,9 +769,7 @@ typedef struct {
 #define SHADOW_RT_BELOW			128.0f	// how far below its floor a lamp's shadow is looked for
 
 static std::vector<shadowLamp_t>						shLamps;
-#ifdef _JK2EXE
 static std::unordered_map<long long, lampChoice_t>		shLampChoices;
-#endif
 static std::vector<shadowMapCaster_t>					shRtEntries;
 
 static float RB_EntityFloat( const std::vector<std::pair<std::string, std::string> > &ent, const char *key, float def )
@@ -802,9 +800,7 @@ void R_ShadowLampsLoad( const char *text, int length )
 	int numTokens = 0;
 
 	shLamps.clear();
-#ifdef _JK2EXE
 	shLampChoices.clear();
-#endif
 
 	// { "key" "value" ... } ...
 	for ( int i = 0; i < length && text[i]; i++ ) {
@@ -886,7 +882,18 @@ void R_ShadowLampsLoad( const char *text, int length )
 	ri.Printf( PRINT_DEVELOPER, "shadows: %d lamps in the level\n", (int)shLamps.size() );
 }
 
+// What stops the light between a point and a lamp: the server's trace in single player, the client's own copy of the
+// level's collision in multiplayer (loaded with the level for the prediction of movement)
+static void R_LampTrace( trace_t *results, const vec3_t start, const vec3_t end )
+{
 #ifdef _JK2EXE
+	ri.SV_Trace( results, start, vec3_origin, vec3_origin, end, ENTITYNUM_NONE, CONTENTS_SOLID, G2_NOCOLLIDE, 0 );
+#else
+	vec3_t mins = { 0.0f, 0.0f, 0.0f }, maxs = { 0.0f, 0.0f, 0.0f };
+	ri.CM_BoxTrace( results, start, end, mins, maxs, 0, CONTENTS_SOLID, 0 );
+#endif
+}
+
 // How much light the lamp gave a point in q3map, for its colour (without the angle: the point is a character, lit
 // from all sides); 0 outside a spotlight's cone
 static float RB_LampAt( const shadowLamp_t *lamp, const vec3_t point )
@@ -953,7 +960,7 @@ const lampChoice_t *R_LampsAt( const vec3_t point )
 			break;
 		}
 		trace_t tr;
-		ri.SV_Trace( &tr, point, vec3_origin, vec3_origin, lamp->origin, ENTITYNUM_NONE, CONTENTS_SOLID, G2_NOCOLLIDE, 0 );
+		R_LampTrace( &tr, point, lamp->origin );
 		if ( tr.fraction < 1.0f && Distance( tr.endpos, lamp->origin ) > 24.0f ) {
 			continue;	// (a lamp often sits in its fixture: what stops near it does not hide it)
 		}
@@ -970,7 +977,6 @@ void R_LampInfo( int lamp, vec3_t origin, vec3_t color, float *luminance, int *s
 	*luminance = shLamps[lamp].luminance;
 	*style = shLamps[lamp].style;
 }
-#endif
 
 // A ray traced entry seen along L: rows that put the box of the caster (mins, maxs) seen so onto 0 to 1 around its
 // middle, grown by magnify and by pad on each side
@@ -1012,12 +1018,16 @@ static void RB_ShadowRtEntries( const vec3_t mins, const vec3_t maxs, float floo
 	const float pad = 4.0f + 24.0f * r_shadowSoftness->value;
 
 	int numLamps = 0;
-#ifdef _JK2EXE
 	static cvar_t *lampsCvar = NULL;
 	if ( !lampsCvar ) {
-		lampsCvar = ri.Cvar_Get( "r_rtLamps", "1", CVAR_ARCHIVE_ND );	// 0: the grid's direction, as without the lamps
+		// 0: the grid's direction, as without the lamps
+#ifdef _JK2EXE
+		lampsCvar = ri.Cvar_Get( "r_rtLamps", "1", CVAR_ARCHIVE_ND );
+#else
+		lampsCvar = ri.Cvar_Get( "r_rtLamps", "1", CVAR_ARCHIVE_ND, "Characters' ray traced shadows cast from the level's lamps" );
+#endif
 	}
-	// (a view of the level only: the lamps are of the last level loaded, the server's traces need it to be running)
+	// (a view of the level only: the lamps are of the last level loaded, the traces need its collision)
 	if ( lampsCvar->integer && !shLamps.empty() && tr.world && !( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) ) {
 		const lampChoice_t *choice = R_LampsAt( mid );
 		float total = 0.0f;
@@ -1045,7 +1055,6 @@ static void RB_ShadowRtEntries( const vec3_t mins, const vec3_t maxs, float floo
 			numLamps++;
 		}
 	}
-#endif
 	if ( !numLamps && shRtEntries.size() < SHADOWMAP_MAX_RT ) {
 		RB_ShadowRtArea( &e, mins, maxs, L, 1.0f, pad * 2.0f );	// (seen along a direction, the shadow is as large as the caster)
 		VectorCopy( L, e.light );

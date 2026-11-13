@@ -21,8 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // Vulkan start-up and shutdown for the Vulkan renderer module (docs/vulkan-renderer.md): instance, device,
 // swapchain and the render target the whole frame is drawn into.
 
-#include "../server/exe_headers.h"
-#include "../rd-vanilla/tr_local.h"
+#include "vk_renderer.h"	// (the single or multiplayer renderer)
 #include "vk_priv.h"
 
 vk_t vk;
@@ -767,10 +766,10 @@ static VkPresentModeKHR VK_ChoosePresentMode( void )
 	}
 
 	// r_swapInterval 0: no waiting; 1: vsync (with r_adaptiveVsync a late frame tears instead of waiting a whole refresh)
-	cvar_t *swapInterval = ri.Cvar_Get( "r_swapInterval", "1", CVAR_ARCHIVE_ND );
-	cvar_t *adaptive = ri.Cvar_Get( "r_adaptiveVsync", "1", CVAR_ARCHIVE_ND );
+	cvar_t *swapInterval = VK_CvarGet( "r_swapInterval", "1", CVAR_ARCHIVE_ND );
+	cvar_t *adaptive = VK_CvarGet( "r_adaptiveVsync", "1", CVAR_ARCHIVE_ND );
 	// the loading screen is redrawn for every step of loading a level, do not wait for the display then
-	cvar_t *levelLoading = ri.Cvar_Get( "com_levelLoading", "0", 0 );
+	cvar_t *levelLoading = VK_CvarGet( "com_levelLoading", "0", 0 );
 	if ( swapInterval->integer == 0 || levelLoading->integer )
 	{
 		return immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : ( mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR );
@@ -929,17 +928,17 @@ bool VK_Init( glconfig_t *glConfig )
 {
 	Com_Printf( "Initializing Vulkan\n" );
 
-	r_vkValidation = ri.Cvar_Get( "r_vkValidation", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	r_vkDevice = ri.Cvar_Get( "r_vkDevice", "-1", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	r_vkProfile = ri.Cvar_Get( "r_vkProfile", "0", 0 );
+	r_vkValidation = VK_CvarGet( "r_vkValidation", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_vkDevice = VK_CvarGet( "r_vkDevice", "-1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_vkProfile = VK_CvarGet( "r_vkProfile", "0", 0 );
 	// 1: the next frame's input is read only once the frame before last is drawn and, with vsync, the last but one is
 	// on screen (VK_PresentFrame); 0: frames are queued as far as the driver lets them
-	r_lowLatency = ri.Cvar_Get( "r_lowLatency", "1", CVAR_ARCHIVE_ND );
-	r_vkRayTracing = ri.Cvar_Get( "r_vkRayTracing", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 0: never turn ray tracing on, even where the device has it
-	r_rayTracing = ri.Cvar_Get( "r_rayTracing", "0", CVAR_ARCHIVE_ND );
+	r_lowLatency = VK_CvarGet( "r_lowLatency", "1", CVAR_ARCHIVE_ND );
+	r_vkRayTracing = VK_CvarGet( "r_vkRayTracing", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );	// 0: never turn ray tracing on, even where the device has it
+	r_rayTracing = VK_CvarGet( "r_rayTracing", "0", CVAR_ARCHIVE_ND );
 
 	// cg_shadows 5 was the ray traced shadows before ray tracing had a setting of its own: the soft ones, ray traced
-	cvar_t *shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	cvar_t *shadows = VK_CvarGet( "cg_shadows", "1", 0 );
 	if ( shadows->integer == 5 )
 	{
 		ri.Cvar_Set( "cg_shadows", "4" );
@@ -962,7 +961,7 @@ bool VK_Init( glconfig_t *glConfig )
 		return false;
 	}
 	{
-		cvar_t *multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+		cvar_t *multisample = VK_CvarGet( "r_ext_multisample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 		vk.samples = VK_ChooseSamples( multisample->integer );
 		const int actual = vk.samples == VK_SAMPLE_COUNT_1_BIT ? 0 : (int)vk.samples;
 		if ( actual != multisample->integer )
@@ -1000,7 +999,9 @@ bool VK_Init( glconfig_t *glConfig )
 	glConfig->clampToEdgeAvailable = qtrue;
 	glConfig->textureEnvAddAvailable = qtrue;
 	glConfig->textureCompression = TC_NONE;
+#ifndef RD_VULKAN_MP
 	glConfig->doStencilShadowsInOneDrawcall = qtrue;
+#endif
 	glConfig->maxTextureFilterAnisotropy = vk.features.samplerAnisotropy ? vk.properties.limits.maxSamplerAnisotropy : 0.0f;
 	ri.Cvar_SetValue( "r_ext_texture_filter_anisotropic_avail", glConfig->maxTextureFilterAnisotropy );
 

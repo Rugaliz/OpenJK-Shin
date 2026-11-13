@@ -1139,6 +1139,18 @@ void RB_CalcSpecularAlpha( unsigned char *alphas ) {
 **
 ** The basic vertex lighting calc
 */
+// lit by the level's lamps (r_lampLighting): the ambient light, and each light from its own direction
+static void RB_CalcLampsColor( const trRefEntity_t *ent, const float *normal, float rgb[3] )
+{
+	VectorCopy( ent->ambientLight, rgb );
+	for ( int l = 0; l < ent->numLights; l++ ) {
+		const float incoming = DotProduct( normal, ent->lightDirs[l] );
+		if ( incoming > 0.0f ) {
+			VectorMA( rgb, incoming, ent->lightColors[l], rgb );
+		}
+	}
+}
+
 void RB_CalcDiffuseColor( unsigned char *colors )
 {
 	int				i, j;
@@ -1161,6 +1173,17 @@ void RB_CalcDiffuseColor( unsigned char *colors )
 	normal = tess.normal[0];
 
 	numVertexes = tess.numVertexes;
+	if ( ent->numLights ) {
+		for ( i = 0 ; i < numVertexes ; i++, normal += 4 ) {
+			float rgb[3];
+			RB_CalcLampsColor( ent, normal, rgb );
+			for ( j = 0; j < 3; j++ ) {
+				colors[i*4+j] = (unsigned char)Q_min( Q_ftol( rgb[j] ), 255 );
+			}
+			colors[i*4+3] = 255;
+		}
+		return;
+	}
 	for (i = 0 ; i < numVertexes ; i++, v += 4, normal += 4) {
 		incoming = DotProduct (normal, lightDir);
 		if ( incoming <= 0 ) {
@@ -1220,6 +1243,19 @@ void RB_CalcDiffuseEntityColor( unsigned char *colors )
 	r = backEnd.currentEntity->e.shaderRGBA[0]/255.0f;
 	g = backEnd.currentEntity->e.shaderRGBA[1]/255.0f;
 	b = backEnd.currentEntity->e.shaderRGBA[2]/255.0f;
+
+	if ( ent->numLights ) {
+		normal = tess.normal[0];
+		for ( i = 0 ; i < tess.numVertexes ; i++, normal += 4 ) {
+			float rgb[3];
+			RB_CalcLampsColor( ent, normal, rgb );
+			colors[i*4+0] = Q_ftol( Q_min( rgb[0], 255.0f ) * r );
+			colors[i*4+1] = Q_ftol( Q_min( rgb[1], 255.0f ) * g );
+			colors[i*4+2] = Q_ftol( Q_min( rgb[2], 255.0f ) * b );
+			colors[i*4+3] = backEnd.currentEntity->e.shaderRGBA[3];
+		}
+		return;
+	}
 
 	((byte *)&ambientLightInt)[0] = Q_ftol( r*ent->ambientLight[0] );
 	((byte *)&ambientLightInt)[1] = Q_ftol( g*ent->ambientLight[1] );

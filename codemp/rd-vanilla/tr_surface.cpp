@@ -247,6 +247,7 @@ void RB_SurfacePolychain( srfPoly_t *p ) {
 	int		numv;
 
 	RB_CHECKOVERFLOW( p->numVerts, 3*(p->numVerts - 2) );
+	tess.effectPolys = true;	// (the polygons the effects add: soft particles)
 
 	// fan triangles into the tess array
 	numv = tess.numVertexes;
@@ -1695,6 +1696,11 @@ static bool RB_TestZFlare( vec3_t point) {
 	if ( r_flares->integer !=1 ) {	//skipping the the z-test
 		return true;
 	}
+#ifdef RD_VULKAN
+	// (the depth there two frames before, read without waiting for the GPU)
+	return VK_FlareVisible( point, (int)( backEnd.viewParms.viewportX + window[0] ), (int)( backEnd.viewParms.viewportY + window[1] ), eye[2],
+		backEnd.viewParms.projectionMatrix[10], backEnd.viewParms.projectionMatrix[11], backEnd.viewParms.projectionMatrix[14] );
+#endif
 	// doing a readpixels is as good as doing a glFinish(), so
 	// don't bother with another sync
 	glState.finishCalled = qfalse;

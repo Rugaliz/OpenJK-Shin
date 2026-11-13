@@ -27,7 +27,12 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "rd-common/tr_public.h"
 #include "rd-common/tr_common.h"
 #include "ghoul2/ghoul2_shared.h" //rwwRMG - added
+#ifdef RD_VULKAN
+#include "../../code/rd-vulkan/qgl.h"	// the Vulkan renderer module: qgl* calls are answered by rd-vulkan/vk_gl.cpp
+#include "../../code/rd-vulkan/vk_local.h"
+#else
 #include "qgl.h"
+#endif
 
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
 typedef unsigned int glIndex_t;
@@ -131,6 +136,8 @@ typedef struct
 
 // a trRefEntity_t has all the information passed in by
 // the client game, as well as some locally derived info
+#define MAX_ENTITY_LIGHTS	5	// the lamps of the level (LAMPS_AT_MAX) and the dynamic lights as one
+
 typedef struct trRefEntity_s {
 	refEntity_t	e;
 
@@ -147,6 +154,10 @@ typedef struct trRefEntity_s {
 	// would turn towards themselves and darken): world space, towards it, and the share of it from that direction
 	vec3_t		shadowLightDir;
 	float		shadowStrength;
+	// lit by the level's lamps (r_lampLighting, R_SetupEntityLamps): each from its own direction (local, as lightDir)
+	int			numLights;
+	vec3_t		lightDirs[MAX_ENTITY_LIGHTS];
+	vec3_t		lightColors[MAX_ENTITY_LIGHTS];
 } trRefEntity_t;
 
 
@@ -1546,6 +1557,7 @@ struct shaderCommands_s
 	int			registration;
 
 	qboolean	SSInitializedWind;
+	bool		effectPolys;	// polygons of effects are in it (RB_SurfacePolychain: soft particles)
 
 	//rww - doing a fade, don't compute shader color/alpha overrides
 	bool		fading;
@@ -1941,6 +1953,11 @@ void	RB_PostProcess( void );
 #include "renderer/tr_shadow_maps.h"	// (the shadow maps of the characters)
 qboolean	R_Post_GammaAvailable( void );
 void	RB_GammaPass( void );	// brightness and overbright for the whole picture (tr_post.h)
+// The soft particles (r_softParticles, vk_post.cpp; none in OpenGL): once the opaque surfaces of a view are drawn,
+// their depth is kept; then a stage of an effect drawn between RB_SoftParticles( units ) and RB_SoftParticles( 0 )
+// fades out within units in front of it (qfalse: it can't)
+void	RB_SoftParticlesBegin( void );
+qboolean	RB_SoftParticles( float units );
 
 // tr_backend.cpp
 void	SetViewportAndScissor( void );

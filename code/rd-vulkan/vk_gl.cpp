@@ -22,8 +22,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // The calls only record state (blend, depth, stencil, texture units, matrices, arrays...). A draw turns the state
 // into a pipeline and the vertex arrays into a buffer (vk_draw.cpp). Calls that are not implemented yet do nothing.
 
-#include "../server/exe_headers.h"
-#include "../rd-vanilla/tr_local.h"
+#include "vk_renderer.h"	// (the single or multiplayer renderer)
 #include "vk_priv.h"
 #include <vector>
 

@@ -85,7 +85,8 @@ Settings are named as they appear in the game's menus. The console command is gi
 
 ### Graphics
 - **Vulkan renderer** in single player: a modern graphics interface, used automatically. If your system can't run it,
-  the game uses OpenGL instead and shows a short note saying why. Multiplayer uses OpenGL.
+  the game uses OpenGL instead and shows a short note saying why. Multiplayer has it too, with everything that comes
+  with it (ray tracing, soft particles, lamp lighting), and keeps its 125 frames a second.
 - **Anti-aliasing and texture filtering** for clean edges and sharp textures at an angle, from the menus.
 - **Smoother level lighting**: the lighting baked into the levels is stored coarsely and showed steps along the edges
   of shadows; it is now smoothed as the level loads, without changing the lighting itself.
@@ -180,8 +181,8 @@ them, the mouse wheel, or the arrow keys.
 ### Ray Tracing
 
 Ray tracing works out light and shadow by tracing the path of light through the level, which makes shadows exact. It
-needs the Vulkan renderer (the default in single player) and a graphics card with ray tracing: AMD Radeon RX 6000 or
-newer, NVIDIA GeForce RTX, or Intel Arc. It is not available in multiplayer.
+needs the Vulkan renderer (the default) and a graphics card with ray tracing: AMD Radeon RX 6000 or newer, NVIDIA
+GeForce RTX, or Intel Arc. It works in single player and in multiplayer.
 
 With Ray Tracing on:
 

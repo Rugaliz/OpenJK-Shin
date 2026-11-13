@@ -87,7 +87,7 @@ the CPU), against 1.2 ms for the stencil shadows.
 
 ## Ray traced shadows (`r_rayTracing`)
 
-Setup > More Video > Ray Tracing: Off, Medium (`r_rayTracing 1`) or High (`r_rayTracing 2`), in single player with the
+Setup > More Video > Ray Tracing: Off, Medium (`r_rayTracing 1`) or High (`r_rayTracing 2`), in all four games with the
 Vulkan renderer on a graphics card with ray tracing (`r_rtAvail` 1, see
 [the Vulkan renderer](vulkan-renderer.md#ray-tracing-for-shadows-in-progress)). It is a setting of its own, apart from
 Shadows: with it on, the shadows of the characters are ray traced whenever Shadows is Volumetric or Soft (with None or
@@ -129,7 +129,9 @@ few steps, a ledge), and a lamp's shadow fades where the ground is further from 
 character (it has less of the lamp's light there to lose), so it is not thrown dark onto ground far below.
 
 **The characters lit by the lamps** (`r_lampLighting`: 1, the default, with Ray Tracing on; 2 always, OpenGL too; 0
-never; Setup > More Video > Lamp Lighting in single player). A character, an item or a weapon is lit by the level's light grid: an amount of light from all around and one
+never; Setup > More Video > Lamp Lighting in single player and Jedi Academy multiplayer). In multiplayer which lamps a
+character sees is traced through the client's own copy of the level's collision (loaded with the level for the
+prediction of movement), in single player through the server's. A character, an item or a weapon is lit by the level's light grid: an amount of light from all around and one
 from a single direction, into which the map compiler added up the lamps around. Where the level has its lamps, that
 directed light is shared out between the lamps that light the character and that it can see, each from its own side
 and in its own colour and light style (a flickering lamp flickers on it): a character is lit from where the lamps

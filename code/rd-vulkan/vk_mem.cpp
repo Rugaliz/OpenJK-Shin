@@ -21,8 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // Device memory for the Vulkan renderer module: big blocks that textures are placed in, so that the number of
 // allocations stays far below the limit of the driver (4096 on some). First fit with free ranges that merge again.
 
-#include "../server/exe_headers.h"
-#include "../rd-vanilla/tr_local.h"
+#include "vk_renderer.h"	// (the single or multiplayer renderer)
 #include "vk_priv.h"
 #include <vector>
 

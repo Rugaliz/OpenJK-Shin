@@ -30,7 +30,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../qcommon/qcommon.h"
 #include "../ghoul2/ghoul2_shared.h"
 
-#define	REF_API_VERSION 11
+#define	REF_API_VERSION 12	// 12: the Vulkan functions of the window (VK_*)
 
 //
 // these are the functions exported by the refresh module
@@ -330,6 +330,11 @@ typedef struct refimport_s {
 	void			(*WIN_SetGamma)						( glconfig_t *glConfig, byte red[256], byte green[256], byte blue[256] );
 	void			(*WIN_Present)						( window_t *window );
 	void            (*WIN_Shutdown)                     ( void );
+
+	// Vulkan-specific (the Vulkan renderer module: the window code makes the surface, rd-vulkan the rest)
+	const char *const *	(*VK_GetInstanceExtensions)		( unsigned int *count );
+	qboolean		(*VK_CreateSurface)					( void *instance, void *surface );
+	void			(*VK_GetDrawableSize)				( int *width, int *height );
 
 	// OpenGL-specific
 	void *			(*GL_GetProcAddress)				( const char *name );

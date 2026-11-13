@@ -24,8 +24,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // depth images, every pass draws into an image of its own, and the result is drawn back over the view by the
 // renderer's ordinary drawing (so it ends up in the multisampled target like everything else).
 
-#include "../server/exe_headers.h"
-#include "../rd-vanilla/tr_local.h"
+#include "vk_renderer.h"	// (the single or multiplayer renderer)
 #include "renderer/tr_smaa_data.h"
 #include "vk_priv.h"
 #include "vk_spirv.h"
@@ -167,7 +166,7 @@ void R_GLSL_Init( void )
 {
 	glslGeneration++;
 	glslAvailable = r_glsl->integer ? qtrue : qfalse;
-	ri.Cvar_Get( "r_glslAvail", "0", 0 );
+	VK_CvarGet( "r_glslAvail", "0", 0 );
 	ri.Cvar_Set( "r_glslAvail", glslAvailable ? "1" : "0" );	// what the menus look at to show the rows for what needs it
 	if ( glslAvailable )
 	{
@@ -1510,7 +1509,7 @@ void RB_SoftParticlesBegin( void )
 	static cvar_t *soft = NULL;
 	if ( !soft )
 	{
-		soft = ri.Cvar_Get( "r_softParticles", "1", CVAR_ARCHIVE_ND );
+		soft = VK_CvarGet( "r_softParticles", "1", CVAR_ARCHIVE_ND );
 	}
 	post.softReady = false;
 	if ( !soft->integer || !post.ready || post.softFailed || backEnd.viewParms.isPortal || ( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
@@ -1568,13 +1567,13 @@ START AND END
 void R_Post_Init( void )
 {
 	// (what the menus look at to show the rows for what needs it)
-	ri.Cvar_Get( "r_postAvail", "0", 0 );
+	VK_CvarGet( "r_postAvail", "0", 0 );
 	ri.Cvar_Set( "r_postAvail", post.ready ? "1" : "0" );
-	ri.Cvar_Get( "r_smaaAvail", "0", 0 );
+	VK_CvarGet( "r_smaaAvail", "0", 0 );
 	ri.Cvar_Set( "r_smaaAvail", post.ready && post.smaaOk ? "1" : "0" );
-	ri.Cvar_Get( "r_softAvail", "0", 0 );
+	VK_CvarGet( "r_softAvail", "0", 0 );
 	ri.Cvar_Set( "r_softAvail", post.ready ? "1" : "0" );	// (the soft particles, RB_SoftParticlesBegin)
-	ri.Cvar_Get( "r_shadowMapsAvail", "0", 0 );
+	VK_CvarGet( "r_shadowMapsAvail", "0", 0 );
 	ri.Cvar_Set( "r_shadowMapsAvail", R_ShadowMaps_Available() ? "1" : "0" );
 	// (r_rtAvail, for the Ray Traced shadows, is set by VK_RT_Init)
 	if ( post.ready )
@@ -1586,7 +1585,7 @@ void R_Post_Init( void )
 void VK_InitPost( void )
 {
 	memset( &post, 0, sizeof( post ) );
-	r_rtDebug = ri.Cvar_Get( "r_rtDebug", "0", 0 );
+	r_rtDebug = VK_CvarGet( "r_rtDebug", "0", 0 );
 	post.passClear = NewRenderPass( false );
 	post.passLoad = NewRenderPass( true );
 

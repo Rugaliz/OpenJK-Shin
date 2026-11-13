@@ -23,8 +23,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // levels the renderer does not upload are simply not sampled), always RGBA8. Uploads go through a staging buffer
 // and a command buffer of their own that is sent before the frame's drawing.
 
-#include "../server/exe_headers.h"
-#include "../rd-vanilla/tr_local.h"
+#include "vk_renderer.h"	// (the single or multiplayer renderer)
 #include "vk_priv.h"
 #include <vector>
 

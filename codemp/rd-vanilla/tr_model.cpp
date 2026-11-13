@@ -1654,6 +1654,10 @@ void RE_BeginRegistration( glconfig_t *glconfigOut ) {
 	R_Init();
 
 	*glconfigOut = glConfig;
+	if ( glConfig.vidWidth == 0 )
+	{
+		return;	// (the renderer could not start: the engine loads the OpenGL one)
+	}
 
 	R_IssuePendingRenderCommands();
 

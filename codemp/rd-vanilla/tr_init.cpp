@@ -833,7 +833,7 @@ static const char *TruncateGLExtensionsString (const char *extensionsString, int
 ** setting variables, checking GL constants, and reporting the gfx system config
 ** to the user.
 */
-static void InitOpenGL( void )
+static qboolean InitOpenGL( void )
 {
 	//
 	// initialize OS specific portions of the renderer
@@ -848,12 +848,30 @@ static void InitOpenGL( void )
 
 	if ( glConfig.vidWidth == 0 )
 	{
+#ifdef RD_VULKAN
+		windowDesc_t windowDesc = { GRAPHICS_API_VULKAN };
+#else
 		windowDesc_t windowDesc = { GRAPHICS_API_OPENGL };
+#endif
 		memset(&glConfig, 0, sizeof(glConfig));
 		memset(&glConfigExt, 0, sizeof(glConfigExt));
 
 		window = ri.WIN_Init(&windowDesc, &glConfig);
 
+#ifdef RD_VULKAN
+		if ( glConfig.vidWidth == 0 )
+		{
+			return qfalse;	// (no window for Vulkan: the engine loads the OpenGL renderer)
+		}
+		// Vulkan device, swapchain and the capabilities the renderer asks glConfig about
+		if ( !VK_Init( &glConfig ) )
+		{
+			// (no usable Vulkan: the engine sees a size of 0 and loads the OpenGL renderer)
+			glConfig.vidWidth = 0;
+			return qfalse;
+		}
+		glConfigExt.originalExtensionString = glConfig.extensions_string;
+#else
 		Com_Printf( "GL_RENDERER: %s\n", (char *)qglGetString (GL_RENDERER) );
 
 		// get our config strings
@@ -873,6 +891,7 @@ static void InitOpenGL( void )
 
 		// initialize extensions
 		GLimp_InitExtensions( );
+#endif
 
 		// set default state
 		GL_SetDefaultState();
@@ -883,6 +902,7 @@ static void InitOpenGL( void )
 		// set default state
 		GL_SetDefaultState();
 	}
+	return qtrue;
 }
 
 /*
@@ -1892,7 +1912,10 @@ void R_Init( void ) {
 	{
 		RE_SetLightStyle(i, -1);
 	}
-	InitOpenGL();
+	if ( !InitOpenGL() )
+	{
+		return;	// (glConfig.vidWidth 0: the engine loads the OpenGL renderer)
+	}
 
 	R_InitImages();
 	R_InitShaders(qfalse);
@@ -1993,6 +2016,9 @@ void RE_Shutdown( qboolean destroyWindow, qboolean restarting ) {
 
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
+#ifdef RD_VULKAN
+		VK_Shutdown();
+#endif
 		ri.WIN_Shutdown();
 	}
 

@@ -73,7 +73,7 @@ original game modules, keeps its lights as they were.
 
 ## Soft particles (`r_softParticles`, default 1, Vulkan)
 
-Setup > More Video > Soft Particles (single player, with the Vulkan renderer).
+Setup > More Video > Soft Particles (with the Vulkan renderer; single player, and Jedi Academy multiplayer).
 
 The sprites of effects (smoke, sparks, explosions, the glow of sabers and blaster bolts) are flat pictures, and where
 one goes into a wall or the floor it used to end in a hard straight line. They now fade out within 6 units in front of

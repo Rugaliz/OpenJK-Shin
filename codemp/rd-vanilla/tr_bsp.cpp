@@ -1896,6 +1896,7 @@ void R_LoadEntities( lump_t *l, world_t &worldData ) {
 	tr.distanceCull = 6000;//DEFAULT_DISTANCE_CULL;
 
 	p = (char *)(fileBase + l->fileofs);
+	R_ShadowLampsLoad( p, l->filelen );	// (all the entities: the lamps' shadows and light, tr_shadow_volumes.h)
 
 	// store for reference by the cgame
 	w->entityString = (char *)Hunk_Alloc( l->filelen + 1, h_low );
@@ -2118,5 +2119,8 @@ void RE_LoadWorldMap( const char *name )
 {
 	ri.CM_SetUsingCache( qtrue );
 	RE_LoadWorldMap_Actual( name, s_worldData, 0 );
+#ifdef RD_VULKAN
+	VK_RT_NewLevel();
+#endif
 	ri.CM_SetUsingCache( qfalse );
 }

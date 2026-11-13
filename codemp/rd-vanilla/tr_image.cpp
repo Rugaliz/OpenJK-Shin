@@ -1372,6 +1372,7 @@ void R_CreateBuiltinImages( void ) {
 	qglTexParameteri( GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP );
 	qglDisable( GL_TEXTURE_RECTANGLE_ARB );
 
+#ifndef RD_VULKAN	// (Vulkan applies the gamma in its own pass: vk_post.cpp)
 	if ( glConfigExt.doGammaCorrectionWithShaders )
 	{
 		qglEnable( GL_TEXTURE_3D );
@@ -1385,6 +1386,7 @@ void R_CreateBuiltinImages( void ) {
 		qglTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		qglDisable(GL_TEXTURE_3D);
 	}
+#endif
 
 	qglEnable(GL_TEXTURE_2D);
 
@@ -1529,9 +1531,11 @@ void R_SetGammaCorrectionLUT()
 			}
 		}
 
+#ifndef RD_VULKAN
 		qglBindTexture(GL_TEXTURE_3D, tr.gammaCorrectLUTImage);
 		qglPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 		qglTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, 64, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, lutTable);
+#endif
 
 		ri.Hunk_FreeTempMemory(lutTable);
 	}

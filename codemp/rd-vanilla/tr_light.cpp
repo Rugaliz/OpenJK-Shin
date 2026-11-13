@@ -24,6 +24,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // tr_light.c
 
 #include "tr_local.h"
+#include <vector>
+#include <algorithm>
 
 #define	DLIGHT_AT_RADIUS		16
 // at the edge of a dlight's influence, this amount of light will be added
@@ -298,6 +300,138 @@ static void LogLight( trRefEntity_t *ent ) {
 
 /*
 =================
+THE LIGHT OF THE LEVEL'S LAMPS (r_lampLighting)
+
+The light grid gives an entity the level's light at its place as an amount from all around (ambient) and one from a
+single direction (directed): the map compiler added the lamps' light there into that one direction. With lamp
+lighting the directed light is instead that of the lamps themselves that light the entity most and that it can see
+(the level's "light" entities, tr_shadow_volumes.h), each from its own side, in its own colour and light style: a
+character is lit from where the lamps are, and darker where a ledge or a pillar hides one, as its shadows say. It is
+never lit more than the grid says (the level's look stays as it was made: the lamps only share that light out, and
+take some away where they are hidden), and the ambient light stays the grid's. The lamps' light is in the map
+compiler's units; what that is in the grid's is found once for a level, from points of its grid (the median of the
+grid's directed light over the lamps' light there). Where no lamp is seen, and in levels without lamps (most of Jedi
+Academy), the grid's light as before.
+=================
+*/
+
+#define LAMP_SCALE_SAMPLES	160
+
+// 0 off, 1 with Ray Tracing (which casts the characters' shadows from the same lamps), 2 always
+static qboolean R_LampLighting( void ) {
+	static cvar_t *lampLighting = NULL;
+	if ( !lampLighting ) {
+		lampLighting = ri.Cvar_Get( "r_lampLighting", "1", CVAR_ARCHIVE_ND, "Characters lit from the level's own lamps: 0 off, 1 with ray tracing, 2 always" );
+	}
+	return ( lampLighting->integer >= 2 || ( lampLighting->integer == 1 && R_RayTracing() ) ) ? qtrue : qfalse;
+}
+
+// the lamps' light at a point, in the map compiler's units, without their colour
+static float R_LampsLightAt( const vec3_t point ) {
+	const lampChoice_t *choice = R_LampsAt( point );
+	float sum = 0.0f;
+	for ( int i = 0; i < choice->count; i++ ) {
+		vec3_t origin, color;
+		float luminance;
+		int style;
+		R_LampInfo( choice->lamps[i], origin, color, &luminance, &style );
+		sum += choice->weights[i] / luminance;
+	}
+	return sum;
+}
+
+// how much of the grid's directed light one unit of the lamps' light is, in this level (0 when it can't be told)
+static float R_LampScale( void ) {
+	static const world_t	*level = NULL;
+	static float			scale = 0.0f;
+
+	if ( level == tr.world ) {
+		return scale;
+	}
+	level = tr.world;
+	scale = 0.0f;
+
+	const int *bounds = tr.world->lightGridBounds;
+	const int total = bounds[0] * bounds[1] * bounds[2];
+	const int stride = Q_max( 1, total / ( LAMP_SCALE_SAMPLES * 8 ) );
+	std::vector<float> ratios;
+	for ( int i = 0; i < total && (int)ratios.size() < LAMP_SCALE_SAMPLES; i += stride ) {
+		const int cell[3] = { i % bounds[0], ( i / bounds[0] ) % bounds[1], i / ( bounds[0] * bounds[1] ) };
+		trRefEntity_t probe;
+		memset( &probe, 0, sizeof( probe ) );
+		for ( int k = 0; k < 3; k++ ) {
+			probe.e.origin[k] = tr.world->lightGridOrigin[k] + cell[k] * tr.world->lightGridSize[k];
+		}
+		if ( ri.CM_PointContents( probe.e.origin, 0 ) & CONTENTS_SOLID ) {
+			continue;
+		}
+		R_SetupEntityLightingGrid( &probe );
+		const float directed = Q_max( probe.directedLight[0], Q_max( probe.directedLight[1], probe.directedLight[2] ) );
+		if ( directed < 16.0f || directed > 200.0f ) {
+			continue;	// (too dark to tell, or near where the grid's values are cut off)
+		}
+		const float lamps = R_LampsLightAt( probe.e.origin );
+		if ( lamps > 0.0f ) {
+			ratios.push_back( directed / lamps );
+		}
+	}
+	if ( ratios.size() >= 8 ) {
+		std::nth_element( ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end() );
+		scale = ratios[ratios.size() / 2];
+	}
+	ri.Printf( PRINT_DEVELOPER, "lamp lighting: %d points of the grid, scale %g\n", (int)ratios.size(), scale );
+	return scale;
+}
+
+// The lamps' light at the entity (world directions into dirs), the lamps as one light in directedLight and lightDir
+// for what else reads them, and the shadows' direction from the brightest. Returns how many lamps.
+static int R_SetupEntityLamps( const trRefdef_t *refdef, trRefEntity_t *ent, const vec3_t lightOrigin, vec3_t *dirs ) {
+	if ( !R_LampLighting() || ( refdef->rdflags & RDF_NOWORLDMODEL ) || !tr.world || !tr.world->lightGridData ||
+		 r_fullbright->integer ) {
+		return 0;
+	}
+	const float scale = R_LampScale();
+	if ( scale <= 0.0f ) {
+		return 0;
+	}
+	const lampChoice_t *choice = R_LampsAt( lightOrigin );
+	vec3_t total = { 0.0f, 0.0f, 0.0f }, toward = { 0.0f, 0.0f, 0.0f };
+	for ( int i = 0; i < choice->count; i++ ) {
+		vec3_t origin, color;
+		float luminance;
+		int style;
+		R_LampInfo( choice->lamps[i], origin, color, &luminance, &style );
+		const float add = scale * choice->weights[i] / luminance;
+		for ( int k = 0; k < 3; k++ ) {
+			ent->lightColors[i][k] = add * color[k] * styleColors[style][k] / 255.0f;
+		}
+		VectorSubtract( origin, lightOrigin, dirs[i] );
+		VectorNormalize( dirs[i] );
+		VectorAdd( total, ent->lightColors[i], total );
+		VectorMA( toward, Q_max( ent->lightColors[i][0], Q_max( ent->lightColors[i][1], ent->lightColors[i][2] ) ), dirs[i], toward );
+	}
+	if ( choice->count ) {
+		// no more than the grid's light here
+		const float grid = Q_max( ent->directedLight[0], Q_max( ent->directedLight[1], ent->directedLight[2] ) );
+		const float lamps = Q_max( total[0], Q_max( total[1], total[2] ) );
+		if ( lamps > grid ) {
+			const float f = grid / lamps;
+			for ( int i = 0; i < choice->count; i++ ) {
+				VectorScale( ent->lightColors[i], f, ent->lightColors[i] );
+			}
+			VectorScale( total, f, total );
+		}
+		VectorCopy( total, ent->directedLight );
+		if ( VectorNormalize( toward ) > 0.0f ) {
+			VectorCopy( toward, ent->lightDir );
+		}
+		VectorCopy( dirs[0], ent->shadowLightDir );	// (the brightest)
+	}
+	return choice->count;
+}
+
+/*
+=================
 R_SetupEntityLighting
 
 Calculates all the lighting values that will be used
@@ -377,6 +511,11 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 		ent->shadowStrength = ( directed + ambient > 1.0f ) ? directed / ( directed + ambient ) : 0.5f;
 	}
 
+	// the lamps' light instead of the grid's one direction (r_lampLighting)
+	vec3_t lightDirs[MAX_ENTITY_LIGHTS];
+	ent->numLights = R_SetupEntityLamps( refdef, ent, lightOrigin, lightDirs );
+	vec3_t dlightColor = { 0.0f, 0.0f, 0.0f }, dlightDir = { 0.0f, 0.0f, 0.0f };
+
 	//
 	// modify the light by dynamic lights
 	//
@@ -396,6 +535,14 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 
 		VectorMA( ent->directedLight, d, dl->color, ent->directedLight );
 		VectorMA( lightDir, d, dir, lightDir );
+		VectorMA( dlightColor, d, dl->color, dlightColor );
+		VectorMA( dlightDir, d, dir, dlightDir );
+	}
+	// lit by the lamps, the dynamic lights are one more light
+	if ( ent->numLights && ent->numLights < MAX_ENTITY_LIGHTS && VectorNormalize( dlightDir ) > 0.0f ) {
+		VectorCopy( dlightColor, ent->lightColors[ent->numLights] );
+		VectorCopy( dlightDir, lightDirs[ent->numLights] );
+		ent->numLights++;
 	}
 
 	// clamp ambient
@@ -420,6 +567,11 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	ent->lightDir[0] = DotProduct( lightDir, ent->e.axis[0] );
 	ent->lightDir[1] = DotProduct( lightDir, ent->e.axis[1] );
 	ent->lightDir[2] = DotProduct( lightDir, ent->e.axis[2] );
+	for ( i = 0; i < ent->numLights; i++ ) {
+		for ( int k = 0; k < 3; k++ ) {
+			ent->lightDirs[i][k] = DotProduct( lightDirs[i], ent->e.axis[k] );
+		}
+	}
 }
 
 /*

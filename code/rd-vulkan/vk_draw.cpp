@@ -21,8 +21,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // Drawing for the Vulkan renderer module: the pipelines (one per combination of fixed function state), the buffers
 // the vertices of a draw are written to, and the descriptor sets for its textures.
 
-#include "../server/exe_headers.h"
-#include "../rd-vanilla/tr_local.h"
+#include "vk_renderer.h"	// (the single or multiplayer renderer)
 #include "vk_priv.h"
 #include "vk_spirv.h"
 #include <unordered_map>

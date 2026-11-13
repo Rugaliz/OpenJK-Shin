@@ -8854,6 +8854,9 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		{ "dlightglsl", "r_dlightGLSL", "r_glslAvail", "Shader Dynamic Lights:", "Light from sabers, blasters and explosions follows the shape of what it falls on. Detailed: it picks out the bumps of the surface too." },
 		{ "lightshafts", "r_lightShafts", "r_postAvail", "Light Shafts:", "Rays of sunlight through gaps and around edges, on levels with a sun." },
 		{ "eyeadaptation", "r_eyeAdaptation", "r_postAvail", "Eye Adaptation:", "Dark places brighten as your eyes get used to them, over a second or two." },
+		{ "raytracing", "r_rayTracing", "r_rtAvail", "Ray Tracing:", "Exact shadows of the characters, and the light of sabers, blasters and explosions stops at walls. High: smoother shadows, slower." },
+		{ "lamplighting", "r_lampLighting", NULL, "Lamp Lighting:", "Characters lit from the level's own lamps, each from its side, as their shadows say." },
+		{ "softparticles", "r_softParticles", "r_softAvail", "Soft Particles:", "Smoke, sparks and glows fade where they meet walls and floors, instead of ending in a hard line." },
 	};
 	itemDef_t	*rows[24];
 	int			numRows = 0;
@@ -8956,6 +8959,18 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		row->cvarFlags = 0;
 		if ( !Q_stricmp( effects[e].name, "shadows" ) )
 			Item_MakeShadowsRow( row );
+		else if ( ( !Q_stricmp( effects[e].name, "raytracing" ) || !Q_stricmp( effects[e].name, "lamplighting" ) ) &&
+				  row->typeData.multi && row->typeData.multi->count == 2 )
+		{
+			// off (copied), then two steps: the qualities of the rays; with ray tracing (the default) or always
+			const qboolean rt = !Q_stricmp( effects[e].name, "raytracing" ) ? qtrue : qfalse;
+			row->typeData.multi->cvarList[1] = String_Alloc( rt ? "Medium" : "With Ray Tracing" );
+			row->typeData.multi->cvarValue[1] = 1.0f;
+			row->typeData.multi->cvarList[2] = String_Alloc( rt ? "High" : "Always" );
+			row->typeData.multi->cvarValue[2] = 2.0f;
+			row->typeData.multi->count = 3;
+			row->typeData.multi->strDef = qfalse;
+		}
 		else if ( !Q_stricmp( effects[e].name, "dlightglsl" ) && row->typeData.multi && row->typeData.multi->count == 2 )
 		{
 			// off, on (copied), and on with the bumps of the surface
@@ -8967,7 +8982,19 @@ static void Menu_AddEffectRows( menuDef_t *menu )
 		rows[numRows++] = row;
 	}
 
-	if ( !driverButton )
+	if ( driverButton )
+	{
+		// main menu: closer rows when they would run past the bottom of the screen (the driver info under them)
+		const float rowsFit = ( 480 - 4 - ( barHeight + 2 ) - 2 - firstY ) / numRows;
+		if ( pitch > rowsFit )
+		{
+			const float shrink = floorf( rowsFit ) / pitch;
+			pitch = barHeight = floorf( rowsFit );
+			for ( i = 0; i < numRows; i++ )
+				rows[i]->textscale *= shrink;
+		}
+	}
+	else
 	{
 		const float rowsFit = ( 291 - 4 - firstY ) / numRows;
 		if ( pitch > rowsFit )
