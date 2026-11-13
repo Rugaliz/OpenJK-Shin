@@ -115,11 +115,12 @@ extern uiimport_t	ui;
 
 
 #define MAX_MOVIES 256
-#define MAX_MODS 64
+#define MAX_MODS 320	// (the packages of the mods folders, then the mod folders)
 
 typedef struct {
 	const char *modName;
 	const char *modDescr;
+	int package;			// a package of the mods folders (FS_Packages_*), -1 for a mod folder
 } modInfo_t;
 
 #define SKIN_LENGTH			16

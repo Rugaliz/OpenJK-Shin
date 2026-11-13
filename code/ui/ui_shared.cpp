@@ -1522,6 +1522,84 @@ static qboolean RowScroll_MouseMove( menuDef_t *menu, float y )
 
 /*
 ================
+Menu_CheckReplaced
+
+The rows this engine adds to the Setup menus are made from the stock menus' own rows (Menu_AddEffectRows,
+Menu_AddRealisticSaberRow). A mod that replaces such a menu with one of its own, without those rows, loses them:
+say which mod, and what is missing, instead of leaving them out without a word.
+================
+*/
+extern const char *FS_FileSource( const char *qpath, qboolean *isGame );
+static bool menuHookedEffectRows, menuHookedSaberRow;	// what was added to the menu being read (Menu_New)
+
+static void Menu_CheckReplaced( const menuDef_t *menu )
+{
+	if ( !menu->window.name )
+		return;
+	const char *file = !Q_stricmp( menu->window.name, "setupMenu" ) ? "ui/setup.menu" :
+		!Q_stricmp( menu->window.name, "ingameSetupMenu" ) ? "ui/ingamesetup.menu" : NULL;
+	if ( !file || ( menuHookedEffectRows && menuHookedSaberRow ) )
+		return;
+	qboolean isGame;
+	const char *source = FS_FileSource( file, &isGame );
+	if ( isGame || !source[0] )
+		return;
+	Com_Printf( S_COLOR_YELLOW "%s comes from %s, which replaces the game's: %s%s%s are not in it.\n", file, source,
+		menuHookedEffectRows ? "" : "the More Video rows of this engine (ambient occlusion, ray tracing...)",
+		!menuHookedEffectRows && !menuHookedSaberRow ? " and " : "",
+		menuHookedSaberRow ? "" : "the Realistic Saber Combat row" );
+}
+
+/*
+================
+Menu_AddModButtons
+
+The Mods page of Setup: its list (feeder 9) shows the packages of the mods folders before the mod folders
+(UI_LoadMods), and its rows can be chosen. Its Load Mod button becomes four: On / Off, Move Up, Move Down (for the
+packages: mods.txt) and Apply (the packages so, and the mod folder chosen, if one is: uiScript RunMod).
+================
+*/
+extern const char *UI_ModDescriptionText( void );
+
+static void Menu_AddModButtons( menuDef_t *menu, itemDef_t *load )
+{
+	static const struct { const char *text, *script, *desc; } buttons[] = {
+		{ "On / Off", "ModToggle", "Switches the chosen mod on or off (it takes effect with Apply)." },
+		{ "Move Up", "ModUp", "Loads the chosen mod earlier: a mod lower in the list wins where two change the same file." },
+		{ "Move Down", "ModDown", "Loads the chosen mod later: it wins over the ones above it where they change the same file." },
+		{ "Apply", "RunMod", "Loads the mods as the list has them now (and the mod folder chosen, if one is)." },
+	};
+	const float x = load->window.rectClient.x, y = load->window.rectClient.y, h = load->window.rectClient.h;
+	const float w = load->window.rectClient.w / ARRAY_LEN( buttons );
+	for ( size_t b = 0; b < ARRAY_LEN( buttons ); b++ )
+	{
+		itemDef_t *button = load;
+		if ( b < ARRAY_LEN( buttons ) - 1 )
+		{
+			if ( menu->itemCount >= MAX_MENUITEMS )
+				return;
+			button = (itemDef_t *)UI_Alloc( sizeof( itemDef_t ) );
+			memcpy( button, load, sizeof( itemDef_t ) );
+			button->window.name = (char *)String_Alloc( va( "modbutton%d", (int)b ) );
+			button->parent = menu;
+			menu->items[menu->itemCount++] = button;
+		}
+		button->window.rectClient.x = x + b * w;
+		button->window.rectClient.w = w;
+		button->textalignx = w * 0.5f;
+		button->textscale *= 0.85f;
+		button->text = (char *)String_Alloc( buttons[b].text );
+		button->descText = String_Alloc( buttons[b].desc );
+		button->action = String_Alloc( va( "\"play\" \"sound/interface/button1.wav\" \"uiScript\" \"%s\" ", buttons[b].script ) );
+		button->mouseEnter = String_Alloc( va( "\"show\" \"loadmod_button\" \"setitemrect\" \"loadmod_button\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ",
+			x + b * w, y, w, h ) );
+		button->mouseExit = String_Alloc( "\"hide\" \"loadmod_button\" " );
+	}
+	Com_Printf( "Turned the Load Mod button into the buttons of the mods list.\n" );
+}
+
+/*
+================
 Menu_AddRealisticSaberRow
 
 Setup > Options gets a row for the more realistic saber combat (precise collision, higher damage: g_saberRealisticCombat
@@ -1583,6 +1661,7 @@ static void Menu_AddRealisticSaberRow( menuDef_t *menu, itemDef_t *dismember )
 	}
 	menu->items[at] = row;
 	menu->itemCount++;
+	menuHookedSaberRow = true;
 	Com_Printf( "Added a realistic saber combat row to the options.\n" );
 }
 
@@ -1777,6 +1856,7 @@ static void Menu_AddEffectRows( menuDef_t *menu, itemDef_t *driverButton )
 #else
 	driverButton->mouseEnter = String_Alloc( va( "\"show\" \"%s\" \"setitemrect\" \"%s\" \"%.0f\" \"%.0f\" \"%.0f\" \"%.0f\" ", bar, bar, x, driverY, w, barHeight + 2 ) );
 #endif
+	menuHookedEffectRows = true;
 	Com_Printf( "More Video: %d rows (%d shown at once), the driver info at %.0f\n", numRows, visible, driverY );
 }
 
@@ -1800,6 +1880,30 @@ qboolean MenuParse_itemDef( itemDef_t *item )
 		newItem->parent = menu->items[menu->itemCount]->parent = menu;
 		menu->itemCount++;
 		Item_ApplyHacks( newItem );
+
+		if ( newItem->window.name && newItem->window.group && !Q_stricmp( newItem->window.group, "mods" ) )
+		{
+			if ( newItem->type == ITEM_TYPE_LISTBOX && newItem->special == FEEDER_MODS && newItem->typeData )
+			{
+				listBoxDef_t *listPtr = (listBoxDef_t *)newItem->typeData;
+				listPtr->notselectable = qfalse;	// (rows are chosen: On / Off, Move...)
+				// two columns: on or off, and the name (UI_FeederItemText); "maxChars" is a width in pixels here, as the
+				// stock list's 280 for its one column
+				const int width = (int)newItem->window.rectClient.w;
+				listPtr->numColumns = 2;
+				listPtr->columnInfo[0].pos = 2;
+				listPtr->columnInfo[0].width = 54;
+				listPtr->columnInfo[0].maxChars = 54;
+				listPtr->columnInfo[1].pos = 60;
+				listPtr->columnInfo[1].width = width - 60 - 24;
+				listPtr->columnInfo[1].maxChars = width - 60 - 24;
+				newItem->descText = UI_ModDescriptionText();
+			}
+			else if ( newItem->type == ITEM_TYPE_BUTTON && !Q_stricmp( newItem->window.name, "loadmod" ) )
+			{
+				Menu_AddModButtons( menu, newItem );
+			}
+		}
 
 		if ( newItem->type == ITEM_TYPE_MULTI && newItem->window.name && !Q_stricmp( newItem->window.name, "dismemberment" ) &&
 			 newItem->window.group && !Q_stricmp( newItem->window.group, "options" ) )
@@ -6560,10 +6664,12 @@ void Menu_New(char *buffer)
 	if (menuCount < MAX_MENUS)
 	{
 		Menu_Init(menu);
+		menuHookedEffectRows = menuHookedSaberRow = false;
 		if (Menu_Parse(buffer, menu))
 		{
 			Menu_PostParse(menu);
 			menuCount++;
+			Menu_CheckReplaced( menu );
 		}
 	}
 }

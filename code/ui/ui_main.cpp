@@ -553,6 +553,54 @@ void _UI_Refresh( int realtime )
 UI_LoadMods
 ===============
 */
+extern int FS_Packages_Count( void );
+extern qboolean FS_Packages_Describe( int i, char *row, int rowSize, char *desc, int descSize );
+extern void FS_Packages_Toggle( int i );
+extern int FS_Packages_Move( int i, int delta );
+
+// what the chosen line of the Mods page says (the list's description: Menu_AddModButtons)
+static char ui_modDescription[1024];
+
+const char *UI_ModDescriptionText( void )
+{
+	return ui_modDescription;
+}
+
+static void UI_DescribeMod( int index )
+{
+	ui_modDescription[0] = '\0';
+	if ( index < 0 || index >= uiInfo.modCount )
+	{
+		return;
+	}
+	if ( uiInfo.modList[index].package >= 0 )
+	{
+		char row[256];
+		FS_Packages_Describe( uiInfo.modList[index].package, row, sizeof( row ), ui_modDescription, sizeof( ui_modDescription ) );
+	}
+	else
+	{
+		Com_sprintf( ui_modDescription, sizeof( ui_modDescription ), "A mod folder (%s): Apply loads it, in place of the "
+			"base game's folder. The mods above are loaded with it.", uiInfo.modList[index].modName );
+	}
+}
+
+// the chosen line of the list, in the menu that is open
+static void UI_SetModCursor( int index )
+{
+	uiInfo.modIndex = index;
+	menuDef_t *menu = Menu_GetFocused();
+	itemDef_t *list = menu ? Menu_FindItemByName( menu, "serverinfo" ) : NULL;
+	if ( list && list->typeData && list->special == FEEDER_MODS )
+	{
+		listBoxDef_t *listPtr = (listBoxDef_t *)list->typeData;
+		listPtr->cursorPos = index;
+		if ( index < listPtr->startPos )
+			listPtr->startPos = index;
+	}
+	UI_DescribeMod( index );
+}
+
 static void UI_LoadMods() {
 	int		numdirs;
 	char	dirlist[MODSBUFSIZE];
@@ -563,13 +611,33 @@ static void UI_LoadMods() {
 
 	uiInfo.modCount = 0;
 
+	// the packages of the mods folders, in their order, then the mod folders
+	for ( i = 0; i < FS_Packages_Count() && uiInfo.modCount < MAX_MODS; i++ ) {
+		char row[256], desc[16];
+		if ( !FS_Packages_Describe( i, row, sizeof( row ), desc, sizeof( desc ) ) ) {
+			break;
+		}
+		uiInfo.modList[uiInfo.modCount].modName = String_Alloc( "" );
+		uiInfo.modList[uiInfo.modCount].modDescr = String_Alloc( row );
+		uiInfo.modList[uiInfo.modCount].package = i;
+		uiInfo.modCount++;
+	}
+
 	numdirs = FS_GetFileList( "$modlist", "", dirlist, sizeof(dirlist) );
 	dirptr  = dirlist;
 	for( i = 0; i < numdirs; i++ ) {
 		dirlen = strlen( dirptr ) + 1;
 		descptr = dirptr + dirlen;
 		uiInfo.modList[uiInfo.modCount].modName = String_Alloc(dirptr);
-		uiInfo.modList[uiInfo.modCount].modDescr = String_Alloc(descptr);
+		uiInfo.modList[uiInfo.modCount].modDescr = String_Alloc( *dirptr ? va( "Mod\t%s", *descptr ? descptr : dirptr ) :
+			va( "Game\t%s, no mod folder", *descptr ? descptr :
+#ifdef JK2_MODE
+			"Jedi Outcast"
+#else
+			"Jedi Academy"
+#endif
+			) );
+		uiInfo.modList[uiInfo.modCount].package = -1;
 		dirptr += dirlen + strlen(descptr) + 1;
 		uiInfo.modCount++;
 		if (uiInfo.modCount >= MAX_MODS) {
@@ -750,16 +818,24 @@ const char *UI_FeederItemText(float feederID, int index, int column, qhandle_t *
 	{
 		if (index >= 0 && index < uiInfo.modCount)
 		{
-			if (uiInfo.modList[index].modDescr && *uiInfo.modList[index].modDescr)
+			// "state<tab>name": two columns (Menu_AddModButtons), or the whole line in one
+			static char sColumn[256];
+			const char *psRow = ( uiInfo.modList[index].modDescr && *uiInfo.modList[index].modDescr ) ?
+				uiInfo.modList[index].modDescr : uiInfo.modList[index].modName;
+			const char *psTab = strchr( psRow, '\t' );
+			if ( !psTab )
 			{
-				return uiInfo.modList[index].modDescr;
+				return psRow;
 			}
-			else
+			if ( column == 0 )
 			{
-				return uiInfo.modList[index].modName;
+				Q_strncpyz( sColumn, psRow, Q_min( (int)sizeof( sColumn ), (int)( psTab - psRow ) + 1 ) );
+				return sColumn;
 			}
+			return psTab + 1;
 		}
 	}
+
 
 	return "";
 }
@@ -988,15 +1064,40 @@ static qboolean UI_RunMenuScript ( const char **args )
 		else if (Q_stricmp(name, "LoadMods") == 0)
 		{
 			UI_LoadMods();
+			if ( uiInfo.modIndex < 0 || uiInfo.modIndex >= uiInfo.modCount )
+				uiInfo.modIndex = 0;
+			UI_SetModCursor( uiInfo.modIndex );
 		}
 		else if (Q_stricmp(name, "RunMod") == 0)
 		{
-			if (uiInfo.modList[uiInfo.modIndex].modName)
+			// Apply: the packages as the list has them now, and the mod folder chosen (if one is)
+			const int index = uiInfo.modIndex;
+			if ( index >= 0 && index < uiInfo.modCount && uiInfo.modList[index].package < 0 && uiInfo.modList[index].modName )
 			{
-				Cvar_Set( "fs_game", uiInfo.modList[uiInfo.modIndex].modName);
-				extern	void FS_Restart( qboolean inPlace = qfalse );
-				FS_Restart();
-				Cbuf_ExecuteText( EXEC_APPEND, "vid_restart;" );
+				Cvar_Set( "fs_game", uiInfo.modList[index].modName);
+			}
+			extern	void FS_Restart( qboolean inPlace = qfalse );
+			FS_Restart();
+			Cbuf_ExecuteText( EXEC_APPEND, "vid_restart;" );
+		}
+		else if ( !Q_stricmp( name, "ModToggle" ) || !Q_stricmp( name, "ModUp" ) || !Q_stricmp( name, "ModDown" ) )
+		{
+			// a package of the mods folders: on or off, up or down the list (mods.txt; Apply loads them so)
+			const int index = uiInfo.modIndex;
+			if ( index >= 0 && index < uiInfo.modCount && uiInfo.modList[index].package >= 0 )
+			{
+				const int package = uiInfo.modList[index].package;
+				int to = index;
+				if ( !Q_stricmp( name, "ModToggle" ) )
+				{
+					FS_Packages_Toggle( package );
+				}
+				else
+				{
+					to = index + ( FS_Packages_Move( package, !Q_stricmp( name, "ModUp" ) ? -1 : 1 ) - package );
+				}
+				UI_LoadMods();
+				UI_SetModCursor( to );
 			}
 		}
 		else if (Q_stricmp(name, "Quit") == 0)
@@ -1993,6 +2094,7 @@ static void UI_FeederSelection(float feederID, int index, itemDef_t *item)
 	else if (feederID == FEEDER_MODS)
 	{
 		uiInfo.modIndex = index;
+		UI_DescribeMod( index );
 	}
 	else if (feederID == FEEDER_PLAYER_SPECIES)
 	{
