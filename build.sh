@@ -347,7 +347,7 @@ check_dependencies() {
 		report_required 0 "OpenGL headers" gl "GL/gl.h not found"
 	fi
 
-	# The Vulkan renderer is the default one of the single player games; without the headers it is not built and the
+	# The Vulkan renderer is the default one of the games; without the headers it is not built and the
 	# game uses the OpenGL renderer (and says so on the screen)
 	if (( BUILD_JO || BUILD_JA_SP )); then
 		if header_ok vulkan/vulkan.h && lib_ok -lvulkan; then
@@ -461,6 +461,7 @@ CMAKE_ARGS=(
 	-DBuildJK2MPEngine="$(onoff $BUILD_JO_MP)"
 	-DBuildJK2MPDed="$(onoff $BUILD_JO_MP)"
 	-DBuildJK2MPRdVanilla="$(onoff $BUILD_JO_MP)"
+	-DBuildJK2MPRdVulkan="$(onoff $BUILD_JO_MP)"
 	-DBuildSPEngine="$(onoff $BUILD_JA_SP)"
 	-DBuildSPGame="$(onoff $BUILD_JA_SP)"
 	-DBuildSPRdVanilla="$(onoff $BUILD_JA_SP)"
@@ -471,6 +472,7 @@ CMAKE_ARGS=(
 	-DBuildMPCGame="$(onoff $BUILD_JA_MP)"
 	-DBuildMPUI="$(onoff $BUILD_JA_MP)"
 	-DBuildMPRdVanilla="$(onoff $BUILD_JA_MP)"
+	-DBuildMPRdVulkan="$(onoff $BUILD_JA_MP)"
 	-DBuildMPRend2="$(onoff $((BUILD_JA_MP && BUILD_REND2)))"
 	-DBuildTests=OFF
 	-DUseInternalSDL3="$(onoff "$USE_INTERNAL_SDL3")"

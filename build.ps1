@@ -265,12 +265,12 @@ function Test-Dependencies {
     }
     Write-Ok 'zlib, libpng, libjpeg: the copies in lib\ are used'
 
-    # --- Vulkan SDK (optional: without it the single player games have no Vulkan renderer and use OpenGL) ---
+    # --- Vulkan SDK (optional: without it the games have no Vulkan renderer and use OpenGL) ---
     $vulkanSdk = [Environment]::GetEnvironmentVariable('VULKAN_SDK')
     if ($vulkanSdk -and (Test-Path (Join-Path $vulkanSdk 'Include\vulkan\vulkan.h'))) {
         Write-Ok "Vulkan SDK ($vulkanSdk)"
     } else {
-        Write-Warn 'Vulkan SDK not found: the Vulkan renderer of the single player games is not built, they use OpenGL'
+        Write-Warn 'Vulkan SDK not found: the Vulkan renderer of the games is not built, they use OpenGL'
         Write-Info 'optional: winget install KhronosGroup.VulkanSDK (or https://vulkan.lunarg.com/), then open a new PowerShell'
     }
 
@@ -370,6 +370,7 @@ $configureArgs = @(
     "-DBuildJK2MPEngine=$(OnOff $buildJOMP)",
     "-DBuildJK2MPDed=$(OnOff $buildJOMP)",
     "-DBuildJK2MPRdVanilla=$(OnOff $buildJOMP)",
+    "-DBuildJK2MPRdVulkan=$(OnOff $buildJOMP)",
     "-DBuildSPEngine=$(OnOff $buildJASP)",
     "-DBuildSPGame=$(OnOff $buildJASP)",
     "-DBuildSPRdVanilla=$(OnOff $buildJASP)",
@@ -380,6 +381,7 @@ $configureArgs = @(
     "-DBuildMPCGame=$(OnOff $buildJAMP)",
     "-DBuildMPUI=$(OnOff $buildJAMP)",
     "-DBuildMPRdVanilla=$(OnOff $buildJAMP)",
+    "-DBuildMPRdVulkan=$(OnOff $buildJAMP)",
     "-DBuildMPRend2=$(OnOff ($buildJAMP -and -not $NoRend2))",
     '-DBuildTests=OFF',
     '-DUseInternalSDL3=ON'
