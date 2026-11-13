@@ -128,8 +128,14 @@ All of these are described in [Graphics settings](#graphics-settings) below.
   suit broadband, and old settings files are updated once.
 
 ### Single player
-- **More realistic saber combat is on by default**: more precise saber hits and higher damage. For the original rules:
-  `g_saberRealisticCombat 0` (Jedi Outcast) or `g_saberMoreRealistic 0` (Jedi Academy).
+- **More realistic saber combat is on by default**: more precise saber hits and higher damage. **Setup > Options >
+  Realistic Saber Combat** turns it off for the original rules (`g_saberRealisticCombat` in Jedi Outcast,
+  `g_saberMoreRealistic` in Jedi Academy). Model Dismemberment is on by default too.
+- **Bodies stay**: the original removed them about 10 seconds after a death, and the limbs a saber cut off soon after.
+  Now they stay until there are more than 128 (`g_corpseLimit`, 0 for no limit); then the ones furthest from you go
+  first, out of your sight, with their limbs. If the level runs short of room for new things (it holds 1024 in all),
+  bodies make room first. `g_corpseRemovalTime` brings back removal after that many seconds. Characters the level's
+  own scripts take away still go.
 - **Escape skips cutscenes**, both the videos and the scenes played in the game engine.
 
 ### Other

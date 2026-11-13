@@ -1522,6 +1522,72 @@ static qboolean RowScroll_MouseMove( menuDef_t *menu, float y )
 
 /*
 ================
+Menu_AddRealisticSaberRow
+
+Setup > Options gets a row for the more realistic saber combat (precise collision, higher damage: g_saberRealisticCombat
+in Jedi Outcast, g_saberMoreRealistic in Jedi Academy), a copy of the Model Dismemberment row (an off and on row) in
+the place the page has free, with the highlight bar made for that place.
+================
+*/
+static void Menu_AddRealisticSaberRow( menuDef_t *menu, itemDef_t *dismember )
+{
+	if ( menu->itemCount >= MAX_MENUITEMS || dismember->type != ITEM_TYPE_MULTI || !dismember->typeData )
+	{
+		return;
+	}
+#ifdef JK2_MODE
+	const char *cvar = "g_saberRealisticCombat", *highlight = "highlight6";
+	const float y = 271;
+#else
+	const char *cvar = "g_saberMoreRealistic", *highlight = "highlight4";
+	const float y = 230;
+#endif
+	itemDef_t *row = (itemDef_t *)UI_Alloc( sizeof( itemDef_t ) );
+	memcpy( row, dismember, sizeof( itemDef_t ) );
+	row->typeData = NULL;
+	Item_ValidateTypeData( row );
+	memcpy( row->typeData, dismember->typeData, sizeof( multiDef_t ) );
+	multiDef_t *multiPtr = (multiDef_t *)row->typeData;
+	if ( multiPtr->count < 2 )
+	{
+		return;
+	}
+	multiPtr->count = 2;
+	multiPtr->cvarValue[0] = 0.0f;	// (the dismemberment row's own Off and On, in the language of the game)
+	multiPtr->cvarValue[1] = 1.0f;
+	row->window.name = (char *)String_Alloc( "realisticsaber" );
+	row->cvar = String_Alloc( cvar );
+	row->text = (char *)String_Alloc( "Realistic Saber Combat:" );
+	row->descText = String_Alloc( "Saber hits land exactly where the blade touches, and do more damage." );
+	row->cvarTest = NULL;	// (not hidden where the game is censored, as dismemberment is)
+	row->cvarFlags = 0;
+	row->window.rectClient.y = y;
+	row->mouseEnter = String_Alloc( va( "\"show\" \"%s\" ", highlight ) );
+	row->mouseExit = String_Alloc( va( "\"hide\" \"%s\" ", highlight ) );
+	row->parent = menu;
+
+	// in the order of the rows on the page, before the first one below it (the arrow keys go through them in this order)
+	int at = menu->itemCount;
+	for ( int i = 0; i < menu->itemCount; i++ )
+	{
+		const itemDef_t *item = menu->items[i];
+		if ( item->window.group && !Q_stricmp( item->window.group, "options" ) && item->window.rectClient.y > y )
+		{
+			at = i;
+			break;
+		}
+	}
+	for ( int i = menu->itemCount; i > at; i-- )
+	{
+		menu->items[i] = menu->items[i - 1];
+	}
+	menu->items[at] = row;
+	menu->itemCount++;
+	Com_Printf( "Added a realistic saber combat row to the options.\n" );
+}
+
+/*
+================
 Menu_AddEffectRows
 
 The "More Video" page of Setup has room for one more row. Make room for one row for each of the screen effects and
@@ -1734,6 +1800,12 @@ qboolean MenuParse_itemDef( itemDef_t *item )
 		newItem->parent = menu->items[menu->itemCount]->parent = menu;
 		menu->itemCount++;
 		Item_ApplyHacks( newItem );
+
+		if ( newItem->type == ITEM_TYPE_MULTI && newItem->window.name && !Q_stricmp( newItem->window.name, "dismemberment" ) &&
+			 newItem->window.group && !Q_stricmp( newItem->window.group, "options" ) )
+		{
+			Menu_AddRealisticSaberRow( menu, newItem );
+		}
 
 		if ( newItem->type == ITEM_TYPE_BUTTON && newItem->window.name && !Q_stricmp( newItem->window.name, "advancedvideo" ) &&
 			 newItem->window.group && !Q_stricmp( newItem->window.group, "video2" ) )

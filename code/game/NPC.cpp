@@ -313,6 +313,22 @@ Determines when it's ok to ditch the corpse
 ----------------------------------------
 */
 
+// how many bodies stay, and which go first (shared/qcommon/g_corpses.h)
+static bool G_CorpseHeld( gentity_t *body )
+{
+	return !G_OkayToRemoveCorpse( body ) || ( body->NPC->aiFlags & NPCAI_HEAL_ROSH ) || body->client->NPC_class == CLASS_VEHICLE;
+}
+static bool G_CorpseInPlayerFOV( gentity_t *ent )
+{
+	return InFOVFromPlayerView( ent, 110, 90 ) != qfalse;
+}
+#include "qcommon/g_corpses.h"
+
+void G_ManageCorpsesFrame( void )
+{
+	G_ManageCorpses();
+}
+
 int BodyRemovalPadTime( gentity_t *ent )
 {
 	int	time;

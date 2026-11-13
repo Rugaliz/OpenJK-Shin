@@ -309,6 +309,17 @@ void UI_Init( int apiVersion, uiimport_t *uiimport, qboolean inGameLoad )
 	ui.Cvar_Create( "ui_disableWeaponSway", "0", CVAR_ARCHIVE );
 #endif
 
+	// The game's settings on the Options page, with the game's defaults: the game module registers them only when a
+	// level loads, and until then the page showed them as off (a saved value is kept: it was read before this)
+#ifdef JK2_MODE
+	ui.Cvar_Create( "g_dismemberment", "3", CVAR_ARCHIVE );
+	ui.Cvar_Create( "g_saberRealisticCombat", "1", CVAR_ARCHIVE );
+#else
+	ui.Cvar_Create( "g_saberMoreRealistic", "1", CVAR_ARCHIVE );
+#endif
+	ui.Cvar_Create( "g_corpseRemovalTime", "0", CVAR_ARCHIVE );
+	ui.Cvar_Create( "g_corpseLimit", "128", CVAR_ARCHIVE );
+
 
 
 	_UI_Init(inGameLoad);

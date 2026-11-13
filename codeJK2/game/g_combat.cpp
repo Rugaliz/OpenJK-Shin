@@ -1533,6 +1533,13 @@ void LimbThink( gentity_t *ent )
 	{//stopped
 		if ( level.time > ent->s.apos.trTime + ent->s.apos.trDuration )
 		{
+			extern cvar_t *g_corpseRemovalTime;
+			if ( g_corpseRemovalTime->integer <= 0 )
+			{//stays, as the bodies do (g_corpseRemovalTime 0; G_ManageCorpses takes it away with its body)
+				ent->e_ThinkFunc = thinkF_NULL;
+				ent->nextthink = 0;
+				return;
+			}
 			ent->nextthink = level.time + Q_irand( 5000, 15000 );
 			ent->e_ThinkFunc = thinkF_G_FreeEntity;
 			//FIXME: these keep drawing for a frame or so after being freed?!  See them lerp to origin of world...

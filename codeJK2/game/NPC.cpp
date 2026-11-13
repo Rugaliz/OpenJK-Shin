@@ -258,6 +258,22 @@ Determines when it's ok to ditch the corpse
 ----------------------------------------
 */
 
+// how many bodies stay, and which go first (shared/qcommon/g_corpses.h)
+static bool G_CorpseHeld( gentity_t *body )
+{
+	return body->message || ( body->taskManager && body->taskManager->IsRunning() );	// (a key; a script)
+}
+static bool G_CorpseInPlayerFOV( gentity_t *ent )
+{
+	return InFOV( ent, &g_entities[0], 110, 90 ) != qfalse;
+}
+#include "qcommon/g_corpses.h"
+
+void G_ManageCorpsesFrame( void )
+{
+	G_ManageCorpses();
+}
+
 int BodyRemovalPadTime( gentity_t *ent )
 {
 	int	time;
@@ -283,10 +299,15 @@ int BodyRemovalPadTime( gentity_t *ent )
 		time = 0;
 		break;
 	default:
-		// never go away
-	//	time = Q3_INFINITE;
-		// for now I'm making default 10000
-		time = 10000;
+		// g_corpseRemovalTime seconds (the original's 10), 0: by time never (G_ManageCorpses keeps their number)
+		if ( g_corpseRemovalTime->integer <= 0 )
+		{
+			time = Q3_INFINITE;
+		}
+		else
+		{
+			time = g_corpseRemovalTime->integer*1000;
+		}
 		break;
 
 	}

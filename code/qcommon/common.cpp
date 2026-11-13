@@ -1246,9 +1246,12 @@ g_saberMoreRealistic in JA.
 Version 4 made the Vulkan renderer the default; a saved choice of the OpenGL renderer is the old default and cannot
 be told apart from a deliberate one, so it is changed to Vulkan once (cl_renderer rdjosp-vanilla / rdsp-vanilla goes
 back to OpenGL, and the game falls back to it by itself when Vulkan cannot be used).
+
+Version 5 keeps the bodies (g_corpseRemovalTime 0: never by time; g_corpseLimit says how many): a saved 10, the old
+default, becomes 0. Only Jedi Academy had the setting.
 ===============
 */
-#define COM_CONFIG_VERSION	4
+#define COM_CONFIG_VERSION	5
 
 #ifdef JK2_MODE
 #define COM_SABER_REALISTIC_CVAR	"g_saberRealisticCombat"
@@ -1271,17 +1274,21 @@ static void Com_MigrateConfig( void ) {
 		Cvar_Set( "com_maxfps", "0" );
 		Cvar_Set( "r_swapInterval", "1" );
 	}
-	if ( !strcmp( Cvar_VariableString( "r_lodscale" ), "10" ) ) {
+	// (each change only for a config older than the version that made it: a value set since is the player's choice)
+	if ( version->integer < 2 && !strcmp( Cvar_VariableString( "r_lodscale" ), "10" ) ) {
 		Cvar_Set( "r_lodscale", "20" );
 	}
-	if ( !strcmp( Cvar_VariableString( "r_shadowRange" ), "1000" ) ) {
+	if ( version->integer < 2 && !strcmp( Cvar_VariableString( "r_shadowRange" ), "1000" ) ) {
 		Cvar_Set( "r_shadowRange", "2000" );
 	}
-	if ( !strcmp( Cvar_VariableString( COM_SABER_REALISTIC_CVAR ), "0" ) ) {
+	if ( version->integer < 3 && !strcmp( Cvar_VariableString( COM_SABER_REALISTIC_CVAR ), "0" ) ) {
 		Cvar_Set( COM_SABER_REALISTIC_CVAR, "1" );
 	}
-	if ( !Q_stricmp( Cvar_VariableString( "cl_renderer" ), COM_OPENGL_RENDERER ) ) {
+	if ( version->integer < 4 && !Q_stricmp( Cvar_VariableString( "cl_renderer" ), COM_OPENGL_RENDERER ) ) {
 		Cvar_Set( "cl_renderer", COM_VULKAN_RENDERER );
+	}
+	if ( version->integer < 5 && !strcmp( Cvar_VariableString( "g_corpseRemovalTime" ), "10" ) ) {
+		Cvar_Set( "g_corpseRemovalTime", "0" );
 	}
 	Cvar_Set( "com_configVersion", va( "%d", COM_CONFIG_VERSION ) );
 }
