@@ -19,6 +19,7 @@ modern systems. OpenJK aims to stay as close to the originals as possible; Shin 
 - [Installing](#installing)
 - [What is different](#what-is-different)
 - [Graphics settings](#graphics-settings)
+- [Mods](#mods)
 - [Supported games and systems](#supported-games-and-systems)
 - [Jedi Outcast multiplayer](#jedi-outcast-multiplayer)
 - [Building from source](#building-from-source)
@@ -61,7 +62,9 @@ Settings are named as they appear in the game's menus. The console command is gi
 - **Setup > Video > Video Mode** lists the resolutions your screen supports, plus "Desktop resolution".
 - **Widescreen and ultrawide screens** show more to the sides, as they should, instead of cutting off the top and
   bottom. Menus and the HUD keep their proportions, videos get black bars, and the HUD sits in the corners of the
-  screen.
+  screen. Scopes, binoculars and the light amplification goggles stay round with black sides, the level's picture while
+  loading keeps its shape, and the console spans the whole screen. "Desktop resolution" in the resolution list is in
+  the game's language.
 - **Linux (X11):** in fullscreen the desktop's compositor keeps drawing the screen, as it does for a window. Letting
   the game draw it directly froze the whole PC with some X server and driver versions (XLibre 25.1.11 with KDE, in
   November 2026). Where that works, `r_bypassCompositor 1` turns it back on.
@@ -77,6 +80,8 @@ Settings are named as they appear in the game's menus. The console command is gi
   before. The original stopped drawing whatever went over its limit, and at high frame rates some effects multiplied
   until it did.
 - **Levels load faster** in single player, using all of your processor's cores.
+- **Lower input latency** with the Vulkan renderer: with vsync, what you do reaches the screen about twice as fast
+  (14 ms instead of 35 at 144 Hz), at the same frame rate (`r_lowLatency 0` for the old behaviour).
 
 ### Graphics
 - **Vulkan renderer** in single player: a modern graphics interface, used automatically. If your system can't run it,
@@ -93,6 +98,13 @@ Settings are named as they appear in the game's menus. The console command is gi
   explosions that stops at walls and casts shadows.
 - **Optional effects**: ambient occlusion, bloom, edge smoothing, more detailed saber and blaster light, light shafts
   and eye adaptation.
+- **Characters lit by the level's lamps**, each from its own side and in its own colour, as their shadows say (Jedi
+  Outcast's levels have the lamps; Lamp Lighting in More Video).
+- **Soft particles** (Vulkan): smoke, sparks and glows fade where they meet walls and floors instead of ending in a
+  hard line.
+- **Textures keep their look in the distance**: smaller copies of textures are made in linear light, and fences,
+  grates and leaves no longer thin out and vanish far away. The picture is dithered, so smooth gradients show no bands.
+- **Light flares no longer slow the game down** (Vulkan): each one waited for the graphics card before.
 
 All of these are described in [Graphics settings](#graphics-settings) below.
 
@@ -142,6 +154,7 @@ All of these are described in [Graphics settings](#graphics-settings) below.
 - If your user folder can't be written to (a locked-down Windows account, for example), the game keeps your settings
   and saves in the game folder instead of failing to start, and says so.
 - Broken sound files in mods no longer crash the game.
+- **Mods are easier to install and manage**: see [Mods](#mods).
 
 ## Graphics settings
 
@@ -186,6 +199,27 @@ at a higher cost; it traces its extra rays only where they make a difference, al
 
 More detail on the effects and what each costs: [docs/post-processing.md](docs/post-processing.md),
 [docs/shadows.md](docs/shadows.md), [docs/antialiasing.md](docs/antialiasing.md).
+
+## Mods
+
+Mods installed the old way (`.pk3` files in `base`, or a mod folder chosen in Setup > Mods) still work as before. On
+top of that:
+
+- **Drop a mod's `.zip` into the `mods` folder** next to `base`, exactly as you downloaded it: the game loads the `.pk3`
+  files inside it. A `.pk3` or a folder works too. Nothing is copied into `base`, so removing a mod is deleting it.
+- **Setup > Mods** lists these mods with **On / Off**, **Move Up**, **Move Down** and **Apply**: switch mods without
+  moving files, and choose which one wins when two change the same thing (the lower one in the list).
+- **Conflicts are reported**: hovering a mod in the list says what it replaces and what replaces it, and the console
+  command `fs_conflicts` lists every `.pk3` that replaces files of another, also for mods in `base`.
+- **Mods no longer wipe out each other's text**: when several mods carry the game's menu text table, each one only
+  changes its own lines (before, the last one replaced the whole table, and a translated game lost its language).
+- **A mod for single player only** stays out of multiplayer (`[sp]` in the list, or the mod's own `modinfo.txt`).
+- The console warns when a mod replaces the Setup menu and the rows this engine adds to it are missing.
+
+Mod makers can add an optional `modinfo.txt` (name, version, author, description, which game, single or
+multiplayer, what it needs). The details are in [docs/mods.md](docs/mods.md).
+
+Mods that replace the game's executable or inject code into it (such as Movie Duels) can't work with this engine.
 
 ## Supported games and systems
 
